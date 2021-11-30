@@ -6,6 +6,7 @@ use itertools::Itertools;
 use log::*;
 use tempfile::{tempdir, TempDir};
 
+/// A single directive in a sqllogictest file.
 #[derive(Debug, PartialEq, Clone)]
 pub enum Record {
     /// A statement is an SQL command that is to be evaluated but from which we do not expect to
@@ -38,6 +39,7 @@ pub enum Record {
     Halt,
 }
 
+/// The condition to run a query.
 #[derive(Debug, PartialEq, Clone)]
 pub enum Condition {
     /// The statement or query is skipped if an `onlyif` record for a different database engine is
@@ -48,6 +50,7 @@ pub enum Condition {
     SkipIf { db_name: String },
 }
 
+/// Whether to apply sorting before checking the results of a query.
 #[derive(Debug, PartialEq, Clone)]
 pub enum SortMode {
     /// The default option. The results appear in exactly the order in which they were received
@@ -80,7 +83,7 @@ impl Error {
     }
 }
 
-/// The error type for parsing sqllogictest.
+/// The error kind for parsing sqllogictest.
 #[derive(thiserror::Error, Debug, PartialEq, Clone)]
 pub enum ErrorKind {
     #[error("unexpected token: {0:?}")]
@@ -213,9 +216,10 @@ pub fn parse(script: &str) -> Result<Vec<Record>, Error> {
 
 /// The database to be tested.
 pub trait DB {
+    /// The error type of SQL execution.
     type Error: std::error::Error;
 
-    /// Run a SQL query, return the output.
+    /// Run a SQL query and return the output.
     fn run(&self, sql: &str) -> Result<String, Self::Error>;
 }
 
@@ -226,15 +230,21 @@ pub struct Runner<D: DB> {
 }
 
 impl<D: DB> Runner<D> {
+    /// Create a new test runner on the database.
     pub fn new(db: D) -> Self {
         Runner { db, testdir: None }
     }
 
+    /// Replace the pattern `__TEST_DIR__` in SQL with a temporary directory path.
+    ///
+    /// This feature is useful in those tests where data will be written to local
+    /// files, e.g. `COPY`.
     pub fn enable_testdir(&mut self) {
         self.testdir = Some(tempdir().expect("failed to create testdir"));
     }
 
-    pub fn test(&mut self, record: Record) {
+    /// Run a single record.
+    pub fn run(&mut self, record: Record) {
         info!("test: {:?}", record);
         match record {
             Record::Statement {
@@ -290,20 +300,25 @@ impl<D: DB> Runner<D> {
         }
     }
 
-    pub fn test_multi(&mut self, records: impl IntoIterator<Item = Record>) {
+    /// Run multiple records.
+    ///
+    /// The runner will stop early once a halt record is seen.
+    pub fn run_multi(&mut self, records: impl IntoIterator<Item = Record>) {
         for record in records.into_iter() {
             if let Record::Halt = record {
                 return;
             }
-            self.test(record);
+            self.run(record);
         }
     }
 
-    pub fn test_script(&mut self, script: &str) {
+    /// Run a sqllogictest script.
+    pub fn run_script(&mut self, script: &str) {
         let records = parse(script).expect("failed to parse sqllogictest");
-        self.test_multi(records);
+        self.run_multi(records);
     }
 
+    /// Replace all keywords in the SQL.
     fn replace_keywords(&self, sql: String) -> String {
         if let Some(testdir) = &self.testdir {
             sql.replace("__TEST_DIR__", testdir.path().to_str().unwrap())
