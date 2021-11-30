@@ -29,7 +29,7 @@ pub enum Record {
         /// The SQL command.
         sql: String,
         /// The expected results.
-        expected_results: Vec<String>,
+        expected_results: String,
     },
     /// Subtest.
     Subtest { name: String },
@@ -185,14 +185,14 @@ pub fn parse(script: &str) -> Result<Vec<Record>, Error> {
                     sql += line;
                 }
                 // Lines following the "----" are expected results of the query, one value per line.
-                let mut expected_results = vec![];
+                let mut expected_results = String::new();
                 if has_result {
                     for (_, line) in &mut lines {
                         if line.is_empty() {
                             break;
                         }
-                        let normalized_line = line.split_ascii_whitespace().join(" ");
-                        expected_results.push(normalized_line);
+                        expected_results += line;
+                        expected_results.push('\n');
                     }
                 }
                 records.push(Record::Query {
@@ -215,22 +215,23 @@ pub fn parse(script: &str) -> Result<Vec<Record>, Error> {
 pub trait DB {
     type Error: std::error::Error;
 
-    /// Run a SQL query.
-    fn run(&self, sql: &str) -> Result<Vec<String>, Self::Error>;
+    /// Run a SQL query, return the output.
+    fn run(&self, sql: &str) -> Result<String, Self::Error>;
 }
 
-/// Tester for a database.
-pub struct SqlLogicTester<D: DB> {
+/// Sqllogictest runner.
+pub struct Runner<D: DB> {
     db: D,
-    testdir: TempDir,
+    testdir: Option<TempDir>,
 }
 
-impl<D: DB> SqlLogicTester<D> {
+impl<D: DB> Runner<D> {
     pub fn new(db: D) -> Self {
-        SqlLogicTester {
-            db,
-            testdir: tempdir().unwrap(),
-        }
+        Runner { db, testdir: None }
+    }
+
+    pub fn enable_testdir(&mut self) {
+        self.testdir = Some(tempdir().expect("failed to create testdir"));
     }
 
     pub fn test(&mut self, record: Record) {
@@ -255,24 +256,24 @@ impl<D: DB> SqlLogicTester<D> {
             Record::Query {
                 line,
                 sql,
-                mut expected_results,
+                expected_results,
                 sort_mode,
                 ..
             } => {
                 let sql = self.replace_keywords(sql);
-                let chunks = self.db.run(&sql).expect("query failed");
-                let mut output = chunks
-                    .iter()
-                    .map(|output| output.split('\n'))
-                    .flatten()
-                    .collect_vec();
+                let output = match self.db.run(&sql) {
+                    Ok(output) => output,
+                    Err(e) => panic!("line {}: query failed: {}\nSQL: {}", line, e, sql),
+                };
+                let mut output = split_lines_and_normalize(&output);
+                let mut expected_results = split_lines_and_normalize(&expected_results);
                 match sort_mode {
                     SortMode::NoSort => {}
                     SortMode::RowSort => {
                         output.sort_unstable();
                         expected_results.sort_unstable();
                     }
-                    SortMode::ValueSort => todo!(),
+                    SortMode::ValueSort => todo!("value sort"),
                 };
                 if output != expected_results {
                     panic!(
@@ -304,6 +305,22 @@ impl<D: DB> SqlLogicTester<D> {
     }
 
     fn replace_keywords(&self, sql: String) -> String {
-        sql.replace("__TEST_DIR__", self.testdir.path().to_str().unwrap())
+        if let Some(testdir) = &self.testdir {
+            sql.replace("__TEST_DIR__", testdir.path().to_str().unwrap())
+        } else {
+            sql
+        }
     }
+}
+
+/// Trim and replace multiple whitespaces with one.
+fn normalize_string(s: &str) -> String {
+    s.trim().split_ascii_whitespace().join(" ")
+}
+
+fn split_lines_and_normalize(s: &str) -> Vec<String> {
+    s.split('\n')
+        .map(normalize_string)
+        .filter(|line| !line.is_empty())
+        .collect()
 }
