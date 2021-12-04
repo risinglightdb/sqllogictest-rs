@@ -3,10 +3,12 @@ name = "sqllogictest"
 version = "0.1.0"
 edition = "2021"
 description = "Sqllogictest parser and runner."
+license = "MIT OR Apache-2.0"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-log = "0.4"
 itertools = "0.10"
+log = "0.4"
 tempfile = "3"
 thiserror = "1"
