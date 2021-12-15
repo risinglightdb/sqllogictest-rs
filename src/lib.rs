@@ -2,10 +2,10 @@
 //!
 //! [Sqllogictest]: https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki
 
+use async_trait::async_trait;
 use itertools::Itertools;
 use log::*;
 use tempfile::{tempdir, TempDir};
-use async_trait::async_trait;
 
 /// A single directive in a sqllogictest file.
 #[derive(Debug, PartialEq, Clone)]
