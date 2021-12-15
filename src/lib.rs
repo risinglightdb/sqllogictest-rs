@@ -5,6 +5,7 @@
 use itertools::Itertools;
 use log::*;
 use tempfile::{tempdir, TempDir};
+use async_trait::async_trait;
 
 /// A single directive in a sqllogictest file.
 #[derive(Debug, PartialEq, Clone)]
@@ -212,6 +213,16 @@ pub fn parse(script: &str) -> Result<Vec<Record>, Error> {
         }
     }
     Ok(records)
+}
+
+/// The async database to be tested.
+#[async_trait]
+pub trait AsyncDB {
+    /// The error type of SQL execution.
+    type Error: std::error::Error;
+
+    /// Async run a SQL query and return the output.
+    async fn run(&self, sql: &str) -> Result<String, Self::Error>;
 }
 
 /// The database to be tested.
