@@ -54,5 +54,5 @@ jobs:
         run: |
           for example in examples/*.rs
           do
-              cargo run --example "$(basename "$example")" -- $args
+              cargo run --example "$(basename "$example" .rs)"
           done
