@@ -89,6 +89,8 @@ pub enum Record {
         error: bool,
         /// The SQL command.
         sql: String,
+        /// Expected rows affected.
+        expected_count: Option<usize>,
     },
     /// A query is an SQL command from which we expect to receive results. The result set might be
     /// empty.
@@ -167,6 +169,8 @@ pub enum ErrorKind {
     InvalidLine(String),
     #[error("invalid type string: {0:?}")]
     InvalidType(String),
+    #[error("invalid number: {0:?}")]
+    InvalidNumber(String),
 }
 
 impl ErrorKind {
@@ -215,11 +219,18 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                     db_name: db_name.to_string(),
                 });
             }
-            &["statement", res] => {
+            ["statement", res @ ..] => {
+                let mut expected_count = None;
                 let error = match res {
-                    "ok" => false,
-                    "error" => true,
-                    _ => return Err(ErrorKind::UnexpectedToken(res.into()).at(pos)),
+                    ["ok"] => false,
+                    ["error"] => true,
+                    ["count", count_str] => {
+                        expected_count = Some(count_str.parse::<usize>().map_err(|_| {
+                            ErrorKind::InvalidNumber((*count_str).into()).at(pos.clone())
+                        })?);
+                        false
+                    }
+                    _ => return Err(ErrorKind::InvalidLine(line.into()).at(pos)),
                 };
                 let mut sql = lines
                     .next()
@@ -239,6 +250,7 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                     conditions: std::mem::take(&mut conditions),
                     error,
                     sql,
+                    expected_count,
                 });
             }
             ["query", type_string, res @ ..] => {
@@ -367,15 +379,26 @@ impl<D: DB> Runner<D> {
         info!("test: {:?}", record);
         match record {
             Record::Statement {
-                error, sql, pos, ..
+                error,
+                sql,
+                pos,
+                expected_count,
+                ..
             } => {
                 let sql = self.replace_keywords(sql);
                 let ret = self.db.run(&sql);
                 match ret {
                     Ok(_) if error => panic!(
-                        "{}: statement is expected to fail, but actually succeed: {:?}",
+                        "{}: statement is expected to fail, but actually succeed\n\tSQL:{:?}",
                         pos, sql
                     ),
+                    Ok(count_str) => {
+                        if let Some(expected_count) = expected_count {
+                            if expected_count.to_string() != count_str {
+                                panic!("{}: statement is expected to affect {} rows, but actually {}\n\tSQL: {:?}", pos, expected_count, count_str, sql)
+                            }
+                        }
+                    }
                     Err(e) if !error => {
                         panic!("{}: statement failed: {}\n\tSQL: {:?}", pos, e, sql)
                     }
