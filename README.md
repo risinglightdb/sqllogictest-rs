@@ -4,7 +4,55 @@
 [![Docs](https://docs.rs/sqllogictest/badge.svg)](https://docs.rs/sqllogictest)
 [![CI](https://github.com/singularity-data/sqllogictest-rs/workflows/CI/badge.svg?branch=main)](https://github.com/singularity-data/sqllogictest-rs/actions)
 
-Sqllogictest parser and runner in Rust.
+[Sqllogictest][Sqllogictest] is a testing framework to verify the correctness of an SQL database.
+
+This crate implements a sqllogictest parser and runner in Rust.
+
+[Sqllogictest]: https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki
+
+## Usage
+
+Add the following line to your `Cargo.toml` file:
+
+```toml
+[dependencies]
+sqllogictest = "0.1"
+```
+
+Implement `DB` trait for your database structure:
+
+```rust
+struct Database {...}
+
+impl sqllogictest::DB for Database {
+    type Error = ...;
+    fn run(&self, sql: &str) -> Result<String, Self::Error> {
+        ...
+    }
+}
+```
+
+It should take an SQL query string as input, and output the query result as a string.
+The runner verifies the results by comparing the string after normalization.
+
+Finally, create a `Runner` on your database instance, and then run the script:
+
+```rust
+let mut tester = sqllogictest::Runner::new(Database::new());
+let script = std::fs::read_to_string("script.slt").unwrap();
+tester.run_script(&script);
+```
+
+You can also parse the script and execute the records separately:
+
+```rust
+let records = sqllogictest::parse(&script).unwrap();
+for record in records {
+    tester.run(record);
+}
+```
+
+See [examples](./examples) directory for more usages.
 
 ## License
 
