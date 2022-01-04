@@ -12,7 +12,7 @@ This crate implements a sqllogictest parser and runner in Rust.
 
 ## Usage
 
-Add the following line to your `Cargo.toml` file:
+Add the following lines to your `Cargo.toml` file:
 
 ```toml
 [dependencies]
