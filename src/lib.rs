@@ -231,7 +231,6 @@ pub fn parse_file(filename: &str) -> Result<Vec<Record>, Error> {
 }
 
 fn parse_file_inner(path: &Path) -> Result<Vec<Record>, Error> {
-    dbg!(path);
     let script = std::fs::read_to_string(path).unwrap();
     let recs = parse(&script)?;
     recs.into_iter()
