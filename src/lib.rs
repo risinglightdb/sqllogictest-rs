@@ -2,12 +2,43 @@
 //!
 //! [Sqllogictest]: https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki
 
-use std::path::Path;
+use std::rc::Rc;
+use std::{fmt, path::Path};
 
 use async_trait::async_trait;
 use itertools::Itertools;
 use log::*;
 use tempfile::{tempdir, TempDir};
+
+const DEFAULT_FILENAME: &str = "<entry>";
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Pos {
+    filename: Rc<str>,
+    line: u32,
+}
+
+impl fmt::Display for Pos {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.filename, self.line)
+    }
+}
+
+impl Pos {
+    pub fn new(filename: impl Into<Rc<str>>, line: u32) -> Self {
+        Self {
+            filename: filename.into(),
+            line,
+        }
+    }
+
+    pub fn map_line(self, op: impl Fn(u32) -> u32) -> Self {
+        Self {
+            filename: self.filename,
+            line: op(self.line),
+        }
+    }
+}
 
 /// A single directive in a sqllogictest file.
 #[derive(Debug, PartialEq, Clone)]
@@ -15,11 +46,11 @@ use tempfile::{tempdir, TempDir};
 pub enum Record {
     /// An include copies all records from another files.
     #[doc(hidden)]
-    Include { filename: String },
+    Include { pos: Pos, filename: String },
     /// A statement is an SQL command that is to be evaluated but from which we do not expect to
     /// get results (other than success or failure).
     Statement {
-        line: u32,
+        pos: Pos,
         conditions: Vec<Condition>,
         /// The SQL command is expected to fail instead of to succeed.
         error: bool,
@@ -29,7 +60,7 @@ pub enum Record {
     /// A query is an SQL command from which we expect to receive results. The result set might be
     /// empty.
     Query {
-        line: u32,
+        pos: Pos,
         conditions: Vec<Condition>,
         type_string: String,
         sort_mode: SortMode,
@@ -72,10 +103,10 @@ pub enum SortMode {
 
 /// The error type for parsing sqllogictest.
 #[derive(thiserror::Error, Debug, PartialEq, Clone)]
-#[error("parse error at line {line}: {kind}")]
+#[error("parse error at {pos}: {kind}")]
 pub struct Error {
     kind: ErrorKind,
-    line: u32,
+    pos: Pos,
 }
 
 impl Error {
@@ -85,8 +116,8 @@ impl Error {
     }
 
     /// Returns the line number from which the error originated.
-    pub fn line(&self) -> u32 {
-        self.line
+    pub fn pos(&self) -> Pos {
+        self.pos.clone()
     }
 }
 
@@ -106,16 +137,17 @@ pub enum ErrorKind {
 }
 
 impl ErrorKind {
-    fn at(self, line: usize) -> Error {
-        Error {
-            kind: self,
-            line: line as u32,
-        }
+    fn at(self, pos: Pos) -> Error {
+        Error { kind: self, pos }
     }
 }
 
 /// Parse a sqllogictest script into a list of records.
 pub fn parse(script: &str) -> Result<Vec<Record>, Error> {
+    parse_inner(Rc::from(DEFAULT_FILENAME), script)
+}
+
+fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
     let mut lines = script.split('\n').enumerate();
     let mut records = vec![];
     let mut conditions = vec![];
@@ -123,11 +155,13 @@ pub fn parse(script: &str) -> Result<Vec<Record>, Error> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
+        let pos = Pos::new(filename.clone(), num as u32);
         let tokens: Vec<&str> = line.split_whitespace().collect();
         match tokens.as_slice() {
             [] => continue,
-            ["include", filename] => records.push(Record::Include {
-                filename: filename.to_string(),
+            ["include", included] => records.push(Record::Include {
+                pos,
+                filename: included.to_string(),
             }),
             ["halt"] => {
                 records.push(Record::Halt);
@@ -149,15 +183,16 @@ pub fn parse(script: &str) -> Result<Vec<Record>, Error> {
                 });
             }
             &["statement", res] => {
-                let line = num as u32;
                 let error = match res {
                     "ok" => false,
                     "error" => true,
-                    _ => return Err(ErrorKind::UnexpectedToken(res.into()).at(num)),
+                    _ => return Err(ErrorKind::UnexpectedToken(res.into()).at(pos.clone())),
                 };
                 let mut sql = lines
                     .next()
-                    .ok_or_else(|| ErrorKind::UnexpectedEOF.at(num + 1))?
+                    .ok_or_else(|| {
+                        ErrorKind::UnexpectedEOF.at(pos.clone().map_line(|line| line + 1))
+                    })?
                     .1
                     .into();
                 for (_, line) in &mut lines {
@@ -167,26 +202,27 @@ pub fn parse(script: &str) -> Result<Vec<Record>, Error> {
                     sql += line;
                 }
                 records.push(Record::Statement {
-                    line,
+                    pos,
                     conditions: std::mem::take(&mut conditions),
                     error,
                     sql,
                 });
             }
             ["query", type_string, res @ ..] => {
-                let line = num as u32;
                 let sort_mode = match res.get(0) {
                     None | Some(&"nosort") => SortMode::NoSort,
                     Some(&"rowsort") => SortMode::RowSort,
                     Some(&"valuesort") => SortMode::ValueSort,
-                    Some(mode) => return Err(ErrorKind::InvalidSortMode(mode.to_string()).at(num)),
+                    Some(mode) => return Err(ErrorKind::InvalidSortMode(mode.to_string()).at(pos)),
                 };
                 let label = res.get(1).map(|s| s.to_string());
                 // The SQL for the query is found on second an subsequent lines of the record
                 // up to first line of the form "----" or until the end of the record.
                 let mut sql = lines
                     .next()
-                    .ok_or_else(|| ErrorKind::UnexpectedEOF.at(num + 1))?
+                    .ok_or_else(|| {
+                        ErrorKind::UnexpectedEOF.at(pos.clone().map_line(|line| line + 1))
+                    })?
                     .1
                     .into();
                 let mut has_result = false;
@@ -209,7 +245,7 @@ pub fn parse(script: &str) -> Result<Vec<Record>, Error> {
                     }
                 }
                 records.push(Record::Query {
-                    line,
+                    pos,
                     conditions: std::mem::take(&mut conditions),
                     type_string: type_string.to_string(),
                     sort_mode,
@@ -218,7 +254,7 @@ pub fn parse(script: &str) -> Result<Vec<Record>, Error> {
                     expected_results,
                 });
             }
-            _ => return Err(ErrorKind::InvalidLine(line.into()).at(num)),
+            _ => return Err(ErrorKind::InvalidLine(line.into()).at(pos)),
         }
     }
     Ok(records)
@@ -227,20 +263,25 @@ pub fn parse(script: &str) -> Result<Vec<Record>, Error> {
 /// Parse a sqllogictest file and link all included scripts together.
 #[doc(hidden)]
 pub fn parse_file(filename: &str) -> Result<Vec<Record>, Error> {
-    parse_file_inner(Path::new(filename))
+    parse_file_inner(Rc::from(filename), Path::new(filename))
 }
 
-fn parse_file_inner(path: &Path) -> Result<Vec<Record>, Error> {
+fn parse_file_inner(filename: Rc<str>, path: &Path) -> Result<Vec<Record>, Error> {
     let script = std::fs::read_to_string(path).unwrap();
-    let recs = parse(&script)?;
+    let recs = parse_inner(filename, &script)?;
     recs.into_iter()
         .map(|rec| {
-            if let Record::Include { filename } = rec {
+            if let Record::Include {
+                pos: _pos,
+                filename,
+            } = rec
+            {
                 let mut path_buf = path.to_path_buf();
                 path_buf.pop();
                 path_buf.push(Path::new(&filename).with_extension("slt"));
+                let new_filename = Rc::from(path_buf.as_os_str().to_string_lossy().to_string());
                 let new_path = path_buf.as_path();
-                parse_file_inner(new_path)
+                parse_file_inner(new_filename, new_path)
             } else {
                 Ok(vec![rec])
             }
@@ -293,23 +334,23 @@ impl<D: DB> Runner<D> {
         info!("test: {:?}", record);
         match record {
             Record::Statement {
-                error, sql, line, ..
+                error, sql, pos, ..
             } => {
                 let sql = self.replace_keywords(sql);
                 let ret = self.db.run(&sql);
                 match ret {
                     Ok(_) if error => panic!(
-                        "line {}: statement is expected to fail, but actually succeed: {:?}",
-                        line, sql
+                        "{}: statement is expected to fail, but actually succeed: {:?}",
+                        pos, sql
                     ),
                     Err(e) if !error => {
-                        panic!("line {}: statement failed: {}\n\tSQL: {:?}", line, e, sql)
+                        panic!("{}: statement failed: {}\n\tSQL: {:?}", pos, e, sql)
                     }
                     _ => {}
                 }
             }
             Record::Query {
-                line,
+                pos,
                 sql,
                 expected_results,
                 sort_mode,
@@ -318,7 +359,7 @@ impl<D: DB> Runner<D> {
                 let sql = self.replace_keywords(sql);
                 let output = match self.db.run(&sql) {
                     Ok(output) => output,
-                    Err(e) => panic!("line {}: query failed: {}\nSQL: {}", line, e, sql),
+                    Err(e) => panic!("{}: query failed: {}\nSQL: {}", pos, e, sql),
                 };
                 let mut output = split_lines_and_normalize(&output);
                 let mut expected_results = split_lines_and_normalize(&expected_results);
@@ -332,8 +373,8 @@ impl<D: DB> Runner<D> {
                 };
                 if output != expected_results {
                     panic!(
-                        "line {}: query result mismatch:\nSQL:\n{}\n\nExpected:\n{}\nActual:\n{}",
-                        line,
+                        "{}: query result mismatch:\nSQL:\n{}\n\nExpected:\n{}\nActual:\n{}",
+                        pos,
                         sql,
                         expected_results.join("\n"),
                         output.join("\n")
