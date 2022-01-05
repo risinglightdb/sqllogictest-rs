@@ -32,6 +32,7 @@ impl Pos {
         }
     }
 
+    #[must_use]
     pub fn map_line(self, op: impl Fn(u32) -> u32) -> Self {
         Self {
             filename: self.filename,
@@ -186,7 +187,7 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                 let error = match res {
                     "ok" => false,
                     "error" => true,
-                    _ => return Err(ErrorKind::UnexpectedToken(res.into()).at(pos.clone())),
+                    _ => return Err(ErrorKind::UnexpectedToken(res.into()).at(pos)),
                 };
                 let mut sql = lines
                     .next()
