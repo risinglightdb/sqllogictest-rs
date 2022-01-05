@@ -2,6 +2,8 @@
 //!
 //! [Sqllogictest]: https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki
 
+use std::path::Path;
+
 use async_trait::async_trait;
 use itertools::Itertools;
 use log::*;
@@ -9,7 +11,11 @@ use tempfile::{tempdir, TempDir};
 
 /// A single directive in a sqllogictest file.
 #[derive(Debug, PartialEq, Clone)]
+#[non_exhaustive]
 pub enum Record {
+    /// An include copies all records from another files.
+    #[doc(hidden)]
+    Include { filename: String },
     /// A statement is an SQL command that is to be evaluated but from which we do not expect to
     /// get results (other than success or failure).
     Statement {
@@ -120,6 +126,9 @@ pub fn parse(script: &str) -> Result<Vec<Record>, Error> {
         let tokens: Vec<&str> = line.split_whitespace().collect();
         match tokens.as_slice() {
             [] => continue,
+            ["include", filename] => records.push(Record::Include {
+                filename: filename.to_string(),
+            }),
             ["halt"] => {
                 records.push(Record::Halt);
                 break;
@@ -215,6 +224,32 @@ pub fn parse(script: &str) -> Result<Vec<Record>, Error> {
     Ok(records)
 }
 
+/// Parse a sqllogictest file and link all included scripts together.
+#[doc(hidden)]
+pub fn parse_file(filename: &str) -> Result<Vec<Record>, Error> {
+    parse_file_inner(Path::new(filename))
+}
+
+fn parse_file_inner(path: &Path) -> Result<Vec<Record>, Error> {
+    dbg!(path);
+    let script = std::fs::read_to_string(path).unwrap();
+    let recs = parse(&script)?;
+    recs.into_iter()
+        .map(|rec| {
+            if let Record::Include { filename } = rec {
+                let mut path_buf = path.to_path_buf();
+                path_buf.pop();
+                path_buf.push(Path::new(&filename).with_extension("slt"));
+                let new_path = path_buf.as_path();
+                parse_file_inner(new_path)
+            } else {
+                Ok(vec![rec])
+            }
+        })
+        .flatten_ok()
+        .collect::<Result<Vec<Record>, Error>>()
+}
+
 /// The async database to be tested.
 #[async_trait]
 pub trait AsyncDB {
@@ -308,6 +343,9 @@ impl<D: DB> Runner<D> {
             }
             Record::Halt => {}
             Record::Subtest { .. } => {}
+            Record::Include { .. } => {
+                unreachable!("include should be rewritten during link.")
+            }
         }
     }
 
@@ -326,6 +364,13 @@ impl<D: DB> Runner<D> {
     /// Run a sqllogictest script.
     pub fn run_script(&mut self, script: &str) {
         let records = parse(script).expect("failed to parse sqllogictest");
+        self.run_multi(records);
+    }
+
+    /// Run a sqllogictest file.
+    #[doc(hidden)]
+    pub fn run_file(&mut self, filename: &str) {
+        let records = parse_file(filename).expect("failed to parse sqllogictest");
         self.run_multi(records);
     }
 
