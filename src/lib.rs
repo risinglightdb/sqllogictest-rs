@@ -329,26 +329,24 @@ pub fn parse_file(filename: impl AsRef<Path>) -> Result<Vec<Record>, Error> {
 
 fn parse_file_inner(filename: Rc<str>, path: &Path) -> Result<Vec<Record>, Error> {
     let script = std::fs::read_to_string(path).unwrap();
-    let recs = parse_inner(filename, &script)?;
-    recs.into_iter()
-        .map(|rec| {
-            if let Record::Include {
-                pos: _pos,
-                filename,
-            } = rec
-            {
-                let mut path_buf = path.to_path_buf();
-                path_buf.pop();
-                path_buf.push(Path::new(&filename).with_extension("slt"));
-                let new_filename = Rc::from(path_buf.as_os_str().to_string_lossy().to_string());
-                let new_path = path_buf.as_path();
-                parse_file_inner(new_filename, new_path)
-            } else {
-                Ok(vec![rec])
-            }
-        })
-        .flatten_ok()
-        .collect::<Result<Vec<Record>, Error>>()
+    let mut records = vec![];
+    for rec in parse_inner(filename, &script)? {
+        if let Record::Include {
+            pos: _pos,
+            filename,
+        } = rec
+        {
+            let mut path_buf = path.to_path_buf();
+            path_buf.pop();
+            path_buf.push(filename);
+            let new_filename = Rc::from(path_buf.as_os_str().to_string_lossy().to_string());
+            let new_path = path_buf.as_path();
+            records.extend(parse_file_inner(new_filename, new_path)?);
+        } else {
+            records.push(rec);
+        }
+    }
+    Ok(records)
 }
 
 /// The async database to be tested.
