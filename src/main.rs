@@ -10,25 +10,21 @@ struct Opt {
     port: u16,
 
     /// Glob of a set of test files.
-    ///
     /// For example: `./test/**/*.slt`
     #[structopt(short, long)]
     files: String,
 
     /// The database name to connect.
-    #[structopt(long, default_value = "postgres")]
-    pgdb: String,
+    #[structopt(short, long, default_value = "postgres")]
+    db: String,
 
     /// The database username.
-    #[structopt(long, default_value = "postgres")]
-    pguser: String,
+    #[structopt(short, long, default_value = "postgres")]
+    user: String,
 
     /// The database password.
-    #[structopt(long, default_value = "postgres")]
-    pgpass: String,
-    // /// The arguments to test harness.
-    // #[structopt(long, default_value = "")]
-    // test_args: String,
+    #[structopt(short = "w", long, default_value = "postgres")]
+    pass: String,
 }
 
 fn main() {
@@ -38,9 +34,9 @@ fn main() {
 
     let files = glob::glob(&opt.files).expect("failed to read glob pattern");
     let client = postgres::Config::new()
-        .user(&opt.pguser)
-        .password(&opt.pgpass)
-        .dbname(&opt.pgdb)
+        .user(&opt.user)
+        .password(&opt.pass)
+        .dbname(&opt.db)
         .host("localhost")
         .port(opt.port)
         .connect(postgres::NoTls)
