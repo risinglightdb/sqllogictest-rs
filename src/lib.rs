@@ -243,6 +243,7 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                     if line.is_empty() {
                         break;
                     }
+                    sql += " ";
                     sql += line;
                 }
                 records.push(Record::Statement {
@@ -276,6 +277,7 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                         has_result = line == "----";
                         break;
                     }
+                    sql += " ";
                     sql += line;
                 }
                 // Lines following the "----" are expected results of the query, one value per line.
@@ -307,8 +309,11 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
 
 /// Parse a sqllogictest file and link all included scripts together.
 #[doc(hidden)]
-pub fn parse_file(filename: &str) -> Result<Vec<Record>, Error> {
-    parse_file_inner(Rc::from(filename), Path::new(filename))
+pub fn parse_file(filename: impl AsRef<Path>) -> Result<Vec<Record>, Error> {
+    parse_file_inner(
+        Rc::from(filename.as_ref().to_str().unwrap()),
+        filename.as_ref(),
+    )
 }
 
 fn parse_file_inner(filename: Rc<str>, path: &Path) -> Result<Vec<Record>, Error> {
@@ -465,7 +470,7 @@ impl<D: DB> Runner<D> {
 
     /// Run a sqllogictest file.
     #[doc(hidden)]
-    pub fn run_file(&mut self, filename: &str) {
+    pub fn run_file(&mut self, filename: impl AsRef<Path>) {
         let records = parse_file(filename).expect("failed to parse sqllogictest");
         self.run_multi(records);
     }

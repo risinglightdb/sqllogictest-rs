@@ -1,4 +1,5 @@
 use libtest_mimic::{run_tests, Arguments, Outcome, Test};
+use rust_decimal::Decimal;
 use std::sync::{Arc, Mutex};
 use structopt::StructOpt;
 
@@ -32,6 +33,8 @@ struct Opt {
 }
 
 fn main() {
+    env_logger::init();
+
     let opt = Opt::from_args();
 
     let files = glob::glob(&opt.files).expect("failed to read glob pattern");
@@ -69,8 +72,7 @@ fn main() {
 
 fn run_test(test: &Test<Postgres>) -> Outcome {
     let mut runner = sqllogictest::Runner::new(test.data.clone());
-    let script = std::fs::read_to_string(&test.name).expect("failed to read script file");
-    runner.run_script(&script);
+    runner.run_file(&test.name);
     Outcome::Passed
 }
 
@@ -93,15 +95,62 @@ impl sqllogictest::DB for Postgres {
             for (i, col) in columns.iter().enumerate() {
                 write!(output, " ").unwrap();
                 match col.type_() {
-                    &Type::BOOL => write!(output, "{}", row.get::<_, bool>(i)),
-                    &Type::CHAR => write!(output, "{}", row.get::<_, i8>(i) as u8 as char),
-                    &Type::INT2 => write!(output, "{}", row.get::<_, i16>(i)),
-                    &Type::INT4 => write!(output, "{}", row.get::<_, i32>(i)),
-                    &Type::INT8 => write!(output, "{}", row.get::<_, i64>(i)),
-                    &Type::FLOAT4 => write!(output, "{}", row.get::<_, f32>(i)),
-                    &Type::FLOAT8 => write!(output, "{}", row.get::<_, f64>(i)),
-                    &Type::TEXT | &Type::VARCHAR => write!(output, "{}", row.get::<_, &str>(i)),
-                    &Type::NUMERIC => write!(output, "{}", row.get::<_, &str>(i)),
+                    &Type::BOOL => match row.get::<_, Option<bool>>(i) {
+                        Some(v) => write!(output, "{}", v),
+                        None => write!(output, "NULL"),
+                    },
+                    &Type::CHAR => match row.get::<_, Option<i8>>(i) {
+                        Some(v) => write!(output, "{}", v as u8 as char),
+                        None => write!(output, "NULL"),
+                    },
+                    &Type::INT2 => match row.get::<_, Option<i16>>(i) {
+                        Some(v) => write!(output, "{}", v),
+                        None => write!(output, "NULL"),
+                    },
+                    &Type::INT4 => match row.get::<_, Option<i32>>(i) {
+                        Some(v) => write!(output, "{}", v),
+                        None => write!(output, "NULL"),
+                    },
+                    &Type::INT8 => match row.get::<_, Option<i64>>(i) {
+                        Some(v) => write!(output, "{}", v),
+                        None => write!(output, "NULL"),
+                    },
+                    &Type::FLOAT4 => match row.get::<_, Option<f32>>(i) {
+                        Some(v) => write!(output, "{}", v),
+                        None => write!(output, "NULL"),
+                    },
+                    &Type::FLOAT8 => match row.get::<_, Option<f64>>(i) {
+                        Some(v) => write!(output, "{}", v),
+                        None => write!(output, "NULL"),
+                    },
+                    &Type::TEXT | &Type::BPCHAR | &Type::VARCHAR => {
+                        match row.get::<_, Option<&str>>(i) {
+                            Some(v) => write!(output, "{}", v),
+                            None => write!(output, "NULL"),
+                        }
+                    }
+                    &Type::NUMERIC => match row.get::<_, Option<Decimal>>(i) {
+                        Some(v) => write!(output, "{}", v),
+                        None => write!(output, "NULL"),
+                    },
+                    &Type::DATE => match row.get::<_, Option<chrono::NaiveDate>>(i) {
+                        Some(v) => write!(output, "{}", v),
+                        None => write!(output, "NULL"),
+                    },
+                    &Type::TIME => match row.get::<_, Option<chrono::NaiveTime>>(i) {
+                        Some(v) => write!(output, "{}", v),
+                        None => write!(output, "NULL"),
+                    },
+                    &Type::TIMESTAMP => match row.get::<_, Option<chrono::NaiveDateTime>>(i) {
+                        Some(v) => write!(output, "{}", v),
+                        None => write!(output, "NULL"),
+                    },
+                    &Type::TIMESTAMPTZ => {
+                        match row.get::<_, Option<chrono::DateTime<chrono::Utc>>>(i) {
+                            Some(v) => write!(output, "{}", v),
+                            None => write!(output, "NULL"),
+                        }
+                    }
                     t => todo!("not supported type: {}", t),
                 }
                 .unwrap();
