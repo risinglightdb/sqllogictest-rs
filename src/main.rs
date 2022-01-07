@@ -1,5 +1,4 @@
 use libtest_mimic::{run_tests, Arguments, Outcome, Test};
-use rust_decimal::Decimal;
 use std::sync::{Arc, Mutex};
 use structopt::StructOpt;
 
@@ -13,7 +12,7 @@ struct Opt {
     /// Glob of a set of test files.
     ///
     /// For example: `./test/**/*.slt`
-    #[structopt(long)]
+    #[structopt(short, long)]
     files: String,
 
     /// The database name to connect.
@@ -85,75 +84,31 @@ impl sqllogictest::DB for Postgres {
     type Error = postgres::error::Error;
 
     fn run(&self, sql: &str) -> Result<String, Self::Error> {
-        use postgres::types::Type;
         use std::fmt::Write;
 
         let mut output = String::new();
-        let rows = self.client.lock().unwrap().query(sql, &[])?;
+        // NOTE:
+        // We use `simple_query` API which returns the query results as strings.
+        // This means that we can not reformat values based on their type,
+        // and we have to follow the format given by the specific database (pg).
+        // For example, postgres will output `t` as true and `f` as false,
+        // thus we have to write `t`/`f` in the expected results.
+        let rows = self.client.lock().unwrap().simple_query(sql)?;
         for row in rows {
-            let columns = row.columns();
-            for (i, col) in columns.iter().enumerate() {
-                write!(output, " ").unwrap();
-                match col.type_() {
-                    &Type::BOOL => match row.get::<_, Option<bool>>(i) {
-                        Some(v) => write!(output, "{}", v),
-                        None => write!(output, "NULL"),
-                    },
-                    &Type::CHAR => match row.get::<_, Option<i8>>(i) {
-                        Some(v) => write!(output, "{}", v as u8 as char),
-                        None => write!(output, "NULL"),
-                    },
-                    &Type::INT2 => match row.get::<_, Option<i16>>(i) {
-                        Some(v) => write!(output, "{}", v),
-                        None => write!(output, "NULL"),
-                    },
-                    &Type::INT4 => match row.get::<_, Option<i32>>(i) {
-                        Some(v) => write!(output, "{}", v),
-                        None => write!(output, "NULL"),
-                    },
-                    &Type::INT8 => match row.get::<_, Option<i64>>(i) {
-                        Some(v) => write!(output, "{}", v),
-                        None => write!(output, "NULL"),
-                    },
-                    &Type::FLOAT4 => match row.get::<_, Option<f32>>(i) {
-                        Some(v) => write!(output, "{}", v),
-                        None => write!(output, "NULL"),
-                    },
-                    &Type::FLOAT8 => match row.get::<_, Option<f64>>(i) {
-                        Some(v) => write!(output, "{}", v),
-                        None => write!(output, "NULL"),
-                    },
-                    &Type::TEXT | &Type::BPCHAR | &Type::VARCHAR => {
-                        match row.get::<_, Option<&str>>(i) {
-                            Some(v) => write!(output, "{}", v),
-                            None => write!(output, "NULL"),
+            match row {
+                postgres::SimpleQueryMessage::Row(row) => {
+                    for i in 0..row.len() {
+                        if i != 0 {
+                            write!(output, " ").unwrap();
+                        }
+                        match row.get(i) {
+                            Some(v) => write!(output, "{}", v).unwrap(),
+                            None => write!(output, "NULL").unwrap(),
                         }
                     }
-                    &Type::NUMERIC => match row.get::<_, Option<Decimal>>(i) {
-                        Some(v) => write!(output, "{}", v),
-                        None => write!(output, "NULL"),
-                    },
-                    &Type::DATE => match row.get::<_, Option<chrono::NaiveDate>>(i) {
-                        Some(v) => write!(output, "{}", v),
-                        None => write!(output, "NULL"),
-                    },
-                    &Type::TIME => match row.get::<_, Option<chrono::NaiveTime>>(i) {
-                        Some(v) => write!(output, "{}", v),
-                        None => write!(output, "NULL"),
-                    },
-                    &Type::TIMESTAMP => match row.get::<_, Option<chrono::NaiveDateTime>>(i) {
-                        Some(v) => write!(output, "{}", v),
-                        None => write!(output, "NULL"),
-                    },
-                    &Type::TIMESTAMPTZ => {
-                        match row.get::<_, Option<chrono::DateTime<chrono::Utc>>>(i) {
-                            Some(v) => write!(output, "{}", v),
-                            None => write!(output, "NULL"),
-                        }
-                    }
-                    t => todo!("not supported type: {}", t),
                 }
-                .unwrap();
+                postgres::SimpleQueryMessage::CommandComplete(_) => {}
+                _ => unreachable!(),
             }
             writeln!(output).unwrap();
         }
