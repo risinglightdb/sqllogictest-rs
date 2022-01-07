@@ -11,7 +11,7 @@ keywords = ["sql", "database", "parser"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-bin = ["postgres", "env_logger", "glob", "structopt", "libtest-mimic"]
+bin = ["postgres", "env_logger", "glob", "clap", "libtest-mimic"]
 
 [dependencies]
 async-trait = "0.1"
@@ -22,7 +22,7 @@ itertools = "0.10"
 libtest-mimic = { version = "0.3", optional = true }
 log = "0.4"
 postgres = { version = "0.19", optional = true }
-structopt = { version = "0.3", optional = true }
+clap = { version = "3", features = ["derive"], optional = true }
 tempfile = "3"
 thiserror = "1"
 

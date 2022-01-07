@@ -1,36 +1,36 @@
+use clap::Parser;
 use libtest_mimic::{run_tests, Arguments, Outcome, Test};
 use std::sync::{Arc, Mutex};
-use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
-#[structopt()]
+#[derive(Parser, Debug)]
+#[clap(about, version, author)]
 struct Opt {
     /// Port of the remote DB server.
-    #[structopt(short, long, default_value = "5432")]
+    #[clap(short, long, default_value = "5432")]
     port: u16,
 
     /// Glob of a set of test files.
     /// For example: `./test/**/*.slt`
-    #[structopt(short, long)]
+    #[clap(short, long)]
     files: String,
 
     /// The database name to connect.
-    #[structopt(short, long, default_value = "postgres")]
+    #[clap(short, long, default_value = "postgres")]
     db: String,
 
     /// The database username.
-    #[structopt(short, long, default_value = "postgres")]
+    #[clap(short, long, default_value = "postgres")]
     user: String,
 
     /// The database password.
-    #[structopt(short = "w", long, default_value = "postgres")]
+    #[clap(short = 'w', long, default_value = "postgres")]
     pass: String,
 }
 
 fn main() {
     env_logger::init();
 
-    let opt = Opt::from_args();
+    let opt = Opt::parse();
 
     let files = glob::glob(&opt.files).expect("failed to read glob pattern");
     let client = postgres::Config::new()
