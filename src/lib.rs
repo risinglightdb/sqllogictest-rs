@@ -35,6 +35,7 @@
 //! ```
 
 use std::rc::Rc;
+use std::time::Duration;
 use std::{fmt, path::Path};
 
 use async_trait::async_trait;
@@ -105,6 +106,8 @@ pub enum Record {
         /// The expected results.
         expected_results: String,
     },
+    /// A sleep period.
+    Sleep { duration: Duration },
     /// Subtest.
     Subtest { name: String },
     /// A halt record merely causes sqllogictest to ignore the rest of the test script.
@@ -171,6 +174,8 @@ pub enum ErrorKind {
     InvalidType(String),
     #[error("invalid number: {0:?}")]
     InvalidNumber(String),
+    #[error("invalid duration: {0:?}")]
+    InvalidDuration(String),
 }
 
 impl ErrorKind {
@@ -207,6 +212,12 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
             ["subtest", name] => {
                 records.push(Record::Subtest {
                     name: name.to_string(),
+                });
+            }
+            ["sleep", dur] => {
+                records.push(Record::Sleep {
+                    duration: humantime::parse_duration(dur)
+                        .map_err(|_| ErrorKind::InvalidDuration(dur.to_string()).at(pos.clone()))?,
                 });
             }
             ["skipif", db_name] => {
@@ -442,6 +453,7 @@ impl<D: DB> Runner<D> {
                     );
                 }
             }
+            Record::Sleep { duration } => std::thread::sleep(duration),
             Record::Halt => {}
             Record::Subtest { .. } => {}
             Record::Include { .. } => {
