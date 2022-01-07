@@ -1,4 +1,4 @@
-include ./include_2
+include ./include_2.slt
 
 query I
 select * from example_basic

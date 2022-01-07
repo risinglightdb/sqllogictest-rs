@@ -10,15 +10,23 @@ repository = "https://github.com/singularity-data/sqllogictest-rs"
 keywords = ["sql", "database", "parser"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+bin = ["postgres", "env_logger", "glob", "structopt", "libtest-mimic"]
+
 [dependencies]
 async-trait = "0.1"
-env_logger = "0.9"
-glob = "0.3"
+env_logger = { version = "0.9", optional = true }
+glob = { version = "0.3", optional = true }
 humantime = "2"
 itertools = "0.10"
-libtest-mimic = "0.3"
+libtest-mimic = { version = "0.3", optional = true }
 log = "0.4"
-postgres = "0.19"
-structopt = "0.3"
+postgres = { version = "0.19", optional = true }
+structopt = { version = "0.3", optional = true }
 tempfile = "3"
 thiserror = "1"
+
+[[bin]]
+name = "sqllogictest"
+path = "src/main.rs"
+required-features = ["bin"]
