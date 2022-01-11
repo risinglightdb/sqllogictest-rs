@@ -11,7 +11,7 @@ struct Opt {
 
     /// Glob of a set of test files.
     /// For example: `./test/**/*.slt`
-    #[clap(short, long)]
+    #[clap()]
     files: String,
 
     /// The database name to connect.

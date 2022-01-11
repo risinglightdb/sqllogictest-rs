@@ -10,7 +10,7 @@ This crate implements a sqllogictest parser and runner in Rust.
 
 [Sqllogictest]: https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki
 
-## Usage
+## Using as Library
 
 Add the following lines to your `Cargo.toml` file:
 
@@ -53,6 +53,28 @@ for record in records {
 ```
 
 See [examples](./examples) directory for more usages.
+
+## Using as CLI
+
+This crate can also be used as a command-line tool.
+
+To install the binary, the `bin` feature is required:
+
+```sh
+cargo install sqllogictest --features bin
+```
+
+You can use it as follows:
+
+```sh
+sqllogictest './test/**/*.slt'
+```
+
+This command will run scripts in `test` directory against postgres with default connection settings.
+
+You can find more options in `sqllogictest --help`.
+
+Note that only postgres is supported now.
 
 ## License
 
