@@ -5,14 +5,18 @@ use std::sync::{Arc, Mutex};
 #[derive(Parser, Debug)]
 #[clap(about, version, author)]
 struct Opt {
-    /// Port of the remote DB server.
-    #[clap(short, long, default_value = "5432")]
-    port: u16,
-
     /// Glob of a set of test files.
     /// For example: `./test/**/*.slt`
     #[clap()]
     files: String,
+
+    /// The database server host.
+    #[clap(short, long, default_value = "localhost")]
+    host: String,
+
+    /// The database server port.
+    #[clap(short, long, default_value = "5432")]
+    port: u16,
 
     /// The database name to connect.
     #[clap(short, long, default_value = "postgres")]
@@ -34,11 +38,11 @@ fn main() {
 
     let files = glob::glob(&opt.files).expect("failed to read glob pattern");
     let client = postgres::Config::new()
+        .host(&opt.host)
+        .port(opt.port)
+        .dbname(&opt.db)
         .user(&opt.user)
         .password(&opt.pass)
-        .dbname(&opt.db)
-        .host("localhost")
-        .port(opt.port)
         .connect(postgres::NoTls)
         .expect("failed to connect to postgres");
 
