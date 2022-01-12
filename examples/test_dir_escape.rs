@@ -29,5 +29,5 @@ fn main() {
     let mut tester = sqllogictest::Runner::new(FakeDB);
     // enable `__TEST_DIR__` override
     tester.enable_testdir();
-    tester.run_script(&script);
+    tester.run_script(&script).unwrap();
 }

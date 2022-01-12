@@ -33,5 +33,5 @@ impl sqllogictest::DB for FakeDB {
 
 fn main() {
     let mut tester = sqllogictest::Runner::new(FakeDB);
-    tester.run_file("examples/include_1.slt");
+    tester.run_file("examples/include_1.slt").unwrap();
 }
