@@ -45,30 +45,41 @@ use tempfile::{tempdir, TempDir};
 
 const DEFAULT_FILENAME: &str = "<entry>";
 
+/// The location in source file.
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Pos {
-    filename: Rc<str>,
+pub struct Location {
+    file: Rc<str>,
     line: u32,
 }
 
-impl fmt::Display for Pos {
+impl fmt::Display for Location {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.filename, self.line)
+        write!(f, "{}:{}", self.file, self.line)
     }
 }
 
-impl Pos {
-    pub fn new(filename: impl Into<Rc<str>>, line: u32) -> Self {
+impl Location {
+    /// File path.
+    pub fn file(&self) -> &str {
+        &self.file
+    }
+
+    /// Line number.
+    pub fn line(&self) -> u32 {
+        self.line
+    }
+
+    fn new(file: impl Into<Rc<str>>, line: u32) -> Self {
         Self {
-            filename: filename.into(),
+            file: file.into(),
             line,
         }
     }
 
     #[must_use]
-    pub fn map_line(self, op: impl Fn(u32) -> u32) -> Self {
+    fn map_line(self, op: impl Fn(u32) -> u32) -> Self {
         Self {
-            filename: self.filename,
+            file: self.file,
             line: op(self.line),
         }
     }
@@ -79,12 +90,11 @@ impl Pos {
 #[non_exhaustive]
 pub enum Record {
     /// An include copies all records from another files.
-    #[doc(hidden)]
-    Include { pos: Pos, filename: String },
+    Include { loc: Location, filename: String },
     /// A statement is an SQL command that is to be evaluated but from which we do not expect to
     /// get results (other than success or failure).
     Statement {
-        pos: Pos,
+        loc: Location,
         conditions: Vec<Condition>,
         /// The SQL command is expected to fail instead of to succeed.
         error: bool,
@@ -96,7 +106,7 @@ pub enum Record {
     /// A query is an SQL command from which we expect to receive results. The result set might be
     /// empty.
     Query {
-        pos: Pos,
+        loc: Location,
         conditions: Vec<Condition>,
         type_string: String,
         sort_mode: SortMode,
@@ -107,12 +117,12 @@ pub enum Record {
         expected_results: String,
     },
     /// A sleep period.
-    Sleep { duration: Duration },
+    Sleep { loc: Location, duration: Duration },
     /// Subtest.
-    Subtest { name: String },
+    Subtest { loc: Location, name: String },
     /// A halt record merely causes sqllogictest to ignore the rest of the test script.
     /// For debugging use only.
-    Halt,
+    Halt { loc: Location },
 }
 
 /// The condition to run a query.
@@ -141,10 +151,10 @@ pub enum SortMode {
 
 /// The error type for parsing sqllogictest.
 #[derive(thiserror::Error, Debug, PartialEq, Clone)]
-#[error("parse error at {pos}: {kind}")]
+#[error("parse error at {loc}: {kind}")]
 pub struct Error {
     kind: ErrorKind,
-    pos: Pos,
+    loc: Location,
 }
 
 impl Error {
@@ -153,9 +163,9 @@ impl Error {
         self.kind.clone()
     }
 
-    /// Returns the line number from which the error originated.
-    pub fn pos(&self) -> Pos {
-        self.pos.clone()
+    /// Returns the location from which the error originated.
+    pub fn location(&self) -> Location {
+        self.loc.clone()
     }
 }
 
@@ -179,8 +189,11 @@ pub enum ErrorKind {
 }
 
 impl ErrorKind {
-    fn at(self, pos: Pos) -> Error {
-        Error { kind: self, pos }
+    fn at(self, pos: Location) -> Error {
+        Error {
+            kind: self,
+            loc: pos,
+        }
     }
 }
 
@@ -197,27 +210,29 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let pos = Pos::new(filename.clone(), num as u32);
+        let loc = Location::new(filename.clone(), num as u32 + 1);
         let tokens: Vec<&str> = line.split_whitespace().collect();
         match tokens.as_slice() {
             [] => continue,
             ["include", included] => records.push(Record::Include {
-                pos,
+                loc,
                 filename: included.to_string(),
             }),
             ["halt"] => {
-                records.push(Record::Halt);
+                records.push(Record::Halt { loc });
                 break;
             }
             ["subtest", name] => {
                 records.push(Record::Subtest {
+                    loc,
                     name: name.to_string(),
                 });
             }
             ["sleep", dur] => {
                 records.push(Record::Sleep {
                     duration: humantime::parse_duration(dur)
-                        .map_err(|_| ErrorKind::InvalidDuration(dur.to_string()).at(pos.clone()))?,
+                        .map_err(|_| ErrorKind::InvalidDuration(dur.to_string()).at(loc.clone()))?,
+                    loc,
                 });
             }
             ["skipif", db_name] => {
@@ -237,16 +252,16 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                     ["error"] => true,
                     ["count", count_str] => {
                         expected_count = Some(count_str.parse::<usize>().map_err(|_| {
-                            ErrorKind::InvalidNumber((*count_str).into()).at(pos.clone())
+                            ErrorKind::InvalidNumber((*count_str).into()).at(loc.clone())
                         })?);
                         false
                     }
-                    _ => return Err(ErrorKind::InvalidLine(line.into()).at(pos)),
+                    _ => return Err(ErrorKind::InvalidLine(line.into()).at(loc)),
                 };
                 let mut sql = lines
                     .next()
                     .ok_or_else(|| {
-                        ErrorKind::UnexpectedEOF.at(pos.clone().map_line(|line| line + 1))
+                        ErrorKind::UnexpectedEOF.at(loc.clone().map_line(|line| line + 1))
                     })?
                     .1
                     .into();
@@ -258,7 +273,7 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                     sql += line;
                 }
                 records.push(Record::Statement {
-                    pos,
+                    loc,
                     conditions: std::mem::take(&mut conditions),
                     error,
                     sql,
@@ -270,7 +285,7 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                     None | Some(&"nosort") => SortMode::NoSort,
                     Some(&"rowsort") => SortMode::RowSort,
                     Some(&"valuesort") => SortMode::ValueSort,
-                    Some(mode) => return Err(ErrorKind::InvalidSortMode(mode.to_string()).at(pos)),
+                    Some(mode) => return Err(ErrorKind::InvalidSortMode(mode.to_string()).at(loc)),
                 };
                 let label = res.get(1).map(|s| s.to_string());
                 // The SQL for the query is found on second an subsequent lines of the record
@@ -278,7 +293,7 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                 let mut sql = lines
                     .next()
                     .ok_or_else(|| {
-                        ErrorKind::UnexpectedEOF.at(pos.clone().map_line(|line| line + 1))
+                        ErrorKind::UnexpectedEOF.at(loc.clone().map_line(|line| line + 1))
                     })?
                     .1
                     .into();
@@ -303,7 +318,7 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                     }
                 }
                 records.push(Record::Query {
-                    pos,
+                    loc,
                     conditions: std::mem::take(&mut conditions),
                     type_string: type_string.to_string(),
                     sort_mode,
@@ -312,7 +327,7 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                     expected_results,
                 });
             }
-            _ => return Err(ErrorKind::InvalidLine(line.into()).at(pos)),
+            _ => return Err(ErrorKind::InvalidLine(line.into()).at(loc)),
         }
     }
     Ok(records)
@@ -331,11 +346,7 @@ fn parse_file_inner(filename: Rc<str>, path: &Path) -> Result<Vec<Record>, Error
     let script = std::fs::read_to_string(path).unwrap();
     let mut records = vec![];
     for rec in parse_inner(filename, &script)? {
-        if let Record::Include {
-            pos: _pos,
-            filename,
-        } = rec
-        {
+        if let Record::Include { filename, .. } = rec {
             let mut path_buf = path.to_path_buf();
             path_buf.pop();
             path_buf.push(filename);
@@ -395,7 +406,7 @@ impl<D: DB> Runner<D> {
             Record::Statement {
                 error,
                 sql,
-                pos,
+                loc,
                 expected_count,
                 ..
             } => {
@@ -404,23 +415,23 @@ impl<D: DB> Runner<D> {
                 match ret {
                     Ok(_) if error => panic!(
                         "{}: statement is expected to fail, but actually succeed\n\tSQL:{:?}",
-                        pos, sql
+                        loc, sql
                     ),
                     Ok(count_str) => {
                         if let Some(expected_count) = expected_count {
                             if expected_count.to_string() != count_str {
-                                panic!("{}: statement is expected to affect {} rows, but actually {}\n\tSQL: {:?}", pos, expected_count, count_str, sql)
+                                panic!("{}: statement is expected to affect {} rows, but actually {}\n\tSQL: {:?}", loc, expected_count, count_str, sql)
                             }
                         }
                     }
                     Err(e) if !error => {
-                        panic!("{}: statement failed: {}\n\tSQL: {:?}", pos, e, sql)
+                        panic!("{}: statement failed: {}\n\tSQL: {:?}", loc, e, sql)
                     }
                     _ => {}
                 }
             }
             Record::Query {
-                pos,
+                loc,
                 sql,
                 expected_results,
                 sort_mode,
@@ -429,7 +440,7 @@ impl<D: DB> Runner<D> {
                 let sql = self.replace_keywords(sql);
                 let output = match self.db.run(&sql) {
                     Ok(output) => output,
-                    Err(e) => panic!("{}: query failed: {}\nSQL: {}", pos, e, sql),
+                    Err(e) => panic!("{}: query failed: {}\nSQL: {}", loc, e, sql),
                 };
                 let mut output = split_lines_and_normalize(&output);
                 let mut expected_results = split_lines_and_normalize(&expected_results);
@@ -444,18 +455,18 @@ impl<D: DB> Runner<D> {
                 if output != expected_results {
                     panic!(
                         "{}: query result mismatch:\nSQL:\n{}\n\nExpected:\n{}\nActual:\n{}",
-                        pos,
+                        loc,
                         sql,
                         expected_results.join("\n"),
                         output.join("\n")
                     );
                 }
             }
-            Record::Sleep { duration } => std::thread::sleep(duration),
-            Record::Halt => {}
+            Record::Sleep { duration, .. } => std::thread::sleep(duration),
+            Record::Halt { .. } => {}
             Record::Subtest { .. } => {}
-            Record::Include { .. } => {
-                unreachable!("include should be rewritten during link.")
+            Record::Include { loc, .. } => {
+                unreachable!("include should be rewritten during link: at {}", loc)
             }
         }
     }
@@ -465,7 +476,7 @@ impl<D: DB> Runner<D> {
     /// The runner will stop early once a halt record is seen.
     pub fn run_multi(&mut self, records: impl IntoIterator<Item = Record>) {
         for record in records.into_iter() {
-            if let Record::Halt = record {
+            if let Record::Halt { .. } = record {
                 return;
             }
             self.run(record);
@@ -479,7 +490,6 @@ impl<D: DB> Runner<D> {
     }
 
     /// Run a sqllogictest file.
-    #[doc(hidden)]
     pub fn run_file(&mut self, filename: impl AsRef<Path>) {
         let records = parse_file(filename).expect("failed to parse sqllogictest");
         self.run_multi(records);
