@@ -71,8 +71,12 @@ fn main() {
 
 fn run_test(test: &Test<Postgres>) -> Outcome {
     let mut runner = sqllogictest::Runner::new(test.data.clone());
-    runner.run_file(&test.name);
-    Outcome::Passed
+    match runner.run_file(&test.name) {
+        Ok(_) => Outcome::Passed,
+        Err(err) => Outcome::Failed {
+            msg: Some(err.to_string()),
+        },
+    }
 }
 
 #[derive(Clone)]

@@ -60,7 +60,7 @@ pub enum Record {
         /// The SQL command.
         sql: String,
         /// Expected rows affected.
-        expected_count: Option<usize>,
+        expected_count: Option<u64>,
     },
     /// A query is an SQL command from which we expect to receive results. The result set might be
     /// empty.
@@ -111,14 +111,14 @@ pub enum SortMode {
 /// The error type for parsing sqllogictest.
 #[derive(thiserror::Error, Debug, PartialEq, Clone)]
 #[error("parse error at {loc}: {kind}")]
-pub struct Error {
-    kind: ErrorKind,
+pub struct ParseError {
+    kind: ParseErrorKind,
     loc: Location,
 }
 
-impl Error {
-    /// Returns the corresponding [`ErrorKind`] for this error.
-    pub fn kind(&self) -> ErrorKind {
+impl ParseError {
+    /// Returns the corresponding [`ParseErrorKind`] for this error.
+    pub fn kind(&self) -> ParseErrorKind {
         self.kind.clone()
     }
 
@@ -130,7 +130,7 @@ impl Error {
 
 /// The error kind for parsing sqllogictest.
 #[derive(thiserror::Error, Debug, PartialEq, Clone)]
-pub enum ErrorKind {
+pub enum ParseErrorKind {
     #[error("unexpected token: {0:?}")]
     UnexpectedToken(String),
     #[error("unexpected EOF")]
@@ -147,23 +147,20 @@ pub enum ErrorKind {
     InvalidDuration(String),
 }
 
-impl ErrorKind {
-    fn at(self, pos: Location) -> Error {
-        Error {
-            kind: self,
-            loc: pos,
-        }
+impl ParseErrorKind {
+    fn at(self, loc: Location) -> ParseError {
+        ParseError { kind: self, loc }
     }
 }
 
 const DEFAULT_FILENAME: &str = "<entry>";
 
 /// Parse a sqllogictest script into a list of records.
-pub fn parse(script: &str) -> Result<Vec<Record>, Error> {
+pub fn parse(script: &str) -> Result<Vec<Record>, ParseError> {
     parse_inner(Rc::from(DEFAULT_FILENAME), script)
 }
 
-fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
+fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, ParseError> {
     let mut lines = script.split('\n').enumerate();
     let mut records = vec![];
     let mut conditions = vec![];
@@ -191,8 +188,9 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
             }
             ["sleep", dur] => {
                 records.push(Record::Sleep {
-                    duration: humantime::parse_duration(dur)
-                        .map_err(|_| ErrorKind::InvalidDuration(dur.to_string()).at(loc.clone()))?,
+                    duration: humantime::parse_duration(dur).map_err(|_| {
+                        ParseErrorKind::InvalidDuration(dur.to_string()).at(loc.clone())
+                    })?,
                     loc,
                 });
             }
@@ -212,17 +210,17 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                     ["ok"] => false,
                     ["error"] => true,
                     ["count", count_str] => {
-                        expected_count = Some(count_str.parse::<usize>().map_err(|_| {
-                            ErrorKind::InvalidNumber((*count_str).into()).at(loc.clone())
+                        expected_count = Some(count_str.parse::<u64>().map_err(|_| {
+                            ParseErrorKind::InvalidNumber((*count_str).into()).at(loc.clone())
                         })?);
                         false
                     }
-                    _ => return Err(ErrorKind::InvalidLine(line.into()).at(loc)),
+                    _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
                 };
                 let mut sql = lines
                     .next()
                     .ok_or_else(|| {
-                        ErrorKind::UnexpectedEOF.at(loc.clone().map_line(|line| line + 1))
+                        ParseErrorKind::UnexpectedEOF.at(loc.clone().map_line(|line| line + 1))
                     })?
                     .1
                     .into();
@@ -246,7 +244,9 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                     None | Some(&"nosort") => SortMode::NoSort,
                     Some(&"rowsort") => SortMode::RowSort,
                     Some(&"valuesort") => SortMode::ValueSort,
-                    Some(mode) => return Err(ErrorKind::InvalidSortMode(mode.to_string()).at(loc)),
+                    Some(mode) => {
+                        return Err(ParseErrorKind::InvalidSortMode(mode.to_string()).at(loc))
+                    }
                 };
                 let label = res.get(1).map(|s| s.to_string());
                 // The SQL for the query is found on second an subsequent lines of the record
@@ -254,7 +254,7 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                 let mut sql = lines
                     .next()
                     .ok_or_else(|| {
-                        ErrorKind::UnexpectedEOF.at(loc.clone().map_line(|line| line + 1))
+                        ParseErrorKind::UnexpectedEOF.at(loc.clone().map_line(|line| line + 1))
                     })?
                     .1
                     .into();
@@ -288,21 +288,21 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, Error> {
                     expected_results,
                 });
             }
-            _ => return Err(ErrorKind::InvalidLine(line.into()).at(loc)),
+            _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
         }
     }
     Ok(records)
 }
 
 /// Parse a sqllogictest file and link all included scripts together.
-pub fn parse_file(filename: impl AsRef<Path>) -> Result<Vec<Record>, Error> {
+pub fn parse_file(filename: impl AsRef<Path>) -> Result<Vec<Record>, ParseError> {
     parse_file_inner(
         Rc::from(filename.as_ref().to_str().unwrap()),
         filename.as_ref(),
     )
 }
 
-fn parse_file_inner(filename: Rc<str>, path: &Path) -> Result<Vec<Record>, Error> {
+fn parse_file_inner(filename: Rc<str>, path: &Path) -> Result<Vec<Record>, ParseError> {
     let script = std::fs::read_to_string(path).unwrap();
     let mut records = vec![];
     for rec in parse_inner(filename, &script)? {
