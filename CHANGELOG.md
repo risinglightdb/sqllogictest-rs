@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A command-line tool to run scripts from file against postgres-compatible databases.
+- Support `sleep` and `include` statement.
+
+### Changed
+
+- Add file location to the error message.
+- Runner returns error type instead of panic.
+
 ## [0.1.0] - 2021-12-10
 
 ### Added
