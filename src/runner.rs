@@ -82,16 +82,24 @@ impl TestErrorKind {
     }
 }
 
+type Validator = fn(&Vec<String>, &Vec<String>) -> bool;
+
 /// Sqllogictest runner.
 pub struct Runner<D: DB> {
     db: D,
+    // validator is used for validate if the result of query equals to expected.
+    validator: Validator,
     testdir: Option<TempDir>,
 }
 
 impl<D: DB> Runner<D> {
     /// Create a new test runner on the database.
     pub fn new(db: D) -> Self {
-        Runner { db, testdir: None }
+        Runner {
+            db,
+            validator: |x, y| x == y,
+            testdir: None,
+        }
     }
 
     /// Replace the pattern `__TEST_DIR__` in SQL with a temporary directory path.
@@ -100,6 +108,10 @@ impl<D: DB> Runner<D> {
     /// files, e.g. `COPY`.
     pub fn enable_testdir(&mut self) {
         self.testdir = Some(tempdir().expect("failed to create testdir"));
+    }
+
+    pub fn with_validator(&mut self, validator: Validator) {
+        self.validator = validator;
     }
 
     /// Run a single record.
@@ -134,7 +146,7 @@ impl<D: DB> Runner<D> {
                             sql,
                             err: Rc::new(e),
                         }
-                        .at(loc))
+                        .at(loc));
                     }
                     _ => {}
                 }
@@ -154,7 +166,7 @@ impl<D: DB> Runner<D> {
                             sql,
                             err: Rc::new(e),
                         }
-                        .at(loc))
+                        .at(loc));
                     }
                 };
                 let mut output = split_lines_and_normalize(&output);
@@ -167,7 +179,7 @@ impl<D: DB> Runner<D> {
                     }
                     SortMode::ValueSort => todo!("value sort"),
                 };
-                if output != expected_results {
+                if !(self.validator)(&output, &expected_results) {
                     return Err(TestErrorKind::QueryResultMismatch {
                         sql,
                         expected: expected_results.join("\n"),
