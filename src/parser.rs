@@ -260,8 +260,11 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, ParseErro
                     .into();
                 let mut has_result = false;
                 for (_, line) in &mut lines {
-                    if line.is_empty() || line == "----" {
-                        has_result = line == "----";
+                    if line.is_empty() {
+                        break;
+                    }
+                    if line == "----" {
+                        has_result = true;
                         break;
                     }
                     sql += " ";
