@@ -82,7 +82,12 @@ impl TestErrorKind {
     }
 }
 
-type Validator = fn(&Vec<String>, &Vec<String>) -> bool;
+/// Validator will be used by `Runner` to validate the output.
+///
+/// # Default
+///
+/// By default, we will use `|x, y| x == y`.
+pub type Validator = fn(&Vec<String>, &Vec<String>) -> bool;
 
 /// Sqllogictest runner.
 pub struct Runner<D: DB> {
