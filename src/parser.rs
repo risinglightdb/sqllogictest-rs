@@ -228,7 +228,7 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, ParseErro
                     if line.is_empty() {
                         break;
                     }
-                    sql += " ";
+                    sql += "\n";
                     sql += line;
                 }
                 records.push(Record::Statement {
@@ -267,7 +267,7 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, ParseErro
                         has_result = true;
                         break;
                     }
-                    sql += " ";
+                    sql += "\n";
                     sql += line;
                 }
                 // Lines following the "----" are expected results of the query, one value per line.
