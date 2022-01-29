@@ -16,7 +16,7 @@ impl std::error::Error for FakeDBError {}
 impl sqllogictest::DB for FakeDB {
     type Error = FakeDBError;
 
-    fn run(&self, sql: &str) -> Result<String, FakeDBError> {
+    fn run(&mut self, sql: &str) -> Result<String, FakeDBError> {
         // Output will be: sqllogictests yields copy test to '/tmp/.tmp6xSyMa/test.csv';
         println!("sqllogictests yields {}", sql);
         assert!(!sql.contains("__TEST_DIR__"));
