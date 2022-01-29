@@ -16,7 +16,7 @@ impl std::error::Error for FakeDBError {}
 impl sqllogictest::DB for FakeDB {
     type Error = FakeDBError;
 
-    fn run(&self, _sql: &str) -> Result<String, FakeDBError> {
+    fn run(&mut self, _sql: &str) -> Result<String, FakeDBError> {
         Ok("Hello, world!".to_string())
     }
 }

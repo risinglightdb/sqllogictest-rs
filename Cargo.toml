@@ -15,14 +15,15 @@ bin = ["postgres", "env_logger", "glob", "clap", "libtest-mimic"]
 
 [dependencies]
 async-trait = "0.1"
+clap = { version = "3", features = ["derive"], optional = true }
 env_logger = { version = "0.9", optional = true }
+futures-lite = "1"
 glob = { version = "0.3", optional = true }
 humantime = "2"
 itertools = "0.10"
 libtest-mimic = { version = "0.3", optional = true }
 log = "0.4"
 postgres = { version = "0.19", optional = true }
-clap = { version = "3", features = ["derive"], optional = true }
 tempfile = "3"
 thiserror = "1"
 

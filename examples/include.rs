@@ -14,7 +14,7 @@ impl std::error::Error for FakeDBError {}
 impl sqllogictest::DB for FakeDB {
     type Error = FakeDBError;
 
-    fn run(&self, sql: &str) -> Result<String, FakeDBError> {
+    fn run(&mut self, sql: &str) -> Result<String, FakeDBError> {
         if sql == "select * from example_basic" {
             return Ok("Alice\nBob\nEve".into());
         }

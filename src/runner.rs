@@ -2,27 +2,41 @@
 
 use crate::parser::*;
 use async_trait::async_trait;
+use futures_lite::future;
 use itertools::Itertools;
 use std::{path::Path, rc::Rc};
 use tempfile::{tempdir, TempDir};
 
 /// The async database to be tested.
 #[async_trait]
-pub trait AsyncDB {
+pub trait AsyncDB: Send {
     /// The error type of SQL execution.
-    type Error: std::error::Error + 'static;
+    type Error: std::error::Error + Send + 'static;
 
     /// Async run a SQL query and return the output.
-    async fn run(&self, sql: &str) -> Result<String, Self::Error>;
+    async fn run(&mut self, sql: &str) -> Result<String, Self::Error>;
 }
 
 /// The database to be tested.
-pub trait DB {
+pub trait DB: Send {
     /// The error type of SQL execution.
-    type Error: std::error::Error + 'static;
+    type Error: std::error::Error + Send + 'static;
 
     /// Run a SQL query and return the output.
-    fn run(&self, sql: &str) -> Result<String, Self::Error>;
+    fn run(&mut self, sql: &str) -> Result<String, Self::Error>;
+}
+
+/// Compat-layer for the new AsyncDB and DB trait
+#[async_trait]
+impl<D> AsyncDB for D
+where
+    D: DB,
+{
+    type Error = <D as DB>::Error;
+
+    async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
+        <D as DB>::run(self, sql)
+    }
 }
 
 /// The error type for running sqllogictest.
@@ -90,14 +104,14 @@ impl TestErrorKind {
 pub type Validator = fn(&Vec<String>, &Vec<String>) -> bool;
 
 /// Sqllogictest runner.
-pub struct Runner<D: DB> {
+pub struct Runner<D: AsyncDB> {
     db: D,
     // validator is used for validate if the result of query equals to expected.
     validator: Validator,
     testdir: Option<TempDir>,
 }
 
-impl<D: DB> Runner<D> {
+impl<D: AsyncDB> Runner<D> {
     /// Create a new test runner on the database.
     pub fn new(db: D) -> Self {
         Runner {
@@ -120,7 +134,7 @@ impl<D: DB> Runner<D> {
     }
 
     /// Run a single record.
-    pub fn run(&mut self, record: Record) -> Result<(), TestError> {
+    pub async fn run_async(&mut self, record: Record) -> Result<(), TestError> {
         info!("test: {:?}", record);
         match record {
             Record::Statement {
@@ -131,7 +145,7 @@ impl<D: DB> Runner<D> {
                 ..
             } => {
                 let sql = self.replace_keywords(sql);
-                let ret = self.db.run(&sql);
+                let ret = self.db.run(&sql).await;
                 match ret {
                     Ok(_) if error => return Err(TestErrorKind::StatementOk { sql }.at(loc)),
                     Ok(count_str) => {
@@ -164,7 +178,7 @@ impl<D: DB> Runner<D> {
                 ..
             } => {
                 let sql = self.replace_keywords(sql);
-                let output = match self.db.run(&sql) {
+                let output = match self.db.run(&sql).await {
                     Ok(output) => output,
                     Err(e) => {
                         return Err(TestErrorKind::QueryFail {
@@ -203,10 +217,15 @@ impl<D: DB> Runner<D> {
         Ok(())
     }
 
+    /// Run a single record.
+    pub async fn run(&mut self, record: Record) -> Result<(), TestError> {
+        future::block_on(self.run_async(record))
+    }
+
     /// Run multiple records.
     ///
     /// The runner will stop early once a halt record is seen.
-    pub fn run_multi(
+    pub async fn run_multi_async(
         &mut self,
         records: impl IntoIterator<Item = Record>,
     ) -> Result<(), TestError> {
@@ -214,21 +233,41 @@ impl<D: DB> Runner<D> {
             if let Record::Halt { .. } = record {
                 break;
             }
-            self.run(record)?;
+            self.run(record).await?;
         }
         Ok(())
     }
 
+    /// Run multiple records.
+    ///
+    /// The runner will stop early once a halt record is seen.
+    pub fn run_multi(
+        &mut self,
+        records: impl IntoIterator<Item = Record>,
+    ) -> Result<(), TestError> {
+        future::block_on(self.run_multi_async(records))
+    }
+
+    /// Run a sqllogictest script.
+    pub async fn run_script_async(&mut self, script: &str) -> Result<(), TestError> {
+        let records = parse(script).expect("failed to parse sqllogictest");
+        self.run_multi_async(records).await
+    }
+
+    /// Run a sqllogictest file.
+    pub async fn run_file_async(&mut self, filename: impl AsRef<Path>) -> Result<(), TestError> {
+        let records = parse_file(filename).expect("failed to parse sqllogictest");
+        self.run_multi_async(records).await
+    }
+
     /// Run a sqllogictest script.
     pub fn run_script(&mut self, script: &str) -> Result<(), TestError> {
-        let records = parse(script).expect("failed to parse sqllogictest");
-        self.run_multi(records)
+        future::block_on(self.run_script_async(script))
     }
 
     /// Run a sqllogictest file.
     pub fn run_file(&mut self, filename: impl AsRef<Path>) -> Result<(), TestError> {
-        let records = parse_file(filename).expect("failed to parse sqllogictest");
-        self.run_multi(records)
+        future::block_on(self.run_file_async(filename))
     }
 
     /// Replace all keywords in the SQL.

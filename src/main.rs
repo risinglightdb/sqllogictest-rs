@@ -87,7 +87,7 @@ struct Postgres {
 impl sqllogictest::DB for Postgres {
     type Error = postgres::error::Error;
 
-    fn run(&self, sql: &str) -> Result<String, Self::Error> {
+    fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
         use std::fmt::Write;
 
         let mut output = String::new();
