@@ -218,7 +218,7 @@ impl<D: AsyncDB> Runner<D> {
     }
 
     /// Run a single record.
-    pub async fn run(&mut self, record: Record) -> Result<(), TestError> {
+    pub fn run(&mut self, record: Record) -> Result<(), TestError> {
         future::block_on(self.run_async(record))
     }
 
@@ -233,7 +233,7 @@ impl<D: AsyncDB> Runner<D> {
             if let Record::Halt { .. } = record {
                 break;
             }
-            self.run(record).await?;
+            self.run_async(record).await?;
         }
         Ok(())
     }
