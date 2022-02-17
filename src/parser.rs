@@ -94,12 +94,11 @@ pub enum Record {
         loc: Location,
     },
     Control(Control),
-    EOF,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Control {
-    SortMode { sort_mode: SortMode, global: bool },
+    SortMode(SortMode),
 }
 
 /// The condition to run a query.
@@ -127,7 +126,7 @@ pub enum SortMode {
 }
 
 impl SortMode {
-    pub fn from_str(s: &str) -> Result<Self, ParseErrorKind> {
+    pub fn try_from_str(s: &str) -> Result<Self, ParseErrorKind> {
         match s {
             "nosort" => Ok(Self::NoSort),
             "rowsort" => Ok(Self::RowSort),
@@ -199,6 +198,7 @@ pub fn parse(script: &str) -> Result<Vec<Record>, ParseError> {
     parse_inner(Rc::from(DEFAULT_FILENAME), script)
 }
 
+#[allow(clippy::collapsible_match)]
 fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, ParseError> {
     let mut lines = script.split('\n').enumerate();
     let mut records = vec![];
@@ -279,7 +279,7 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, ParseErro
                 });
             }
             ["query", type_string, res @ ..] => {
-                let sort_mode = match res.get(0).map(|&s| SortMode::from_str(s)).transpose() {
+                let sort_mode = match res.get(0).map(|&s| SortMode::try_from_str(s)).transpose() {
                     Ok(sm) => sm,
                     Err(k) => return Err(k.at(loc)),
                 };
@@ -327,26 +327,15 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, ParseErro
                 });
             }
             ["control", res @ ..] => match res {
-                ["sortmode", values @ ..] => {
-                    let (sort_mode, global) = match values {
-                        [sort_mode, "global"] => (SortMode::from_str(sort_mode), true),
-                        [sort_mode] => (SortMode::from_str(sort_mode), false),
-                        _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
-                    };
-                    match (sort_mode, global) {
-                        (Ok(sort_mode), global) => {
-                            records.push(Record::Control(Control::SortMode { sort_mode, global }))
-                        }
-                        (Err(k), _) => return Err(k.at(loc)),
-                    }
-                }
-
+                ["sortmode", sort_mode] => match SortMode::try_from_str(sort_mode) {
+                    Ok(sort_mode) => records.push(Record::Control(Control::SortMode(sort_mode))),
+                    Err(k) => return Err(k.at(loc)),
+                },
                 _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
             },
             _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
         }
     }
-    records.push(Record::EOF);
     Ok(records)
 }
 
