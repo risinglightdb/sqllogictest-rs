@@ -49,7 +49,10 @@ impl Location {
 #[non_exhaustive]
 pub enum Record {
     /// An include copies all records from another files.
-    Include { loc: Location, filename: String },
+    Include {
+        loc: Location,
+        filename: String,
+    },
     /// A statement is an SQL command that is to be evaluated but from which we do not expect to
     /// get results (other than success or failure).
     Statement {
@@ -68,7 +71,7 @@ pub enum Record {
         loc: Location,
         conditions: Vec<Condition>,
         type_string: String,
-        sort_mode: SortMode,
+        sort_mode: Option<SortMode>,
         label: Option<String>,
         /// The SQL command.
         sql: String,
@@ -76,12 +79,27 @@ pub enum Record {
         expected_results: String,
     },
     /// A sleep period.
-    Sleep { loc: Location, duration: Duration },
+    Sleep {
+        loc: Location,
+        duration: Duration,
+    },
     /// Subtest.
-    Subtest { loc: Location, name: String },
+    Subtest {
+        loc: Location,
+        name: String,
+    },
     /// A halt record merely causes sqllogictest to ignore the rest of the test script.
     /// For debugging use only.
-    Halt { loc: Location },
+    Halt {
+        loc: Location,
+    },
+    Control(Control),
+    EOF,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum Control {
+    SortMode { sort_mode: SortMode, global: bool },
 }
 
 /// The condition to run a query.
@@ -106,6 +124,25 @@ pub enum SortMode {
     /// It works like rowsort except that it does not honor row groupings. Each individual result
     /// value is sorted on its own.
     ValueSort,
+}
+
+impl SortMode {
+    pub fn from_str(s: &str) -> Result<Self, ParseErrorKind> {
+        match s {
+            "nosort" => Ok(Self::NoSort),
+            "rowsort" => Ok(Self::RowSort),
+            "valuesort" => Ok(Self::ValueSort),
+            _ => Err(ParseErrorKind::InvalidSortMode(s.to_string())),
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NoSort => "nosort",
+            Self::RowSort => "rowsort",
+            Self::ValueSort => "valuesort",
+        }
+    }
 }
 
 /// The error type for parsing sqllogictest.
@@ -145,6 +182,8 @@ pub enum ParseErrorKind {
     InvalidNumber(String),
     #[error("invalid duration: {0:?}")]
     InvalidDuration(String),
+    #[error("invalid control: {0:?}")]
+    InvalidControl(String),
 }
 
 impl ParseErrorKind {
@@ -240,13 +279,9 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, ParseErro
                 });
             }
             ["query", type_string, res @ ..] => {
-                let sort_mode = match res.get(0) {
-                    None | Some(&"nosort") => SortMode::NoSort,
-                    Some(&"rowsort") => SortMode::RowSort,
-                    Some(&"valuesort") => SortMode::ValueSort,
-                    Some(mode) => {
-                        return Err(ParseErrorKind::InvalidSortMode(mode.to_string()).at(loc))
-                    }
+                let sort_mode = match res.get(0).map(|&s| SortMode::from_str(s)).transpose() {
+                    Ok(sm) => sm,
+                    Err(k) => return Err(k.at(loc)),
                 };
                 let label = res.get(1).map(|s| s.to_string());
                 // The SQL for the query is found on second an subsequent lines of the record
@@ -291,9 +326,27 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, ParseErro
                     expected_results,
                 });
             }
+            ["control", res @ ..] => match res {
+                ["sortmode", values @ ..] => {
+                    let (sort_mode, global) = match values {
+                        [sort_mode, "global"] => (SortMode::from_str(sort_mode), true),
+                        [sort_mode] => (SortMode::from_str(sort_mode), false),
+                        _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
+                    };
+                    match (sort_mode, global) {
+                        (Ok(sort_mode), global) => {
+                            records.push(Record::Control(Control::SortMode { sort_mode, global }))
+                        }
+                        (Err(k), _) => return Err(k.at(loc)),
+                    }
+                }
+
+                _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
+            },
             _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
         }
     }
+    records.push(Record::EOF);
     Ok(records)
 }
 
