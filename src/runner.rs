@@ -109,6 +109,7 @@ pub struct Runner<D: AsyncDB> {
     // validator is used for validate if the result of query equals to expected.
     validator: Validator,
     testdir: Option<TempDir>,
+    sort_mode: Option<SortMode>,
 }
 
 impl<D: AsyncDB> Runner<D> {
@@ -118,6 +119,7 @@ impl<D: AsyncDB> Runner<D> {
             db,
             validator: |x, y| x == y,
             testdir: None,
+            sort_mode: None,
         }
     }
 
@@ -190,13 +192,13 @@ impl<D: AsyncDB> Runner<D> {
                 };
                 let mut output = split_lines_and_normalize(&output);
                 let mut expected_results = split_lines_and_normalize(&expected_results);
-                match sort_mode {
-                    SortMode::NoSort => {}
-                    SortMode::RowSort => {
+                match sort_mode.as_ref().or_else(|| self.sort_mode.as_ref()) {
+                    None | Some(SortMode::NoSort) => {}
+                    Some(SortMode::RowSort) => {
                         output.sort_unstable();
                         expected_results.sort_unstable();
                     }
-                    SortMode::ValueSort => todo!("value sort"),
+                    Some(SortMode::ValueSort) => todo!("value sort"),
                 };
                 if !(self.validator)(&output, &expected_results) {
                     return Err(TestErrorKind::QueryResultMismatch {
@@ -213,6 +215,11 @@ impl<D: AsyncDB> Runner<D> {
             Record::Include { loc, .. } => {
                 unreachable!("include should be rewritten during link: at {}", loc)
             }
+            Record::Control(control) => match control {
+                Control::SortMode(sort_mode) => {
+                    self.sort_mode = Some(sort_mode);
+                }
+            },
         }
         Ok(())
     }
