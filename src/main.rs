@@ -52,7 +52,7 @@ fn main() {
 
     let pg = Postgres {
         client: Arc::new(Mutex::new(client)),
-        engine_name: opt.engine.clone(),
+        engine_name: opt.engine,
     };
     let tests = files
         .map(|file| Test {

@@ -27,7 +27,7 @@ impl sqllogictest::DB for FakeDB {
     }
 
     fn engine_name(&self) -> &str {
-        &self.engine_name
+        self.engine_name
     }
 }
 
