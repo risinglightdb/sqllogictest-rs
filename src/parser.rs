@@ -106,10 +106,20 @@ pub enum Control {
 pub enum Condition {
     /// The statement or query is skipped if an `onlyif` record for a different database engine is
     /// seen.
-    OnlyIf { db_name: String },
+    OnlyIf { engine_name: String },
     /// The statement or query is not evaluated if a `skipif` record for the target database engine
     /// is seen in the prefix.
-    SkipIf { db_name: String },
+    SkipIf { engine_name: String },
+}
+
+impl Condition {
+    /// Evaluate condition on given `targe_name`, returns whether to skip this record.
+    pub fn should_skip(&self, target_name: &str) -> bool {
+        match self {
+            Condition::OnlyIf { engine_name } => engine_name != target_name,
+            Condition::SkipIf { engine_name } => engine_name == target_name,
+        }
+    }
 }
 
 /// Whether to apply sorting before checking the results of a query.
@@ -233,14 +243,14 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, ParseErro
                     loc,
                 });
             }
-            ["skipif", db_name] => {
+            ["skipif", engine_name] => {
                 conditions.push(Condition::SkipIf {
-                    db_name: db_name.to_string(),
+                    engine_name: engine_name.to_string(),
                 });
             }
-            ["onlyif", db_name] => {
+            ["onlyif", engine_name] => {
                 conditions.push(Condition::OnlyIf {
-                    db_name: db_name.to_string(),
+                    engine_name: engine_name.to_string(),
                 });
             }
             ["statement", res @ ..] => {

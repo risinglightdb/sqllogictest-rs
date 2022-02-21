@@ -15,6 +15,9 @@ pub trait AsyncDB: Send {
 
     /// Async run a SQL query and return the output.
     async fn run(&mut self, sql: &str) -> Result<String, Self::Error>;
+
+    /// Engine name of current database.
+    fn engine_name(&self) -> &str;
 }
 
 /// The database to be tested.
@@ -24,6 +27,11 @@ pub trait DB: Send {
 
     /// Run a SQL query and return the output.
     fn run(&mut self, sql: &str) -> Result<String, Self::Error>;
+
+    /// Engine name of current database.
+    fn engine_name(&self) -> &str {
+        ""
+    }
 }
 
 /// Compat-layer for the new AsyncDB and DB trait
@@ -36,6 +44,10 @@ where
 
     async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
         <D as DB>::run(self, sql)
+    }
+
+    fn engine_name(&self) -> &str {
+        <D as DB>::engine_name(self)
     }
 }
 
@@ -139,6 +151,7 @@ impl<D: AsyncDB> Runner<D> {
     pub async fn run_async(&mut self, record: Record) -> Result<(), TestError> {
         info!("test: {:?}", record);
         match record {
+            Record::Statement { conditions, .. } if self.should_skip(&conditions) => {}
             Record::Statement {
                 error,
                 sql,
@@ -172,6 +185,7 @@ impl<D: AsyncDB> Runner<D> {
                     _ => {}
                 }
             }
+            Record::Query { conditions, .. } if self.should_skip(&conditions) => {}
             Record::Query {
                 loc,
                 sql,
@@ -284,6 +298,13 @@ impl<D: AsyncDB> Runner<D> {
         } else {
             sql
         }
+    }
+
+    /// Returns whether we should skip this record, according to given `conditions`.
+    fn should_skip(&self, conditions: &[Condition]) -> bool {
+        conditions
+            .iter()
+            .any(|c| c.should_skip(self.db.engine_name()))
     }
 }
 

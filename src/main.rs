@@ -10,6 +10,10 @@ struct Opt {
     #[clap()]
     files: String,
 
+    /// The database engine name, used by the record conditions.
+    #[clap(short, long, default_value = "postgresql")]
+    engine: String,
+
     /// The database server host.
     #[clap(short, long, default_value = "localhost")]
     host: String,
@@ -48,6 +52,7 @@ fn main() {
 
     let pg = Postgres {
         client: Arc::new(Mutex::new(client)),
+        engine_name: opt.engine.clone(),
     };
     let tests = files
         .map(|file| Test {
@@ -82,6 +87,8 @@ fn run_test(test: &Test<Postgres>) -> Outcome {
 #[derive(Clone)]
 struct Postgres {
     client: Arc<Mutex<postgres::Client>>,
+
+    engine_name: String,
 }
 
 impl sqllogictest::DB for Postgres {
@@ -117,5 +124,9 @@ impl sqllogictest::DB for Postgres {
             writeln!(output).unwrap();
         }
         Ok(output)
+    }
+
+    fn engine_name(&self) -> &str {
+        &self.engine_name
     }
 }
