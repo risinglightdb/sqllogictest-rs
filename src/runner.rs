@@ -17,7 +17,9 @@ pub trait AsyncDB: Send {
     async fn run(&mut self, sql: &str) -> Result<String, Self::Error>;
 
     /// Engine name of current database.
-    fn engine_name(&self) -> &str;
+    fn engine_name(&self) -> &str {
+        ""
+    }
 }
 
 /// The database to be tested.
