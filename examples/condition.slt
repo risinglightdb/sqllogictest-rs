@@ -1,0 +1,24 @@
+onlyif risinglight
+statement ok
+create table risinglight_t(v1 int not null)
+
+skipif risinglight
+statement ok
+create table otherdb_t(v1 int not null)
+
+
+onlyif risinglight
+query I
+select * from risinglight_t
+----
+Alice
+Bob
+Eve
+
+skipif risinglight
+query I
+select * from otherdb_t
+----
+Alice
+Bob
+Eve
