@@ -208,7 +208,7 @@ impl<D: AsyncDB> Runner<D> {
                 };
                 let mut output = split_lines_and_normalize(&output);
                 let mut expected_results = split_lines_and_normalize(&expected_results);
-                match sort_mode.as_ref().or_else(|| self.sort_mode.as_ref()) {
+                match sort_mode.as_ref().or(self.sort_mode.as_ref()) {
                     None | Some(SortMode::NoSort) => {}
                     Some(SortMode::RowSort) => {
                         output.sort_unstable();
