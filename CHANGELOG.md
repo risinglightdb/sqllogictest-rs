@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2022-03-21
+
+### Added
+
+- Async interface `AsyncDB` for SQL runners.
+- support evaluating `skipif` and `onlyif` conditions
+- support file-level sort mode control syntax
+- supports custom validator
+
 ## [0.2.0] - 2022-01-12
 
 ### Added
