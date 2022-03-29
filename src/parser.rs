@@ -1,8 +1,9 @@
 //! Sqllogictest parser.
 
+use std::fmt;
+use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
-use std::{fmt, path::Path};
 
 /// The location in source file.
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -49,10 +50,7 @@ impl Location {
 #[non_exhaustive]
 pub enum Record {
     /// An include copies all records from another files.
-    Include {
-        loc: Location,
-        filename: String,
-    },
+    Include { loc: Location, filename: String },
     /// A statement is an SQL command that is to be evaluated but from which we do not expect to
     /// get results (other than success or failure).
     Statement {
@@ -79,26 +77,26 @@ pub enum Record {
         expected_results: String,
     },
     /// A sleep period.
-    Sleep {
-        loc: Location,
-        duration: Duration,
-    },
+    Sleep { loc: Location, duration: Duration },
     /// Subtest.
-    Subtest {
-        loc: Location,
-        name: String,
-    },
+    Subtest { loc: Location, name: String },
     /// A halt record merely causes sqllogictest to ignore the rest of the test script.
     /// For debugging use only.
-    Halt {
-        loc: Location,
-    },
+    Halt { loc: Location },
+    /// Control statements.
     Control(Control),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Control {
+    /// Control sort mode.
     SortMode(SortMode),
+    /// Pseudo control command to indicate the begin of an include statement. Automatically
+    /// injected by sqllogictest parser.
+    BeginInclude(String),
+    /// Pseudo control command to indicate the end of an include statement. Automatically injected
+    /// by sqllogictest parser.
+    EndInclude(String),
 }
 
 /// The condition to run a query.
@@ -364,10 +362,12 @@ fn parse_file_inner(filename: Rc<str>, path: &Path) -> Result<Vec<Record>, Parse
         if let Record::Include { filename, .. } = rec {
             let mut path_buf = path.to_path_buf();
             path_buf.pop();
-            path_buf.push(filename);
+            path_buf.push(filename.clone());
             let new_filename = Rc::from(path_buf.as_os_str().to_string_lossy().to_string());
             let new_path = path_buf.as_path();
+            records.push(Record::Control(Control::BeginInclude(filename.clone())));
             records.extend(parse_file_inner(new_filename, new_path)?);
+            records.push(Record::Control(Control::EndInclude(filename)));
         } else {
             records.push(rec);
         }

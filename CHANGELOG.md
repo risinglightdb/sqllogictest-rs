@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New test UI for sqllogictest binary
+
 ## [0.3.0] - 2022-03-21
 
 ### Added
