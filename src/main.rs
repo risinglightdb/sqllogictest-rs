@@ -71,15 +71,25 @@ async fn main() -> Result<()> {
         engine_name: opt.engine,
     };
 
+    let mut has_failed = false;
+
+    let mut failed_case = vec![];
+
     for file in files {
         let file = file?;
         if let Err(e) = run_test_file(pg.clone(), &file).await {
             println!("{}\n\n{:?}", style("[FAILED]").red().bold(), e);
             println!();
+            has_failed = true;
+            failed_case.push(file.to_string_lossy().to_string());
         }
     }
 
-    Ok(())
+    if has_failed {
+        Err(anyhow!("some test case failed:\n{:#?}", failed_case))
+    } else {
+        Ok(())
+    }
 }
 
 async fn flush_stdout() -> std::io::Result<()> {
