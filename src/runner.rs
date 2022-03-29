@@ -1,11 +1,14 @@
 //! Sqllogictest runner.
 
-use crate::parser::*;
+use std::path::Path;
+use std::rc::Rc;
+
 use async_trait::async_trait;
 use futures_lite::future;
 use itertools::Itertools;
-use std::{path::Path, rc::Rc};
 use tempfile::{tempdir, TempDir};
+
+use crate::parser::*;
 
 /// The async database to be tested.
 #[async_trait]
@@ -54,11 +57,17 @@ where
 }
 
 /// The error type for running sqllogictest.
-#[derive(thiserror::Error, Debug, Clone)]
+#[derive(thiserror::Error, Clone)]
 #[error("test error at {loc}: {kind}")]
 pub struct TestError {
     kind: TestErrorKind,
     loc: Location,
+}
+
+impl std::fmt::Debug for TestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
 }
 
 impl TestError {
@@ -235,6 +244,7 @@ impl<D: AsyncDB> Runner<D> {
                 Control::SortMode(sort_mode) => {
                     self.sort_mode = Some(sort_mode);
                 }
+                Control::BeginInclude(_) | Control::EndInclude(_) => {}
             },
         }
         Ok(())
