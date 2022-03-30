@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - New test UI for sqllogictest binary
+- Support set console color on the test UI with `--color` parameter
 
 ## [0.3.0] - 2022-03-21
 
