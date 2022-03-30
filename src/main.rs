@@ -5,9 +5,23 @@ use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use clap::Parser;
+use clap::{ArgEnum, Parser};
 use console::style;
 use sqllogictest::{Control, Record};
+
+#[derive(Copy, Clone, Debug, PartialEq, ArgEnum)]
+#[must_use]
+pub enum Color {
+    Auto,
+    Always,
+    Never,
+}
+
+impl Default for Color {
+    fn default() -> Self {
+        Color::Auto
+    }
+}
 
 #[derive(Parser, Debug)]
 #[clap(about, version, author)]
@@ -40,6 +54,15 @@ struct Opt {
     /// The database password.
     #[clap(short = 'w', long, default_value = "postgres")]
     pass: String,
+
+    #[clap(
+        long,
+        arg_enum,
+        default_value_t,
+        value_name = "WHEN",
+        env = "CARGO_TERM_COLOR"
+    )]
+    color: Color,
 }
 
 #[tokio::main]
@@ -47,6 +70,18 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     let opt = Opt::parse();
+
+    match opt.color {
+        Color::Always => {
+            console::set_colors_enabled(true);
+            console::set_colors_enabled_stderr(true);
+        }
+        Color::Never => {
+            console::set_colors_enabled(false);
+            console::set_colors_enabled_stderr(false);
+        }
+        Color::Auto => {}
+    }
 
     let files = glob::glob(&opt.files).expect("failed to read glob pattern");
 
@@ -107,7 +142,7 @@ async fn run_test_file(engine: Postgres, filename: impl AsRef<Path>) -> Result<(
     let mut begin_times = vec![];
     let mut did_pop = false;
 
-    print!("{} .. ", filename.to_string_lossy());
+    print!("{: <60} .. ", filename.to_string_lossy());
     flush_stdout().await?;
 
     begin_times.push(Instant::now());
@@ -118,10 +153,10 @@ async fn run_test_file(engine: Postgres, filename: impl AsRef<Path>) -> Result<(
         if *did_pop {
             // start a new line if the result is not immediately after the item
             print!(
-                "\n{}{} {} {} in {} ms",
-                "  ".repeat(time_stack.len()),
-                file,
+                "\n{}{} {: <54} .. {} in {} ms",
+                "| ".repeat(time_stack.len()),
                 style("[END]").blue().bold(),
+                file,
                 style("[OK]").green().bold(),
                 begin_time.elapsed().as_millis()
             );
@@ -147,7 +182,7 @@ async fn run_test_file(engine: Postgres, filename: impl AsRef<Path>) -> Result<(
                     println!();
                 }
                 did_pop = false;
-                print!("{}{} .. ", "  ".repeat(begin_times.len() - 1), file);
+                print!("{}{: <60} .. ", "| ".repeat(begin_times.len() - 1), file);
                 flush_stdout().await?;
             }
             Record::Control(Control::EndInclude(file)) => {

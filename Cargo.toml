@@ -1,6 +1,6 @@
 [package]
 name = "sqllogictest"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 description = "Sqllogictest parser and runner."
 license = "MIT OR Apache-2.0"
@@ -16,7 +16,7 @@ bin = ["anyhow", "console", "tokio-postgres", "env_logger", "glob", "clap", "tok
 [dependencies]
 anyhow = { version = "1", optional = true }
 async-trait = "0.1"
-clap = { version = "3", features = ["derive"], optional = true }
+clap = { version = "3", features = ["derive", "env"], optional = true }
 console = { version = "0.15", optional = true }
 env_logger = { version = "0.9", optional = true }
 futures-lite = "1"
