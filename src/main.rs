@@ -7,6 +7,7 @@ use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use clap::{ArgEnum, Parser};
 use console::style;
+use itertools::Itertools;
 use sqllogictest::{Control, Record};
 
 #[derive(Copy, Clone, Debug, PartialEq, ArgEnum)]
@@ -106,21 +107,23 @@ async fn main() -> Result<()> {
         engine_name: opt.engine,
     };
 
-    let mut has_failed = false;
-
     let mut failed_case = vec![];
 
+    let files = files.into_iter().try_collect::<_, Vec<_>, _>()?;
+
+    if files.is_empty() {
+        return Err(anyhow!("no test case found"));
+    }
+
     for file in files {
-        let file = file?;
         if let Err(e) = run_test_file(pg.clone(), &file).await {
             println!("{}\n\n{:?}", style("[FAILED]").red().bold(), e);
             println!();
-            has_failed = true;
             failed_case.push(file.to_string_lossy().to_string());
         }
     }
 
-    if has_failed {
+    if !failed_case.is_empty() {
         Err(anyhow!("some test case failed:\n{:#?}", failed_case))
     } else {
         Ok(())
