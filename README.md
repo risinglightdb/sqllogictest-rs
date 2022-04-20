@@ -26,7 +26,7 @@ struct Database {...}
 
 impl sqllogictest::DB for Database {
     type Error = ...;
-    fn run(&self, sql: &str) -> Result<String, Self::Error> {
+    fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
         ...
     }
 }

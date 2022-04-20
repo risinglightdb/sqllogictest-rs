@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+## [0.3.4] - 2022-04-21
+
+### Added
+
+- Panic if no test file is found
+
+## [0.3.3] - 2022-03-30
+
+### Added
+
 - New test UI for sqllogictest binary
 - Support set console color on the test UI with `--color` parameter
 
