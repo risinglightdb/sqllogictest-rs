@@ -163,9 +163,11 @@ async fn main() -> Result<()> {
             })
             .buffer_unordered(*job);
 
-        eprintln!("{}\n\n", style("[TEST IN PROGRESS]").blue().bold());
+        eprintln!("{}", style("[TEST IN PROGRESS]").blue().bold());
 
         let mut failed_case = vec![];
+
+        let start = Instant::now();
 
         while let Some((file, res, mut buf)) = stream.next().await {
             if let Err(e) = res {
@@ -175,6 +177,11 @@ async fn main() -> Result<()> {
             }
             tokio::task::block_in_place(|| stdout().write_all(&buf))?;
         }
+
+        eprintln!(
+            "\n All test cases finished in {} ms",
+            start.elapsed().as_millis()
+        );
 
         if !failed_case.is_empty() {
             Err(anyhow!("some test case failed:\n{:#?}", failed_case))
