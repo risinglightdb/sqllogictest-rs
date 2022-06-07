@@ -69,7 +69,7 @@ struct Opt {
 
     /// Whether to enable parallel test. The `db` option will be used to create databases, and one
     /// database will be created for each test file.
-    #[clap(long)]
+    #[clap(long, short)]
     jobs: Option<usize>,
 }
 
