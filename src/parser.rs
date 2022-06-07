@@ -2,13 +2,13 @@
 
 use std::fmt;
 use std::path::Path;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// The location in source file.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Location {
-    file: Rc<str>,
+    file: Arc<str>,
     line: u32,
 }
 
@@ -29,7 +29,7 @@ impl Location {
         self.line
     }
 
-    fn new(file: impl Into<Rc<str>>, line: u32) -> Self {
+    fn new(file: impl Into<Arc<str>>, line: u32) -> Self {
         Self {
             file: file.into(),
             line,
@@ -203,11 +203,11 @@ const DEFAULT_FILENAME: &str = "<entry>";
 
 /// Parse a sqllogictest script into a list of records.
 pub fn parse(script: &str) -> Result<Vec<Record>, ParseError> {
-    parse_inner(Rc::from(DEFAULT_FILENAME), script)
+    parse_inner(Arc::from(DEFAULT_FILENAME), script)
 }
 
 #[allow(clippy::collapsible_match)]
-fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, ParseError> {
+fn parse_inner(filename: Arc<str>, script: &str) -> Result<Vec<Record>, ParseError> {
     let mut lines = script.split('\n').enumerate();
     let mut records = vec![];
     let mut conditions = vec![];
@@ -350,12 +350,12 @@ fn parse_inner(filename: Rc<str>, script: &str) -> Result<Vec<Record>, ParseErro
 /// Parse a sqllogictest file and link all included scripts together.
 pub fn parse_file(filename: impl AsRef<Path>) -> Result<Vec<Record>, ParseError> {
     parse_file_inner(
-        Rc::from(filename.as_ref().to_str().unwrap()),
+        Arc::from(filename.as_ref().to_str().unwrap()),
         filename.as_ref(),
     )
 }
 
-fn parse_file_inner(filename: Rc<str>, path: &Path) -> Result<Vec<Record>, ParseError> {
+fn parse_file_inner(filename: Arc<str>, path: &Path) -> Result<Vec<Record>, ParseError> {
     let script = std::fs::read_to_string(path).unwrap();
     let mut records = vec![];
     for rec in parse_inner(filename, &script)? {
@@ -363,7 +363,7 @@ fn parse_file_inner(filename: Rc<str>, path: &Path) -> Result<Vec<Record>, Parse
             let mut path_buf = path.to_path_buf();
             path_buf.pop();
             path_buf.push(filename.clone());
-            let new_filename = Rc::from(path_buf.as_os_str().to_string_lossy().to_string());
+            let new_filename = Arc::from(path_buf.as_os_str().to_string_lossy().to_string());
             let new_path = path_buf.as_path();
             records.push(Record::Control(Control::BeginInclude(filename.clone())));
             records.extend(parse_file_inner(new_filename, new_path)?);
