@@ -1,5 +1,6 @@
+use std::collections::BTreeMap;
 use std::io::{stdout, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -7,6 +8,7 @@ use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use clap::{ArgEnum, Parser};
 use console::style;
+use futures::StreamExt;
 use itertools::Itertools;
 use sqllogictest::{Control, Record};
 
@@ -24,7 +26,7 @@ impl Default for Color {
     }
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[clap(about, version, author)]
 struct Opt {
     /// Glob of a set of test files.
@@ -64,6 +66,11 @@ struct Opt {
         env = "CARGO_TERM_COLOR"
     )]
     color: Color,
+
+    /// Whether to enable parallel test. The `db` option will be used to create databases, and one
+    /// database will be created for each test file.
+    #[clap(long)]
+    jobs: Option<usize>,
 }
 
 #[tokio::main]
@@ -104,10 +111,8 @@ async fn main() -> Result<()> {
 
     let pg = Postgres {
         client: Arc::new(client),
-        engine_name: opt.engine,
+        engine_name: opt.engine.clone(),
     };
-
-    let mut failed_case = vec![];
 
     let files = files.into_iter().try_collect::<_, Vec<_>, _>()?;
 
@@ -115,26 +120,131 @@ async fn main() -> Result<()> {
         return Err(anyhow!("no test case found"));
     }
 
-    for file in files {
-        if let Err(e) = run_test_file(pg.clone(), &file).await {
-            println!("{}\n\n{:?}", style("[FAILED]").red().bold(), e);
-            println!();
-            failed_case.push(file.to_string_lossy().to_string());
+    if let Some(job) = &opt.jobs {
+        let mut create_databases = BTreeMap::new();
+        for file in files {
+            let db_name = file
+                .file_name()
+                .ok_or_else(|| anyhow!("not a valid filename"))?
+                .to_str()
+                .ok_or_else(|| anyhow!("not a UTF-8 filename"))?;
+            let db_name = db_name
+                .replace(' ', "_")
+                .replace('.', "_")
+                .replace('-', "_");
+            eprintln!("+ Discovered Test: {}", db_name);
+            if create_databases.insert(db_name.to_string(), file).is_some() {
+                return Err(anyhow!("duplicated file name found: {}", db_name));
+            }
+        }
+
+        for db_name in create_databases.keys() {
+            let query = format!("CREATE DATABASE {};", db_name);
+            eprintln!("+ {}", query);
+            if let Err(err) = pg.client.simple_query(&query).await {
+                eprintln!("  ignore error: {}", err);
+            }
+        }
+
+        let mut stream = futures::stream::iter(create_databases.into_iter())
+            .map(|(db_name, filename)| {
+                let opt = opt.clone();
+                let file = filename.to_string_lossy().to_string();
+                async move {
+                    let (buf, res) = tokio::spawn(async {
+                        let mut buf = vec![];
+                        let res = run_test_file_on_db(&mut buf, filename, db_name, opt).await;
+                        (buf, res)
+                    })
+                    .await
+                    .unwrap();
+                    (file, res, buf)
+                }
+            })
+            .buffer_unordered(*job);
+
+        eprintln!("{}\n\n", style("[TEST IN PROGRESS]").blue().bold());
+
+        let mut failed_case = vec![];
+
+        while let Some((file, res, mut buf)) = stream.next().await {
+            if let Err(e) = res {
+                writeln!(buf, "{}\n\n{:?}", style("[FAILED]").red().bold(), e)?;
+                writeln!(buf)?;
+                failed_case.push(file);
+            }
+            tokio::task::block_in_place(|| stdout().write_all(&buf))?;
+        }
+
+        if !failed_case.is_empty() {
+            Err(anyhow!("some test case failed:\n{:#?}", failed_case))
+        } else {
+            Ok(())
+        }
+    } else {
+        // Run test one be one
+
+        let mut failed_case = vec![];
+
+        for file in files {
+            if let Err(e) = run_test_file(&mut std::io::stdout(), pg.clone(), &file).await {
+                println!("{}\n\n{:?}", style("[FAILED]").red().bold(), e);
+                println!();
+                failed_case.push(file.to_string_lossy().to_string());
+            }
+        }
+
+        if !failed_case.is_empty() {
+            Err(anyhow!("some test case failed:\n{:#?}", failed_case))
+        } else {
+            Ok(())
         }
     }
-
-    if !failed_case.is_empty() {
-        Err(anyhow!("some test case failed:\n{:#?}", failed_case))
-    } else {
-        Ok(())
-    }
 }
 
-async fn flush_stdout() -> std::io::Result<()> {
-    tokio::task::block_in_place(|| stdout().flush())
+async fn flush(out: &mut impl std::io::Write) -> std::io::Result<()> {
+    tokio::task::block_in_place(|| out.flush())
 }
 
-async fn run_test_file(engine: Postgres, filename: impl AsRef<Path>) -> Result<()> {
+async fn run_test_file_on_db(
+    out: &mut impl std::io::Write,
+    filename: PathBuf,
+    db_name: String,
+    opt: Opt,
+) -> Result<()> {
+    let (client, connection) = tokio_postgres::Config::new()
+        .host(&opt.host)
+        .port(opt.port)
+        .dbname(&db_name)
+        .user(&opt.user)
+        .password(&opt.pass)
+        .connect(tokio_postgres::NoTls)
+        .await
+        .context("failed to connect to postgres")?;
+
+    let handle = tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            log::error!("Postgres connection error: {:?}", e);
+        }
+    });
+
+    let pg = Postgres {
+        client: Arc::new(client),
+        engine_name: opt.engine.clone(),
+    };
+
+    run_test_file(out, pg, filename).await?;
+
+    handle.abort();
+
+    Ok(())
+}
+
+async fn run_test_file<T: std::io::Write>(
+    out: &mut T,
+    engine: Postgres,
+    filename: impl AsRef<Path>,
+) -> Result<()> {
     let filename = filename.as_ref();
     let mut runner = sqllogictest::Runner::new(engine);
     let records = tokio::task::block_in_place(|| {
@@ -145,34 +255,38 @@ async fn run_test_file(engine: Postgres, filename: impl AsRef<Path>) -> Result<(
     let mut begin_times = vec![];
     let mut did_pop = false;
 
-    print!("{: <60} .. ", filename.to_string_lossy());
-    flush_stdout().await?;
+    write!(out, "{: <60} .. ", filename.to_string_lossy())?;
+    flush(out).await?;
 
     begin_times.push(Instant::now());
 
-    let finish = |time_stack: &mut Vec<Instant>, did_pop: &mut bool, file: &str| {
+    let finish = |out: &mut T, time_stack: &mut Vec<Instant>, did_pop: &mut bool, file: &str| {
         let begin_time = time_stack.pop().unwrap();
 
         if *did_pop {
             // start a new line if the result is not immediately after the item
-            print!(
+            write!(
+                out,
                 "\n{}{} {: <54} .. {} in {} ms",
                 "| ".repeat(time_stack.len()),
                 style("[END]").blue().bold(),
                 file,
                 style("[OK]").green().bold(),
                 begin_time.elapsed().as_millis()
-            );
+            )?;
         } else {
             // otherwise, append time to the previous line
-            print!(
+            write!(
+                out,
                 "{} in {} ms",
                 style("[OK]").green().bold(),
                 begin_time.elapsed().as_millis()
-            );
+            )?;
         }
 
         *did_pop = true;
+
+        Ok::<_, anyhow::Error>(())
     };
 
     for record in records {
@@ -180,16 +294,21 @@ async fn run_test_file(engine: Postgres, filename: impl AsRef<Path>) -> Result<(
             Record::Control(Control::BeginInclude(file)) => {
                 begin_times.push(Instant::now());
                 if !did_pop {
-                    println!("{}", style("[BEGIN]").blue().bold());
+                    writeln!(out, "{}", style("[BEGIN]").blue().bold())?;
                 } else {
-                    println!();
+                    writeln!(out)?;
                 }
                 did_pop = false;
-                print!("{}{: <60} .. ", "| ".repeat(begin_times.len() - 1), file);
-                flush_stdout().await?;
+                write!(
+                    out,
+                    "{}{: <60} .. ",
+                    "| ".repeat(begin_times.len() - 1),
+                    file
+                )?;
+                flush(out).await?;
             }
             Record::Control(Control::EndInclude(file)) => {
-                finish(&mut begin_times, &mut did_pop, file);
+                finish(out, &mut begin_times, &mut did_pop, file)?;
             }
             _ => {}
         }
@@ -203,9 +322,14 @@ async fn run_test_file(engine: Postgres, filename: impl AsRef<Path>) -> Result<(
             ))?;
     }
 
-    finish(&mut begin_times, &mut did_pop, &*filename.to_string_lossy());
+    finish(
+        out,
+        &mut begin_times,
+        &mut did_pop,
+        &*filename.to_string_lossy(),
+    )?;
 
-    println!();
+    writeln!(out)?;
 
     Ok(())
 }
