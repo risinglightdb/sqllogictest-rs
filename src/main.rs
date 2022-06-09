@@ -370,7 +370,13 @@ impl sqllogictest::AsyncDB for Postgres {
                             write!(output, " ").unwrap();
                         }
                         match row.get(i) {
-                            Some(v) => write!(output, "{}", v).unwrap(),
+                            Some(v) => {
+                                if v.is_empty() {
+                                    write!(output, "(empty)").unwrap()
+                                } else {
+                                    write!(output, "{}", v).unwrap()
+                                }
+                            }
                             None => write!(output, "NULL").unwrap(),
                         }
                     }
