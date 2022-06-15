@@ -1,5 +1,6 @@
 //! Sqllogictest parser.
 
+use crate::ParseErrorKind::InvalidIncludeFile;
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
@@ -191,6 +192,8 @@ pub enum ParseErrorKind {
     InvalidDuration(String),
     #[error("invalid control: {0:?}")]
     InvalidControl(String),
+    #[error("invalid include file pattern: {0:?}")]
+    InvalidIncludeFile(String),
 }
 
 impl ParseErrorKind {
@@ -359,18 +362,41 @@ fn parse_file_inner(filename: Arc<str>, path: &Path) -> Result<Vec<Record>, Pars
     let script = std::fs::read_to_string(path).unwrap();
     let mut records = vec![];
     for rec in parse_inner(filename, &script)? {
-        if let Record::Include { filename, .. } = rec {
-            let mut path_buf = path.to_path_buf();
-            path_buf.pop();
-            path_buf.push(filename.clone());
-            let new_filename = Arc::from(path_buf.as_os_str().to_string_lossy().to_string());
-            let new_path = path_buf.as_path();
-            records.push(Record::Control(Control::BeginInclude(filename.clone())));
-            records.extend(parse_file_inner(new_filename, new_path)?);
-            records.push(Record::Control(Control::EndInclude(filename)));
+        if let Record::Include { filename, loc } = rec {
+            let complete_filename = {
+                let mut path_buf = path.to_path_buf();
+                path_buf.pop();
+                path_buf.push(filename.clone());
+
+                path_buf.as_os_str().to_string_lossy().to_string()
+            };
+
+            for included_file in glob::glob(&complete_filename)
+                .map_err(|e| InvalidIncludeFile(format!("{:?}", e)).at(loc))?
+                .filter_map(Result::ok)
+            {
+                let new_filename =
+                    Arc::from(included_file.as_os_str().to_string_lossy().to_string());
+                let new_path = included_file.as_path();
+
+                records.push(Record::Control(Control::BeginInclude(filename.clone())));
+                records.extend(parse_file_inner(new_filename, new_path)?);
+                records.push(Record::Control(Control::EndInclude(filename.clone())));
+            }
         } else {
             records.push(rec);
         }
     }
     Ok(records)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::parse_file;
+
+    #[test]
+    fn test_include_glob() {
+        let records = parse_file("examples/include_1.slt").unwrap();
+        assert_eq!(12, records.len());
+    }
 }
