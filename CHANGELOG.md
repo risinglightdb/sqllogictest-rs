@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+## [0.5.1] - 2022-06-15
+
+### Added
+
+- Support wildcard in `include` statement
+
 ## [0.5.0] - 2022-06-09
 
 ### Added
