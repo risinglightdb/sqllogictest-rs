@@ -18,6 +18,7 @@ anyhow = { version = "1", optional = true }
 async-trait = "0.1"
 clap = { version = "3", features = ["derive", "env"], optional = true }
 console = { version = "0.15", optional = true }
+difference = "2.0"
 env_logger = { version = "0.9", optional = true }
 futures = { version = "0.3", default-features = false, optional = true }
 futures-lite = "1"
