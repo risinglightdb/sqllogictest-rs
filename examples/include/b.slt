@@ -1,0 +1,7 @@
+query I
+select * from example_basic
+----
+Alice
+Bob
+Eve
+

@@ -11,7 +11,7 @@ keywords = ["sql", "database", "parser", "cli"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-bin = ["anyhow", "console", "tokio-postgres", "env_logger", "glob", "clap", "tokio", "futures"]
+bin = ["anyhow", "console", "tokio-postgres", "env_logger", "clap", "tokio", "futures"]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
@@ -21,7 +21,7 @@ console = { version = "0.15", optional = true }
 env_logger = { version = "0.9", optional = true }
 futures = { version = "0.3", default-features = false, optional = true }
 futures-lite = "1"
-glob = { version = "0.3", optional = true }
+glob = "0.3"
 humantime = "2"
 itertools = "0.10"
 log = "0.4"
