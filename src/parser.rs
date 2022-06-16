@@ -375,13 +375,17 @@ fn parse_file_inner(filename: Arc<str>, path: &Path) -> Result<Vec<Record>, Pars
                 .map_err(|e| InvalidIncludeFile(format!("{:?}", e)).at(loc))?
                 .filter_map(Result::ok)
             {
-                let new_filename =
-                    Arc::from(included_file.as_os_str().to_string_lossy().to_string());
+                let new_filename_str = included_file.as_os_str().to_string_lossy().to_string();
+                let new_filename = Arc::from(new_filename_str.clone());
                 let new_path = included_file.as_path();
 
-                records.push(Record::Control(Control::BeginInclude(filename.clone())));
+                records.push(Record::Control(Control::BeginInclude(
+                    new_filename_str.clone(),
+                )));
                 records.extend(parse_file_inner(new_filename, new_path)?);
-                records.push(Record::Control(Control::EndInclude(filename.clone())));
+                records.push(Record::Control(Control::EndInclude(
+                    new_filename_str.clone(),
+                )));
             }
         } else {
             records.push(rec);
