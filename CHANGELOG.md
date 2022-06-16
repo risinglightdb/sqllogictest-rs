@@ -6,13 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2022-06-16
+
+### Fixed
+
+- Fix expanded `include` wildcard file name. (#52)
+
+## [0.5.1] - 2022-06-16
+
 ### Added
 
-## [0.5.1] - 2022-06-15
+- Support wildcard in `include` statement. (#49)
 
-### Added
+### Changed
 
-- Support wildcard in `include` statement
+- Show diff instead of actual / expected data on failed. (#51)
 
 ## [0.5.0] - 2022-06-09
 
