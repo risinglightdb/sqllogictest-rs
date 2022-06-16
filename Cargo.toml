@@ -1,6 +1,6 @@
 [package]
 name = "sqllogictest"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 description = "Sqllogictest parser and runner."
 license = "MIT OR Apache-2.0"
@@ -26,6 +26,8 @@ glob = "0.3"
 humantime = "2"
 itertools = "0.10"
 log = "0.4"
+tempfile = "3"
+thiserror = "1"
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
@@ -34,8 +36,6 @@ tokio = { version = "1", features = [
     "fs"
 ], optional = true }
 tokio-postgres = { version = "0.7", optional = true }
-tempfile = "3"
-thiserror = "1"
 
 [[bin]]
 name = "sqllogictest"
