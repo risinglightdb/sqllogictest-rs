@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::io::{stdout, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
@@ -10,6 +10,7 @@ use clap::{ArgEnum, Parser};
 use console::style;
 use futures::StreamExt;
 use itertools::Itertools;
+use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
 use sqllogictest::{Control, Record, TestErrorKind};
 
 #[derive(Copy, Clone, Debug, PartialEq, ArgEnum)]
@@ -58,6 +59,7 @@ struct Opt {
     #[clap(short = 'w', long, default_value = "postgres")]
     pass: String,
 
+    /// Whether to enable colorful output.
     #[clap(
         long,
         arg_enum,
@@ -71,6 +73,10 @@ struct Opt {
     /// database will be created for each test file.
     #[clap(long, short)]
     jobs: Option<usize>,
+
+    /// Report to junit XML.
+    #[clap(long)]
+    junit: Option<String>,
 }
 
 #[tokio::main]
@@ -120,7 +126,14 @@ async fn main() -> Result<()> {
         return Err(anyhow!("no test case found"));
     }
 
-    if let Some(job) = &opt.jobs {
+    let mut report = Report::new(
+        opt.junit
+            .clone()
+            .unwrap_or_else(|| "sqllogictest".to_string()),
+    );
+    let mut test_suite = TestSuite::new("sqllogictest");
+
+    let result = if let Some(job) = &opt.jobs {
         let mut create_databases = BTreeMap::new();
         for file in files {
             let db_name = file
@@ -170,11 +183,20 @@ async fn main() -> Result<()> {
         let start = Instant::now();
 
         while let Some((file, res, mut buf)) = stream.next().await {
-            if let Err(e) = res {
-                writeln!(buf, "{}\n\n{:?}", style("[FAILED]").red().bold(), e)?;
-                writeln!(buf)?;
-                failed_case.push(file);
-            }
+            let case = match res {
+                Ok(duration) => {
+                    let mut case = TestCase::new(file, TestCaseStatus::success());
+                    case.set_time(duration);
+                    case
+                }
+                Err(e) => {
+                    writeln!(buf, "{}\n\n{:?}", style("[FAILED]").red().bold(), e)?;
+                    writeln!(buf)?;
+                    failed_case.push(file.clone());
+                    TestCase::new(file, TestCaseStatus::non_success(NonSuccessKind::Failure))
+                }
+            };
+            test_suite.add_test_case(case);
             tokio::task::block_in_place(|| stdout().write_all(&buf))?;
         }
 
@@ -184,7 +206,7 @@ async fn main() -> Result<()> {
         );
 
         if !failed_case.is_empty() {
-            Err(anyhow!("some test case failed:\n{:#?}", failed_case))
+            return Err(anyhow!("some test case failed:\n{:#?}", failed_case));
         } else {
             Ok(())
         }
@@ -194,11 +216,24 @@ async fn main() -> Result<()> {
         let mut failed_case = vec![];
 
         for file in files {
-            if let Err(e) = run_test_file(&mut std::io::stdout(), pg.clone(), &file).await {
-                println!("{}\n\n{:?}", style("[FAILED]").red().bold(), e);
-                println!();
-                failed_case.push(file.to_string_lossy().to_string());
-            }
+            let filename = file.to_string_lossy().to_string();
+            let case = match run_test_file(&mut std::io::stdout(), pg.clone(), &file).await {
+                Ok(duration) => {
+                    let mut case = TestCase::new(filename, TestCaseStatus::success());
+                    case.set_time(duration);
+                    case
+                }
+                Err(e) => {
+                    println!("{}\n\n{:?}", style("[FAILED]").red().bold(), e);
+                    println!();
+                    failed_case.push(filename.clone());
+                    TestCase::new(
+                        filename,
+                        TestCaseStatus::non_success(NonSuccessKind::Failure),
+                    )
+                }
+            };
+            test_suite.add_test_case(case);
         }
 
         if !failed_case.is_empty() {
@@ -206,7 +241,15 @@ async fn main() -> Result<()> {
         } else {
             Ok(())
         }
+    };
+
+    report.add_test_suite(test_suite);
+
+    if let Some(junit_file) = opt.junit {
+        tokio::fs::write(format!("{}-junit.xml", junit_file), report.to_string()?).await?;
     }
+
+    result
 }
 
 async fn flush(out: &mut impl std::io::Write) -> std::io::Result<()> {
@@ -218,7 +261,7 @@ async fn run_test_file_on_db(
     filename: PathBuf,
     db_name: String,
     opt: Opt,
-) -> Result<()> {
+) -> Result<Duration> {
     let (client, connection) = tokio_postgres::Config::new()
         .host(&opt.host)
         .port(opt.port)
@@ -240,18 +283,18 @@ async fn run_test_file_on_db(
         engine_name: opt.engine.clone(),
     };
 
-    run_test_file(out, pg, filename).await?;
+    let result = run_test_file(out, pg, filename).await?;
 
     handle.abort();
 
-    Ok(())
+    Ok(result)
 }
 
 async fn run_test_file<T: std::io::Write>(
     out: &mut T,
     engine: Postgres,
     filename: impl AsRef<Path>,
-) -> Result<()> {
+) -> Result<Duration> {
     let filename = filename.as_ref();
     let mut runner = sqllogictest::Runner::new(engine);
     let records = tokio::task::block_in_place(|| {
@@ -341,6 +384,8 @@ async fn run_test_file<T: std::io::Write>(
             ))?;
     }
 
+    let duration = begin_times[0].elapsed();
+
     finish(
         out,
         &mut begin_times,
@@ -350,7 +395,7 @@ async fn run_test_file<T: std::io::Write>(
 
     writeln!(out)?;
 
-    Ok(())
+    Ok(duration)
 }
 
 #[derive(Clone)]
