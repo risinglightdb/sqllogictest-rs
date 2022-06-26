@@ -55,7 +55,7 @@ jobs:
         with:
           command: test
           args: --no-fail-fast --all-features
-      - name: Run all examples
+      - name: Run examples
         run: |
           for example in examples/*.rs
           do

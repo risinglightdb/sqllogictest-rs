@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2022-06-26
+
+### Added
+
+- Add junit support. Use `--junit <filename>` to generate junit xml.
+
+
 ## [0.5.2] - 2022-06-16
 
 ### Fixed

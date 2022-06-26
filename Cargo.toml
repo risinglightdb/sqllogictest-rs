@@ -1,6 +1,6 @@
 [package]
 name = "sqllogictest"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2021"
 description = "Sqllogictest parser and runner."
 license = "MIT OR Apache-2.0"
@@ -11,7 +11,7 @@ keywords = ["sql", "database", "parser", "cli"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-bin = ["anyhow", "console", "tokio-postgres", "env_logger", "clap", "tokio", "futures"]
+bin = ["anyhow", "console", "tokio-postgres", "env_logger", "clap", "tokio", "futures", "quick-junit"]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
@@ -26,6 +26,7 @@ glob = "0.3"
 humantime = "2"
 itertools = "0.10"
 log = "0.4"
+quick-junit = { version = "0.2", optional = true }
 tempfile = "3"
 thiserror = "1"
 tokio = { version = "1", features = [
