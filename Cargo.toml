@@ -1,6 +1,6 @@
 [package]
 name = "sqllogictest"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2021"
 description = "Sqllogictest parser and runner."
 license = "MIT OR Apache-2.0"

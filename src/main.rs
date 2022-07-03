@@ -183,9 +183,14 @@ async fn main() -> Result<()> {
         let start = Instant::now();
 
         while let Some((file, res, mut buf)) = stream.next().await {
+            let test_case_name = file
+                .replace('/', "_")
+                .replace(' ', "_")
+                .replace('.', "_")
+                .replace('-', "_");
             let case = match res {
                 Ok(duration) => {
-                    let mut case = TestCase::new(file, TestCaseStatus::success());
+                    let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
                     case.set_time(duration);
                     case
                 }
@@ -193,7 +198,10 @@ async fn main() -> Result<()> {
                     writeln!(buf, "{}\n\n{:?}", style("[FAILED]").red().bold(), e)?;
                     writeln!(buf)?;
                     failed_case.push(file.clone());
-                    TestCase::new(file, TestCaseStatus::non_success(NonSuccessKind::Failure))
+                    TestCase::new(
+                        test_case_name,
+                        TestCaseStatus::non_success(NonSuccessKind::Failure),
+                    )
                 }
             };
             test_suite.add_test_case(case);
@@ -217,9 +225,14 @@ async fn main() -> Result<()> {
 
         for file in files {
             let filename = file.to_string_lossy().to_string();
+            let test_case_name = filename
+                .replace('/', "_")
+                .replace(' ', "_")
+                .replace('.', "_")
+                .replace('-', "_");
             let case = match run_test_file(&mut std::io::stdout(), pg.clone(), &file).await {
                 Ok(duration) => {
-                    let mut case = TestCase::new(filename, TestCaseStatus::success());
+                    let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
                     case.set_time(duration);
                     case
                 }
@@ -228,7 +241,7 @@ async fn main() -> Result<()> {
                     println!();
                     failed_case.push(filename.clone());
                     TestCase::new(
-                        filename,
+                        test_case_name,
                         TestCaseStatus::non_success(NonSuccessKind::Failure),
                     )
                 }
