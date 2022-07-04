@@ -199,7 +199,7 @@ async fn main() -> Result<()> {
                     let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
                     case.set_time(duration);
                     case.set_timestamp(Local::now());
-                    case.set_classname(opt.junit.as_ref().map(|x| x.as_str()).unwrap_or_default());
+                    case.set_classname(opt.junit.as_deref().unwrap_or_default());
                     case
                 }
                 Err(e) => {
@@ -213,7 +213,7 @@ async fn main() -> Result<()> {
                     case.set_time(Duration::from_millis(0));
                     case.set_system_out("");
                     case.set_timestamp(Local::now());
-                    case.set_classname(opt.junit.as_ref().map(|x| x.as_str()).unwrap_or_default());
+                    case.set_classname(opt.junit.as_deref().unwrap_or_default());
                     case
                 }
             };
@@ -248,7 +248,7 @@ async fn main() -> Result<()> {
                     let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
                     case.set_time(duration);
                     case.set_timestamp(Local::now());
-                    case.set_classname(opt.junit.as_ref().map(|x| x.as_str()).unwrap_or_default());
+                    case.set_classname(opt.junit.as_deref().unwrap_or_default());
                     case
                 }
                 Err(e) => {
@@ -259,7 +259,7 @@ async fn main() -> Result<()> {
                     status.set_type("test failure");
                     let mut case = TestCase::new(test_case_name, status);
                     case.set_timestamp(Local::now());
-                    case.set_classname(opt.junit.as_ref().map(|x| x.as_str()).unwrap_or_default());
+                    case.set_classname(opt.junit.as_deref().unwrap_or_default());
                     case.set_system_err(e.to_string());
                     case.set_time(Duration::from_millis(0));
                     case.set_system_out("");
