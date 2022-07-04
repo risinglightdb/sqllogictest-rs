@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
+use chrono::Local;
 use clap::{ArgEnum, Parser};
 use console::style;
 use futures::StreamExt;
@@ -131,7 +132,12 @@ async fn main() -> Result<()> {
             .clone()
             .unwrap_or_else(|| "sqllogictest".to_string()),
     );
+
+    report.set_timestamp(Local::now());
+
     let mut test_suite = TestSuite::new("sqllogictest");
+
+    test_suite.set_timestamp(Local::now());
 
     let result = if let Some(job) = &opt.jobs {
         let mut create_databases = BTreeMap::new();
@@ -192,16 +198,23 @@ async fn main() -> Result<()> {
                 Ok(duration) => {
                     let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
                     case.set_time(duration);
+                    case.set_timestamp(Local::now());
+                    case.set_classname(opt.junit.as_ref().unwrap());
                     case
                 }
                 Err(e) => {
                     writeln!(buf, "{}\n\n{:?}", style("[FAILED]").red().bold(), e)?;
                     writeln!(buf)?;
                     failed_case.push(file.clone());
-                    TestCase::new(
-                        test_case_name,
-                        TestCaseStatus::non_success(NonSuccessKind::Failure),
-                    )
+                    let mut status = TestCaseStatus::non_success(NonSuccessKind::Failure);
+                    status.set_type("test failure");
+                    let mut case = TestCase::new(test_case_name, status);
+                    case.set_system_err(e.to_string());
+                    case.set_time(Duration::from_millis(0));
+                    case.set_system_out("");
+                    case.set_timestamp(Local::now());
+                    case.set_classname(opt.junit.as_ref().unwrap());
+                    case
                 }
             };
             test_suite.add_test_case(case);
@@ -234,16 +247,23 @@ async fn main() -> Result<()> {
                 Ok(duration) => {
                     let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
                     case.set_time(duration);
+                    case.set_timestamp(Local::now());
+                    case.set_classname(opt.junit.as_ref().unwrap());
                     case
                 }
                 Err(e) => {
                     println!("{}\n\n{:?}", style("[FAILED]").red().bold(), e);
                     println!();
                     failed_case.push(filename.clone());
-                    TestCase::new(
-                        test_case_name,
-                        TestCaseStatus::non_success(NonSuccessKind::Failure),
-                    )
+                    let mut status = TestCaseStatus::non_success(NonSuccessKind::Failure);
+                    status.set_type("test failure");
+                    let mut case = TestCase::new(test_case_name, status);
+                    case.set_timestamp(Local::now());
+                    case.set_classname(opt.junit.as_ref().unwrap());
+                    case.set_system_err(e.to_string());
+                    case.set_time(Duration::from_millis(0));
+                    case.set_system_out("");
+                    case
                 }
             };
             test_suite.add_test_case(case);

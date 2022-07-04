@@ -11,11 +11,12 @@ keywords = ["sql", "database", "parser", "cli"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-bin = ["anyhow", "console", "tokio-postgres", "env_logger", "clap", "tokio", "futures", "quick-junit"]
+bin = ["anyhow", "chrono", "console", "tokio-postgres", "env_logger", "clap", "tokio", "futures", "quick-junit"]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
 async-trait = "0.1"
+chrono = { version = "0.4", optional = true }
 clap = { version = "3", features = ["derive", "env"], optional = true }
 console = { version = "0.15", optional = true }
 difference = "2.0"
