@@ -2,6 +2,7 @@
 
 use std::path::Path;
 use std::rc::Rc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_lite::future;
@@ -22,6 +23,12 @@ pub trait AsyncDB: Send {
     /// Engine name of current database.
     fn engine_name(&self) -> &str {
         ""
+    }
+
+    /// Sleep for a while.
+    #[doc(hidden)]
+    async fn sleep(dur: Duration) {
+        std::thread::sleep(dur);
     }
 }
 
@@ -232,7 +239,7 @@ impl<D: AsyncDB> Runner<D> {
                     .at(loc));
                 }
             }
-            Record::Sleep { duration, .. } => std::thread::sleep(duration),
+            Record::Sleep { duration, .. } => D::sleep(duration).await,
             Record::Halt { .. } => {}
             Record::Subtest { .. } => {}
             Record::Include { loc, .. } => {
