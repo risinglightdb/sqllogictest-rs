@@ -395,26 +395,10 @@ async fn run_test_file<T: std::io::Write>(
             }
             _ => {}
         }
-        runner
-            .run_async(record)
-            .await
-            .map_err(|e| {
-                if let TestErrorKind::QueryResultMismatch {
-                    sql,
-                    expected,
-                    actual,
-                } = e.kind()
-                {
-                    let diff = difference::Changeset::new(&expected, &actual, "\n").to_string();
-                    anyhow!("query result mismatch:\nSQL: {}\nDiff:\n{}", sql, diff)
-                } else {
-                    anyhow!("{:?}", e)
-                }
-            })
-            .context(format!(
-                "failed to run `{}`",
-                style(filename.to_string_lossy()).bold()
-            ))?;
+        runner.run_async(record).await.context(format!(
+            "failed to run `{}`",
+            style(filename.to_string_lossy()).bold()
+        ))?;
     }
 
     let duration = begin_times[0].elapsed();

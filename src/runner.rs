@@ -85,27 +85,25 @@ impl TestError {
 /// The error kind for running sqllogictest.
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum TestErrorKind {
-    #[error("statement is expected to fail, but actually succeed:\nSQL: {sql}")]
+    #[error("statement is expected to fail, but actually succeed:\n[SQL] {sql}")]
     StatementOk { sql: String },
-    #[error("statement failed: {err}\nSQL: {sql}")]
+    #[error("statement failed: {err}\n[SQL] {sql}")]
     StatementFail {
         sql: String,
         err: Rc<dyn std::error::Error>,
     },
-    #[error(
-        "statement is expected to affect {expected} rows, but actually {actual}\n\tSQL: {sql}"
-    )]
+    #[error("statement is expected to affect {expected} rows, but actually {actual}\n[SQL] {sql}")]
     StatementResultMismatch {
         sql: String,
         expected: u64,
         actual: String,
     },
-    #[error("query failed: {err}\nSQL: {sql}")]
+    #[error("query failed: {err}\n[SQL] {sql}")]
     QueryFail {
         sql: String,
         err: Rc<dyn std::error::Error>,
     },
-    #[error("query result mismatch:\nSQL: {sql}\nExpected:\n{expected}\nActual:\n{actual}")]
+    #[error("query result mismatch:\n[SQL] {sql}\n[Diff]\n{}", difference::Changeset::new(.expected, .actual, "\n"))]
     QueryResultMismatch {
         sql: String,
         expected: String,
