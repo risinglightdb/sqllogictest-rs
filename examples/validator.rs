@@ -1,5 +1,3 @@
-use std::path::Path;
-
 pub struct FakeDB;
 
 #[derive(Debug)]
@@ -22,9 +20,8 @@ impl sqllogictest::DB for FakeDB {
 }
 
 fn main() {
-    let script = std::fs::read_to_string(Path::new("examples/validator.slt")).unwrap();
     let mut tester = sqllogictest::Runner::new(FakeDB);
     // Validator will always return true.
     tester.with_validator(|_, _| true);
-    tester.run_script(&script).unwrap();
+    tester.run_file("examples/validator.slt").unwrap();
 }

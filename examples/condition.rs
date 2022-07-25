@@ -1,5 +1,3 @@
-use std::path::Path;
-
 pub struct FakeDB {
     engine_name: &'static str,
 }
@@ -32,10 +30,8 @@ impl sqllogictest::DB for FakeDB {
 }
 
 fn main() {
-    let script = std::fs::read_to_string(Path::new("examples/condition.slt")).unwrap();
-
     for engine_name in ["risinglight", "otherdb"] {
         let mut tester = sqllogictest::Runner::new(FakeDB { engine_name });
-        tester.run_script(&script).unwrap();
+        tester.run_file("examples/condition.slt").unwrap();
     }
 }
