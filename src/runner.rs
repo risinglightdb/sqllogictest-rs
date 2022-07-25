@@ -2,6 +2,7 @@
 
 use std::path::Path;
 use std::rc::Rc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_lite::future;
@@ -22,6 +23,15 @@ pub trait AsyncDB: Send {
     /// Engine name of current database.
     fn engine_name(&self) -> &str {
         ""
+    }
+
+    /// [`Runner`] calls this function to perform sleep.
+    ///
+    /// The default implementation is `std::thread::sleep`, which is universial to any async runtime
+    /// but would block the current thread. If you are running in tokio runtime, you should override
+    /// this by `tokio::time::sleep`.
+    async fn sleep(dur: Duration) {
+        std::thread::sleep(dur);
     }
 }
 
@@ -232,7 +242,7 @@ impl<D: AsyncDB> Runner<D> {
                     .at(loc));
                 }
             }
-            Record::Sleep { duration, .. } => std::thread::sleep(duration),
+            Record::Sleep { duration, .. } => D::sleep(duration).await,
             Record::Halt { .. } => {}
             Record::Subtest { .. } => {}
             Record::Include { loc, .. } => {
