@@ -1,5 +1,3 @@
-use std::path::Path;
-
 pub struct FakeDB;
 
 #[derive(Debug)]
@@ -25,9 +23,8 @@ impl sqllogictest::DB for FakeDB {
 }
 
 fn main() {
-    let script = std::fs::read_to_string(Path::new("examples/test_dir_escape.slt")).unwrap();
     let mut tester = sqllogictest::Runner::new(FakeDB);
     // enable `__TEST_DIR__` override
     tester.enable_testdir();
-    tester.run_script(&script).unwrap();
+    tester.run_file("examples/test_dir_escape.slt").unwrap();
 }

@@ -1,5 +1,3 @@
-use std::path::Path;
-
 pub struct FakeDB;
 
 #[derive(Debug)]
@@ -27,7 +25,6 @@ impl sqllogictest::DB for FakeDB {
 }
 
 fn main() {
-    let script = std::fs::read_to_string(Path::new("examples/rowsort.slt")).unwrap();
     let mut tester = sqllogictest::Runner::new(FakeDB);
-    tester.run_script(&script).unwrap();
+    tester.run_file("examples/rowsort.slt").unwrap();
 }

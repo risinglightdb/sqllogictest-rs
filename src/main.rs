@@ -12,7 +12,7 @@ use console::style;
 use futures::StreamExt;
 use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
-use sqllogictest::{Control, Record, TestErrorKind};
+use sqllogictest::{Control, Record};
 
 #[derive(Copy, Clone, Debug, PartialEq, ArgEnum)]
 #[must_use]
@@ -398,19 +398,7 @@ async fn run_test_file<T: std::io::Write>(
         runner
             .run_async(record)
             .await
-            .map_err(|e| {
-                if let TestErrorKind::QueryResultMismatch {
-                    sql,
-                    expected,
-                    actual,
-                } = e.kind()
-                {
-                    let diff = difference::Changeset::new(&expected, &actual, "\n").to_string();
-                    anyhow!("query result mismatch:\nSQL: {}\nDiff:\n{}", sql, diff)
-                } else {
-                    anyhow!("{:?}", e)
-                }
-            })
+            .map_err(|e| anyhow!("{:?}", e))
             .context(format!(
                 "failed to run `{}`",
                 style(filename.to_string_lossy()).bold()
