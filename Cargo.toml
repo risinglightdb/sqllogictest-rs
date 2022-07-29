@@ -16,7 +16,7 @@ bin = ["anyhow", "chrono", "console", "tokio-postgres", "env_logger", "clap", "t
 [dependencies]
 anyhow = { version = "1", optional = true }
 async-trait = "0.1"
-chrono = { version = "0.4", optional = true }
+chrono = { version = "0.4",optional = true }
 clap = { version = "3", features = ["derive", "env"], optional = true }
 console = { version = "0.15", optional = true }
 difference = "2.0"
@@ -27,7 +27,9 @@ glob = "0.3"
 humantime = "2"
 itertools = "0.10"
 log = "0.4"
+postgres-types = { version = "0.2.3", features = ["derive","with-chrono-0_4"] }
 quick-junit = { version = "0.2", optional = true }
+rust_decimal = { version = "1.7.0", features = [ "tokio-pg" ] }
 tempfile = "3"
 thiserror = "1"
 tokio = { version = "1", features = [
