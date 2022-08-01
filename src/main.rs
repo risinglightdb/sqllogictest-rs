@@ -433,6 +433,21 @@ impl Postgres {
     }
 }
 
+macro_rules! array_process {
+    ($row:ident, $output:ident, $idx:ident, $t:ty) => {
+        let value: Vec<$t> = $row.get($idx);
+        write!($output, "{{").unwrap();
+        for (i, v) in value.iter().enumerate() {
+            if i == value.len() - 1 {
+                write!($output, "{}", v).unwrap();
+            } else {
+                write!($output, "{},", v).unwrap();
+            }
+        }
+        write!($output, "}}").unwrap();
+    };
+}
+
 #[async_trait]
 impl sqllogictest::AsyncDB for Postgres {
     type Error = tokio_postgres::error::Error;
@@ -488,7 +503,6 @@ impl sqllogictest::AsyncDB for Postgres {
                                 let value: &str = row.get(idx);
                                 write!(output, "{}", value).unwrap();
                             }
-
                             Type::INT2 => {
                                 let value: i16 = row.get(idx);
                                 write!(output, "{}", value).unwrap();
@@ -528,6 +542,24 @@ impl sqllogictest::AsyncDB for Postgres {
                             Type::TIME => {
                                 let value: chrono::NaiveTime = row.get(idx);
                                 write!(output, "{}", value).unwrap();
+                            }
+                            Type::INT2_ARRAY => {
+                                array_process!(row, output, idx, i16);
+                            }
+                            Type::INT4_ARRAY => {
+                                array_process!(row, output, idx, i32);
+                            }
+                            Type::INT8_ARRAY => {
+                                array_process!(row, output, idx, i64);
+                            }
+                            Type::FLOAT4_ARRAY => {
+                                array_process!(row, output, idx, f32);
+                            }
+                            Type::FLOAT8_ARRAY => {
+                                array_process!(row, output, idx, f64);
+                            }
+                            Type::NUMERIC_ARRAY => {
+                                array_process!(row, output, idx, Decimal);
                             }
                             _ => {
                                 todo!("Don't support {} type now.", column.type_().name())
