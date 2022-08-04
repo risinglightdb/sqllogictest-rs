@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use chrono::Local;
+use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime};
 use clap::{ArgEnum, Parser};
 use console::style;
 use futures::StreamExt;
@@ -435,16 +435,43 @@ impl Postgres {
 
 macro_rules! array_process {
     ($row:ident, $output:ident, $idx:ident, $t:ty) => {
-        let value: Vec<$t> = $row.get($idx);
-        write!($output, "{{").unwrap();
-        for (i, v) in value.iter().enumerate() {
-            if i == value.len() - 1 {
-                write!($output, "{}", v).unwrap();
-            } else {
-                write!($output, "{},", v).unwrap();
+        let value: Option<Vec<Option<$t>>> = $row.get($idx);
+        match value {
+            Some(value) => {
+                write!($output, "{{").unwrap();
+                for (i, v) in value.iter().enumerate() {
+                    match v {
+                        Some(v) => {
+                            write!($output, "{}", v).unwrap();
+                        }
+                        None => {
+                            write!($output, "NULL").unwrap();
+                        }
+                    }
+                    if i < value.len() - 1 {
+                        write!($output, ",").unwrap();
+                    }
+                }
+                write!($output, "}}").unwrap();
+            }
+            None => {
+                write!($output, "NULL").unwrap();
             }
         }
-        write!($output, "}}").unwrap();
+    };
+}
+
+macro_rules! single_process {
+    ($row:ident, $output:ident, $idx:ident, $t:ty) => {
+        let value: Option<$t> = $row.get($idx);
+        match value {
+            Some(value) => {
+                write!($output, "{}", value).unwrap();
+            }
+            None => {
+                write!($output, "NULL").unwrap();
+            }
+        }
     };
 }
 
@@ -490,7 +517,16 @@ impl sqllogictest::AsyncDB for Postgres {
             }
             Ok(output)
         } else {
-            if sql.contains("select") {
+            // Query statement.
+            let is_query_sql = {
+                let lower_sql = sql.to_ascii_lowercase();
+                lower_sql.starts_with("select")
+                    || lower_sql.starts_with("values")
+                    || lower_sql.starts_with("show")
+                    || lower_sql.starts_with("with")
+                    || lower_sql.starts_with("describe")
+            };
+            if is_query_sql {
                 let rows = self.client.query(sql, &[]).await?;
                 for row in rows {
                     for (idx, column) in row.columns().iter().enumerate() {
@@ -500,48 +536,89 @@ impl sqllogictest::AsyncDB for Postgres {
 
                         match column.type_().clone() {
                             Type::VARCHAR | Type::TEXT => {
-                                let value: &str = row.get(idx);
-                                write!(output, "{}", value).unwrap();
+                                let value: Option<&str> = row.get(idx);
+                                match value {
+                                    Some(value) => {
+                                        if value.is_empty() {
+                                            write!(output, "(empty)").unwrap();
+                                        } else {
+                                            write!(output, "{}", value).unwrap();
+                                        }
+                                    }
+                                    None => {
+                                        write!(output, "NULL").unwrap();
+                                    }
+                                }
                             }
                             Type::INT2 => {
-                                let value: i16 = row.get(idx);
-                                write!(output, "{}", value).unwrap();
+                                single_process!(row, output, idx, i16);
                             }
                             Type::INT4 => {
-                                let value: i32 = row.get(idx);
-                                write!(output, "{}", value).unwrap();
+                                single_process!(row, output, idx, i32);
                             }
                             Type::INT8 => {
-                                let value: i64 = row.get(idx);
-                                write!(output, "{}", value).unwrap();
+                                single_process!(row, output, idx, i64);
                             }
                             Type::BOOL => {
-                                let value: bool = row.get(idx);
-                                write!(output, "{}", value).unwrap();
+                                let value: Option<bool> = row.get(idx);
+                                match value {
+                                    Some(value) => {
+                                        if value {
+                                            write!(output, "t").unwrap();
+                                        } else {
+                                            write!(output, "f").unwrap();
+                                        }
+                                    }
+                                    None => {
+                                        write!(output, "NULL").unwrap();
+                                    }
+                                }
                             }
                             Type::FLOAT4 => {
-                                let value: f32 = row.get(idx);
-                                write!(output, "{}", value).unwrap();
+                                let value: Option<f32> = row.get(idx);
+                                match value {
+                                    Some(value) => {
+                                        if value == f32::INFINITY {
+                                            write!(output, "Infinity").unwrap();
+                                        } else if value == f32::NEG_INFINITY {
+                                            write!(output, "-Infinity").unwrap();
+                                        } else {
+                                            write!(output, "{}", value).unwrap();
+                                        }
+                                    }
+                                    None => {
+                                        write!(output, "NULL").unwrap();
+                                    }
+                                }
                             }
                             Type::FLOAT8 => {
-                                let value: f64 = row.get(idx);
-                                write!(output, "{}", value).unwrap();
+                                let value: Option<f64> = row.get(idx);
+                                match value {
+                                    Some(value) => {
+                                        if value == f64::INFINITY {
+                                            write!(output, "Infinity").unwrap();
+                                        } else if value == f64::NEG_INFINITY {
+                                            write!(output, "-Infinity").unwrap();
+                                        } else {
+                                            write!(output, "{}", value).unwrap();
+                                        }
+                                    }
+                                    None => {
+                                        write!(output, "NULL").unwrap();
+                                    }
+                                }
                             }
                             Type::NUMERIC => {
-                                let value: Decimal = row.get(idx);
-                                write!(output, "{}", value).unwrap();
+                                single_process!(row, output, idx, Decimal);
                             }
                             Type::TIMESTAMP => {
-                                let value: chrono::NaiveDateTime = row.get(idx);
-                                write!(output, "{}", value).unwrap();
+                                single_process!(row, output, idx, NaiveDateTime);
                             }
                             Type::DATE => {
-                                let value: chrono::NaiveDate = row.get(idx);
-                                write!(output, "{}", value).unwrap();
+                                single_process!(row, output, idx, NaiveDate);
                             }
                             Type::TIME => {
-                                let value: chrono::NaiveTime = row.get(idx);
-                                write!(output, "{}", value).unwrap();
+                                single_process!(row, output, idx, NaiveTime);
                             }
                             Type::INT2_ARRAY => {
                                 array_process!(row, output, idx, i16);
