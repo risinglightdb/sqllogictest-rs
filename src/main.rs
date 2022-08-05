@@ -6,12 +6,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use chrono::Local;
+use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime};
 use clap::{ArgEnum, Parser};
 use console::style;
 use futures::StreamExt;
 use itertools::Itertools;
+use postgres_types::Type;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
+use rust_decimal::Decimal;
 use sqllogictest::{Control, Record};
 
 #[derive(Copy, Clone, Debug, PartialEq, ArgEnum)]
@@ -116,10 +118,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    let pg = Postgres {
-        client: Arc::new(client),
-        engine_name: opt.engine.clone(),
-    };
+    let pg = Postgres::new(Arc::new(client), opt.engine.clone());
 
     let files = files.into_iter().try_collect::<_, Vec<_>, _>()?;
 
@@ -311,10 +310,7 @@ async fn run_test_file_on_db(
         }
     });
 
-    let pg = Postgres {
-        client: Arc::new(client),
-        engine_name: opt.engine.clone(),
-    };
+    let pg = Postgres::new(Arc::new(client), opt.engine.clone());
 
     let result = run_test_file(out, pg, filename).await?;
 
@@ -423,6 +419,60 @@ async fn run_test_file<T: std::io::Write>(
 struct Postgres {
     client: Arc<tokio_postgres::Client>,
     engine_name: String,
+    extend: bool,
+}
+
+impl Postgres {
+    fn new(client: Arc<tokio_postgres::Client>, engine_name: String) -> Self {
+        let extend = engine_name == "postgresql-extended";
+        Self {
+            client,
+            engine_name,
+            extend,
+        }
+    }
+}
+
+macro_rules! array_process {
+    ($row:ident, $output:ident, $idx:ident, $t:ty) => {
+        let value: Option<Vec<Option<$t>>> = $row.get($idx);
+        match value {
+            Some(value) => {
+                write!($output, "{{").unwrap();
+                for (i, v) in value.iter().enumerate() {
+                    match v {
+                        Some(v) => {
+                            write!($output, "{}", v).unwrap();
+                        }
+                        None => {
+                            write!($output, "NULL").unwrap();
+                        }
+                    }
+                    if i < value.len() - 1 {
+                        write!($output, ",").unwrap();
+                    }
+                }
+                write!($output, "}}").unwrap();
+            }
+            None => {
+                write!($output, "NULL").unwrap();
+            }
+        }
+    };
+}
+
+macro_rules! single_process {
+    ($row:ident, $output:ident, $idx:ident, $t:ty) => {
+        let value: Option<$t> = $row.get($idx);
+        match value {
+            Some(value) => {
+                write!($output, "{}", value).unwrap();
+            }
+            None => {
+                write!($output, "NULL").unwrap();
+            }
+        }
+    };
 }
 
 #[async_trait]
@@ -439,32 +489,167 @@ impl sqllogictest::AsyncDB for Postgres {
         // and we have to follow the format given by the specific database (pg).
         // For example, postgres will output `t` as true and `f` as false,
         // thus we have to write `t`/`f` in the expected results.
-        let rows = self.client.simple_query(sql).await?;
-        for row in rows {
-            match row {
-                tokio_postgres::SimpleQueryMessage::Row(row) => {
-                    for i in 0..row.len() {
-                        if i != 0 {
-                            write!(output, " ").unwrap();
-                        }
-                        match row.get(i) {
-                            Some(v) => {
-                                if v.is_empty() {
-                                    write!(output, "(empty)").unwrap()
-                                } else {
-                                    write!(output, "{}", v).unwrap()
-                                }
+        if !self.extend {
+            let rows = self.client.simple_query(sql).await?;
+            for row in rows {
+                match row {
+                    tokio_postgres::SimpleQueryMessage::Row(row) => {
+                        for i in 0..row.len() {
+                            if i != 0 {
+                                write!(output, " ").unwrap();
                             }
-                            None => write!(output, "NULL").unwrap(),
+                            match row.get(i) {
+                                Some(v) => {
+                                    if v.is_empty() {
+                                        write!(output, "(empty)").unwrap()
+                                    } else {
+                                        write!(output, "{}", v).unwrap()
+                                    }
+                                }
+                                None => write!(output, "NULL").unwrap(),
+                            }
                         }
                     }
+                    tokio_postgres::SimpleQueryMessage::CommandComplete(_) => {}
+                    _ => unreachable!(),
                 }
-                tokio_postgres::SimpleQueryMessage::CommandComplete(_) => {}
-                _ => unreachable!(),
+                writeln!(output).unwrap();
             }
-            writeln!(output).unwrap();
+            Ok(output)
+        } else {
+            // Query statement.
+            let is_query_sql = {
+                let lower_sql = sql.to_ascii_lowercase();
+                lower_sql.starts_with("select")
+                    || lower_sql.starts_with("values")
+                    || lower_sql.starts_with("show")
+                    || lower_sql.starts_with("with")
+                    || lower_sql.starts_with("describe")
+            };
+            if is_query_sql {
+                let rows = self.client.query(sql, &[]).await?;
+                for row in rows {
+                    for (idx, column) in row.columns().iter().enumerate() {
+                        if idx != 0 {
+                            write!(output, " ").unwrap();
+                        }
+
+                        match column.type_().clone() {
+                            Type::VARCHAR | Type::TEXT => {
+                                let value: Option<&str> = row.get(idx);
+                                match value {
+                                    Some(value) => {
+                                        if value.is_empty() {
+                                            write!(output, "(empty)").unwrap();
+                                        } else {
+                                            write!(output, "{}", value).unwrap();
+                                        }
+                                    }
+                                    None => {
+                                        write!(output, "NULL").unwrap();
+                                    }
+                                }
+                            }
+                            Type::INT2 => {
+                                single_process!(row, output, idx, i16);
+                            }
+                            Type::INT4 => {
+                                single_process!(row, output, idx, i32);
+                            }
+                            Type::INT8 => {
+                                single_process!(row, output, idx, i64);
+                            }
+                            Type::BOOL => {
+                                let value: Option<bool> = row.get(idx);
+                                match value {
+                                    Some(value) => {
+                                        if value {
+                                            write!(output, "t").unwrap();
+                                        } else {
+                                            write!(output, "f").unwrap();
+                                        }
+                                    }
+                                    None => {
+                                        write!(output, "NULL").unwrap();
+                                    }
+                                }
+                            }
+                            Type::FLOAT4 => {
+                                let value: Option<f32> = row.get(idx);
+                                match value {
+                                    Some(value) => {
+                                        if value == f32::INFINITY {
+                                            write!(output, "Infinity").unwrap();
+                                        } else if value == f32::NEG_INFINITY {
+                                            write!(output, "-Infinity").unwrap();
+                                        } else {
+                                            write!(output, "{}", value).unwrap();
+                                        }
+                                    }
+                                    None => {
+                                        write!(output, "NULL").unwrap();
+                                    }
+                                }
+                            }
+                            Type::FLOAT8 => {
+                                let value: Option<f64> = row.get(idx);
+                                match value {
+                                    Some(value) => {
+                                        if value == f64::INFINITY {
+                                            write!(output, "Infinity").unwrap();
+                                        } else if value == f64::NEG_INFINITY {
+                                            write!(output, "-Infinity").unwrap();
+                                        } else {
+                                            write!(output, "{}", value).unwrap();
+                                        }
+                                    }
+                                    None => {
+                                        write!(output, "NULL").unwrap();
+                                    }
+                                }
+                            }
+                            Type::NUMERIC => {
+                                single_process!(row, output, idx, Decimal);
+                            }
+                            Type::TIMESTAMP => {
+                                single_process!(row, output, idx, NaiveDateTime);
+                            }
+                            Type::DATE => {
+                                single_process!(row, output, idx, NaiveDate);
+                            }
+                            Type::TIME => {
+                                single_process!(row, output, idx, NaiveTime);
+                            }
+                            Type::INT2_ARRAY => {
+                                array_process!(row, output, idx, i16);
+                            }
+                            Type::INT4_ARRAY => {
+                                array_process!(row, output, idx, i32);
+                            }
+                            Type::INT8_ARRAY => {
+                                array_process!(row, output, idx, i64);
+                            }
+                            Type::FLOAT4_ARRAY => {
+                                array_process!(row, output, idx, f32);
+                            }
+                            Type::FLOAT8_ARRAY => {
+                                array_process!(row, output, idx, f64);
+                            }
+                            Type::NUMERIC_ARRAY => {
+                                array_process!(row, output, idx, Decimal);
+                            }
+                            _ => {
+                                todo!("Don't support {} type now.", column.type_().name())
+                            }
+                        }
+                    }
+                    writeln!(output).unwrap();
+                }
+            } else {
+                self.client.execute(sql, &[]).await?;
+            }
+            Ok(output)
         }
-        Ok(output)
     }
 
     fn engine_name(&self) -> &str {
