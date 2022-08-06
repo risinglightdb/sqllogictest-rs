@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 pub struct FakeDB;
 
 #[derive(Debug)]
@@ -26,7 +28,11 @@ impl sqllogictest::DB for FakeDB {
 
 fn main() {
     let mut tester = sqllogictest::Runner::new(FakeDB);
-    tester
-        .run_file("examples/file_level_sort_mode.slt")
-        .unwrap();
+
+    let mut filename = PathBuf::from(file!());
+    filename.pop();
+    filename.pop();
+    filename.push("file_level_sort_mode.slt");
+
+    tester.run_file(filename).unwrap();
 }

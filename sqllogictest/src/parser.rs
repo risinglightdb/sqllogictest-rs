@@ -401,7 +401,7 @@ mod tests {
 
     #[test]
     fn test_include_glob() {
-        let records = parse_file("../examples/include_1.slt").unwrap();
+        let records = parse_file("../examples/include/include_1.slt").unwrap();
         assert_eq!(12, records.len());
     }
 }

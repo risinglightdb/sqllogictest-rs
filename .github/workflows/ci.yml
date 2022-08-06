@@ -57,7 +57,7 @@ jobs:
           args: --no-fail-fast --all-features
       - name: Run examples
         run: |
-          for example in examples/*.rs
+          for example in examples/*
           do
-              cargo run --example "$(basename "$example" .rs)"
+              cargo run --example "$(basename "$example")"
           done

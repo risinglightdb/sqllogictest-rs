@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 pub struct FakeDB;
 
 #[derive(Debug)]
@@ -23,5 +25,11 @@ fn main() {
     let mut tester = sqllogictest::Runner::new(FakeDB);
     // Validator will always return true.
     tester.with_validator(|_, _| true);
-    tester.run_file("examples/validator.slt").unwrap();
+
+    let mut filename = PathBuf::from(file!());
+    filename.pop();
+    filename.pop();
+    filename.push("validator.slt");
+
+    tester.run_file(filename).unwrap();
 }

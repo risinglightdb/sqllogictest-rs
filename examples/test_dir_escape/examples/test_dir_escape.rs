@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 pub struct FakeDB;
 
 #[derive(Debug)]
@@ -26,5 +28,11 @@ fn main() {
     let mut tester = sqllogictest::Runner::new(FakeDB);
     // enable `__TEST_DIR__` override
     tester.enable_testdir();
-    tester.run_file("examples/test_dir_escape.slt").unwrap();
+
+    let mut filename = PathBuf::from(file!());
+    filename.pop();
+    filename.pop();
+    filename.push("test_dir_escape.slt");
+
+    tester.run_file(filename).unwrap();
 }

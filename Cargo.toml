@@ -1,2 +1,2 @@
 [workspace]
-members = ["sqllogictest", "sqllogictest-bin"]
+members = ["sqllogictest", "sqllogictest-bin", "examples/*"]
