@@ -23,7 +23,7 @@ jobs:
         name: Compile all targets 🚀
         with:
           command: build
-          args: --workspace --release --all-features
+          args: --workspace --release
       - name: create tar
         run: tar -cvzf sqllogictest-linux-amd64.tar.gz -C target/release sqllogictest
       - uses: actions/create-release@latest

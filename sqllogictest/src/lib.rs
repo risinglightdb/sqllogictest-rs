@@ -43,3 +43,6 @@ pub mod runner;
 
 pub use self::parser::*;
 pub use self::runner::*;
+
+#[cfg(feature = "bin")]
+compile_error!("--features bin is deprecated. Please install sqllogictest runner with `cargo install sqllogictest-bin`.");
