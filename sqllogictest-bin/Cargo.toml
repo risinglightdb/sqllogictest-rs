@@ -27,7 +27,7 @@ log = "0.4"
 postgres-types = { version = "0.2.3", features = ["derive", "with-chrono-0_4"] }
 quick-junit = { version = "0.2" }
 rust_decimal = { version = "1.7.0", features = ["tokio-pg"] }
-sqllogictest = "0.5.5"
+sqllogictest = { path = "../sqllogictest" }
 tempfile = "3"
 thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "fs"] }
