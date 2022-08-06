@@ -61,7 +61,7 @@ This crate can also be used as a command-line tool.
 To install the binary, the `bin` feature is required:
 
 ```sh
-cargo install sqllogictest --features bin
+cargo install sqllogictest-bin
 ```
 
 You can use it as follows:
