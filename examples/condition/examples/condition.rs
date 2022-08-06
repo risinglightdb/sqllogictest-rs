@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 pub struct FakeDB {
     engine_name: &'static str,
 }
@@ -32,6 +34,12 @@ impl sqllogictest::DB for FakeDB {
 fn main() {
     for engine_name in ["risinglight", "otherdb"] {
         let mut tester = sqllogictest::Runner::new(FakeDB { engine_name });
-        tester.run_file("examples/condition.slt").unwrap();
+
+        let mut filename = PathBuf::from(file!());
+        filename.pop();
+        filename.pop();
+        filename.push("condition.slt");
+
+        tester.run_file(filename).unwrap();
     }
 }

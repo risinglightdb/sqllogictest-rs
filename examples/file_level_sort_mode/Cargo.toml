@@ -1,0 +1,7 @@
+[package]
+name = "file_level_sort_mode"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sqllogictest = { path = "../../sqllogictest" }
