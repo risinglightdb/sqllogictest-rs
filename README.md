@@ -95,3 +95,10 @@ dual licensed as above, without any additional terms or conditions.
 
 Contributors should add a Signed-off-by line for [Developer Certificate of Origin](https://github.com/probot/dco#how-it-works)
 in their commits. Use `git commit -s` to sign off commits.
+
+## Publish the crate
+
+```
+cargo publish -p sqllogictest
+cargo publish -p sqllogictest-bin
+```
