@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2022-08-06
+
+- Support postgres extended mode
+- Separate sqllogictest runner to sqllogictest-bin
+
 ## [0.5.5] - 2022-07-26
 
 - Add timestamp to junit. (#57)

@@ -37,7 +37,7 @@ struct Opt {
     files: String,
 
     /// The database engine name, used by the record conditions.
-    #[clap(short, long, default_value = "postgresql")]
+    #[clap(short, long, default_value = "postgres")]
     engine: String,
 
     /// Whether to enable colorful output.
@@ -91,8 +91,7 @@ struct DBConfig {
     pass: String,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+pub async fn main_okk() -> Result<()> {
     env_logger::init();
 
     let Opt {

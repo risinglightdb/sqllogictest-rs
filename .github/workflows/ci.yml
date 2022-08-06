@@ -35,7 +35,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --all-targets --all-features -- -D warnings
+          args: --all-targets -- -D warnings
 
   test:
     runs-on: ubuntu-20.04
@@ -49,12 +49,12 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --all-features --all-targets
+          args: --all-targets
       - name: Test
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --no-fail-fast --all-features
+          args: --no-fail-fast
       - name: Run examples
         run: |
           for example in examples/*

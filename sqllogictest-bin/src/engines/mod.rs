@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use postgres_extended::PostgresExtended;
 use sqllogictest::AsyncDB;
 
-use crate::{DBConfig, Result};
+use super::{DBConfig, Result};
 
 enum Engines {
     Postgres(Postgres),
