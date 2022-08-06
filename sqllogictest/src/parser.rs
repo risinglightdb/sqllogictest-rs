@@ -48,7 +48,7 @@ impl Location {
 }
 
 /// A single directive in a sqllogictest file.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 #[non_exhaustive]
 pub enum Record {
     /// An include copies all records from another files.
@@ -89,7 +89,7 @@ pub enum Record {
     Control(Control),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Control {
     /// Control sort mode.
     SortMode(SortMode),
@@ -102,7 +102,7 @@ pub enum Control {
 }
 
 /// The condition to run a query.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Condition {
     /// The statement or query is skipped if an `onlyif` record for a different database engine is
     /// seen.
@@ -123,7 +123,7 @@ impl Condition {
 }
 
 /// Whether to apply sorting before checking the results of a query.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum SortMode {
     /// The default option. The results appear in exactly the order in which they were received
     /// from the database engine.
@@ -155,7 +155,7 @@ impl SortMode {
 }
 
 /// The error type for parsing sqllogictest.
-#[derive(thiserror::Error, Debug, PartialEq, Clone)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
 #[error("parse error at {loc}: {kind}")]
 pub struct ParseError {
     kind: ParseErrorKind,
@@ -175,7 +175,7 @@ impl ParseError {
 }
 
 /// The error kind for parsing sqllogictest.
-#[derive(thiserror::Error, Debug, PartialEq, Clone)]
+#[derive(thiserror::Error, Debug, Eq, PartialEq, Clone)]
 pub enum ParseErrorKind {
     #[error("unexpected token: {0:?}")]
     UnexpectedToken(String),
@@ -291,7 +291,7 @@ fn parse_inner(filename: Arc<str>, script: &str) -> Result<Vec<Record>, ParseErr
                 });
             }
             ["query", type_string, res @ ..] => {
-                let sort_mode = match res.get(0).map(|&s| SortMode::try_from_str(s)).transpose() {
+                let sort_mode = match res.first().map(|&s| SortMode::try_from_str(s)).transpose() {
                     Ok(sm) => sm,
                     Err(k) => return Err(k.at(loc)),
                 };
@@ -401,7 +401,7 @@ mod tests {
 
     #[test]
     fn test_include_glob() {
-        let records = parse_file("examples/include_1.slt").unwrap();
+        let records = parse_file("../examples/include_1.slt").unwrap();
         assert_eq!(12, records.len());
     }
 }
