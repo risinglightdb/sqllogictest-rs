@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
+use std::vec;
 
 use async_trait::async_trait;
 use futures_lite::future;
@@ -325,6 +326,43 @@ impl<D: AsyncDB> Runner<D> {
         conditions
             .iter()
             .any(|c| c.should_skip(self.db.engine_name()))
+    }
+}
+
+pub struct ParallelRunner {}
+
+impl ParallelRunner {
+    pub async fn run_with_db_file_pairs_async<D: AsyncDB + 'static>(
+        &self,
+        mut pairs: Vec<(D, String)>,
+        jobs: usize,
+    ) -> Result<(), TestError> {
+        let chunk_size = (pairs.len() as f64 / jobs as f64).ceil() as usize;
+        let mut tasks = vec![];
+        loop {
+            if pairs.len() > chunk_size {
+                tasks.push(pairs.drain((pairs.len() - chunk_size)..).collect_vec());
+            } else {
+                tasks.push(pairs.drain(..).collect_vec());
+                break;
+            }
+        }
+
+        let mut handles = vec![];
+        for task in tasks {
+            handles.push(tokio::spawn(async move {
+                for (db, filename) in task {
+                    let mut tester = Runner::new(db);
+                    tester.run_file_async(filename).await.unwrap();
+                }
+            }));
+        }
+
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        Ok(())
     }
 }
 
