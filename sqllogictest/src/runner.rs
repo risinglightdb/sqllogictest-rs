@@ -6,7 +6,7 @@ use std::time::Duration;
 use std::vec;
 
 use async_trait::async_trait;
-use futures_lite::future;
+use futures_lite::{future, Future};
 use itertools::Itertools;
 use tempfile::{tempdir, TempDir};
 
@@ -329,27 +329,87 @@ impl<D: AsyncDB> Runner<D> {
     }
 }
 
-pub struct ParallelRunner {}
+/// a parallel Sqllogictest runner
 
-impl ParallelRunner {
-    pub async fn run_with_db_file_pairs_async<D: AsyncDB + 'static>(
+pub struct ParallelRunner<D: AsyncDB> {
+    db: D,
+    hosts: Vec<String>,
+}
+
+impl<D: AsyncDB + 'static> ParallelRunner<D> {
+    pub fn new(db: D, hosts: Vec<String>) -> ParallelRunner<D> {
+        ParallelRunner { db, hosts }
+    }
+
+    pub async fn prepare_async<F, Fut>(
+        &mut self,
+        glob: &str,
+        conn_builder: F,
+    ) -> Result<Vec<(D, String)>, TestError>
+    where
+        F: Fn(String, String) -> Fut,
+        Fut: Future<Output = D>,
+    {
+        let files = glob::glob(glob).expect("failed to read glob pattern");
+        let mut tasks = vec![];
+        let mut idx = 0;
+
+        for file in files {
+            let file = file.unwrap();
+            let db_name = file
+                .file_name()
+                .expect("not a valid filename")
+                .to_str()
+                .expect("not a UTF-8 filename");
+            let db_name = db_name
+                .replace(' ', "_")
+                .replace('.', "_")
+                .replace('-', "_");
+            self.db
+                .run(&format!("CREATE DATABASE {};", db_name))
+                .await
+                .expect("create db failed");
+            tasks.push((
+                conn_builder(self.hosts[idx % self.hosts.len()].clone(), db_name).await,
+                file.to_string_lossy().to_string(),
+            ));
+            idx += 1;
+        }
+
+        Ok(tasks)
+    }
+
+    pub fn prepare<F, Fut>(
+        &mut self,
+        glob: &str,
+        conn_builder: F,
+    ) -> Result<Vec<(D, String)>, TestError>
+    where
+        F: Fn(String, String) -> D,
+    {
+        future::block_on(
+            self.prepare_async(glob, |host, dbname| async { conn_builder(host, dbname) }),
+        )
+    }
+
+    pub async fn run_parallel_async(
         &self,
-        mut pairs: Vec<(D, String)>,
+        mut tasks: Vec<(D, String)>,
         jobs: usize,
     ) -> Result<(), TestError> {
-        let chunk_size = (pairs.len() as f64 / jobs as f64).ceil() as usize;
-        let mut tasks = vec![];
+        let chunk_size = (tasks.len() as f64 / jobs as f64).ceil() as usize;
+        let mut chunked_tasks = vec![];
         loop {
-            if pairs.len() > chunk_size {
-                tasks.push(pairs.drain((pairs.len() - chunk_size)..).collect_vec());
+            if tasks.len() > chunk_size {
+                chunked_tasks.push(tasks.drain((tasks.len() - chunk_size)..).collect_vec());
             } else {
-                tasks.push(pairs.drain(..).collect_vec());
+                chunked_tasks.push(tasks.drain(..).collect_vec());
                 break;
             }
         }
 
         let mut handles = vec![];
-        for task in tasks {
+        for task in chunked_tasks {
             handles.push(tokio::spawn(async move {
                 for (db, filename) in task {
                     let mut tester = Runner::new(db);
@@ -363,6 +423,10 @@ impl ParallelRunner {
         }
 
         Ok(())
+    }
+
+    pub fn run_parallel(&self, tasks: Vec<(D, String)>, jobs: usize) -> Result<(), TestError> {
+        future::block_on(self.run_parallel_async(tasks, jobs))
     }
 }
 
