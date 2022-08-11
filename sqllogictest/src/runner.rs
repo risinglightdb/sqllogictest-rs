@@ -352,7 +352,7 @@ impl<D: AsyncDB> Runner<D> {
             ));
         }
 
-        let chunk_size = (tasks.len() as f64 / jobs as f64).ceil() as usize;
+        let chunk_size = (tasks.len() + jobs - 1) / jobs;
         let mut chunked_tasks = vec![];
         loop {
             if tasks.len() > chunk_size {
