@@ -312,62 +312,16 @@ impl<D: AsyncDB> Runner<D> {
         future::block_on(self.run_file_async(filename))
     }
 
-    /// Replace all keywords in the SQL.
-    fn replace_keywords(&self, sql: String) -> String {
-        if let Some(testdir) = &self.testdir {
-            sql.replace("__TEST_DIR__", testdir.path().to_str().unwrap())
-        } else {
-            sql
-        }
-    }
-
-    /// Returns whether we should skip this record, according to given `conditions`.
-    fn should_skip(&self, conditions: &[Condition]) -> bool {
-        conditions
-            .iter()
-            .any(|c| c.should_skip(self.db.engine_name()))
-    }
-}
-
-/// A parallel Sqllogictest runner
-///
-/// before beginning the runner, we should use prepare(_async) to parse slt files and split task and
-/// then we can pass the tasks to runner for parallel running.
-///
-/// the db record is for the database creating, and hosts for target address. If there is multiple
-/// db address, we can use conn_builder to connect multiple target(in prepare).
-///
-/// ```ignore
-/// let db = DB::connect(hosts, dbname).await;
-/// let mut tester = sqllogictest::ParallelRunner::new(db, hosts.to_vec());
-/// let tasks = tester
-///     .prepare_async(glob, DB::connect)
-///     .await
-///     .expect("prepare failed");
-/// tester
-///     .run_parallel_async(tasks, jobs)
-///     .await
-///     .expect("test failed");
-/// ```
-
-pub struct ParallelRunner<D: AsyncDB> {
-    db: D,
-    hosts: Vec<String>,
-}
-
-impl<D: AsyncDB + 'static> ParallelRunner<D> {
-    pub fn new(db: D, hosts: Vec<String>) -> ParallelRunner<D> {
-        ParallelRunner { db, hosts }
-    }
-
-    /// parse slt files and create DB connection for multiple target. Here we use the conn_builder
-    /// parameter function for connection creating, the function accept two parameter which is host
-    /// and dbname in order.
-    pub async fn prepare_async<F, Fut>(
-        &mut self,
+    /// aceept the tasks, spawn jobs task to run slt test. the tasks are (AsyncDB, slt filename)
+    /// pairs.
+    pub async fn run_parallel_async<F, Fut>(
+        &self,
         glob: &str,
+        mut init_db: D,
+        hosts: Vec<String>,
         conn_builder: F,
-    ) -> Result<Vec<(D, String)>, TestError>
+        jobs: usize,
+    ) -> Result<(), TestError>
     where
         F: Fn(String, String) -> Fut,
         Fut: Future<Output = D>,
@@ -388,40 +342,16 @@ impl<D: AsyncDB + 'static> ParallelRunner<D> {
                 .replace('.', "_")
                 .replace('-', "_");
 
-            self.db
+            init_db
                 .run(&format!("CREATE DATABASE {};", db_name))
                 .await
                 .expect("create db failed");
             tasks.push((
-                conn_builder(self.hosts[idx % self.hosts.len()].clone(), db_name).await,
+                conn_builder(hosts[idx % hosts.len()].clone(), db_name).await,
                 file.to_string_lossy().to_string(),
             ));
         }
 
-        Ok(tasks)
-    }
-
-    /// sync version of `prepare_aync`
-    pub fn prepare<F, Fut>(
-        &mut self,
-        glob: &str,
-        conn_builder: F,
-    ) -> Result<Vec<(D, String)>, TestError>
-    where
-        F: Fn(String, String) -> D,
-    {
-        future::block_on(
-            self.prepare_async(glob, |host, dbname| async { conn_builder(host, dbname) }),
-        )
-    }
-
-    /// aceept the tasks, spawn jobs task to run slt test. the tasks are (AsyncDB, slt filename)
-    /// pairs.
-    pub async fn run_parallel_async(
-        &self,
-        mut tasks: Vec<(D, String)>,
-        jobs: usize,
-    ) -> Result<(), TestError> {
         let chunk_size = (tasks.len() as f64 / jobs as f64).ceil() as usize;
         let mut chunked_tasks = vec![];
         loop {
@@ -448,8 +378,35 @@ impl<D: AsyncDB + 'static> ParallelRunner<D> {
     }
 
     /// sync version of `run_parallel_async`
-    pub fn run_parallel(&self, tasks: Vec<(D, String)>, jobs: usize) -> Result<(), TestError> {
-        future::block_on(self.run_parallel_async(tasks, jobs))
+    pub fn run_parallel<F, Fut>(
+        &self,
+        glob: &str,
+        init_db: D,
+        hosts: Vec<String>,
+        conn_builder: F,
+        jobs: usize,
+    ) -> Result<(), TestError>
+    where
+        F: Fn(String, String) -> Fut,
+        Fut: Future<Output = D>,
+    {
+        future::block_on(self.run_parallel_async(glob, init_db, hosts, conn_builder, jobs))
+    }
+
+    /// Replace all keywords in the SQL.
+    fn replace_keywords(&self, sql: String) -> String {
+        if let Some(testdir) = &self.testdir {
+            sql.replace("__TEST_DIR__", testdir.path().to_str().unwrap())
+        } else {
+            sql
+        }
+    }
+
+    /// Returns whether we should skip this record, according to given `conditions`.
+    fn should_skip(&self, conditions: &[Condition]) -> bool {
+        conditions
+            .iter()
+            .any(|c| c.should_skip(self.db.engine_name()))
     }
 }
 
