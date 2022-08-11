@@ -352,7 +352,7 @@ impl<D: AsyncDB> Runner<D> {
 /// the db record is for the database creating, and hosts for target address. If there is multiple
 /// db address, we can use conn_builder to connect multiple target(in prepare).
 ///
-/// ```no_run
+/// ```ignore
 /// let db = DB::connect(hosts, dbname).await;
 /// let mut tester = sqllogictest::ParallelRunner::new(db, hosts.to_vec());
 /// let tasks = tester
@@ -389,9 +389,8 @@ impl<D: AsyncDB + 'static> ParallelRunner<D> {
     {
         let files = glob::glob(glob).expect("failed to read glob pattern");
         let mut tasks = vec![];
-        let mut idx = 0;
 
-        for file in files {
+        for (idx, file) in files.enumerate() {
             // for every slt file, we create a database against table conflict
             let file = file.unwrap();
             let db_name = file
@@ -412,7 +411,6 @@ impl<D: AsyncDB + 'static> ParallelRunner<D> {
                 conn_builder(self.hosts[idx % self.hosts.len()].clone(), db_name).await,
                 file.to_string_lossy().to_string(),
             ));
-            idx += 1;
         }
 
         Ok(tasks)
