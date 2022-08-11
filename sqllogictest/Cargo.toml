@@ -20,4 +20,4 @@ itertools = "0.10"
 log = "0.4"
 tempfile = "3"
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.7", package = "madsim-tokio", features = ["full"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "fs"] }

@@ -34,6 +34,18 @@ pub trait AsyncDB: Send {
     async fn sleep(dur: Duration) {
         std::thread::sleep(dur);
     }
+
+    async fn run_task<F>(futures: Vec<F>)
+    where
+        F: Future + Send + 'static,
+        <F as Future>::Output: Send + 'static,
+    {
+        let handles = futures.into_iter().map(|future| tokio::spawn(future));
+
+        for handle in handles {
+            handle.await.unwrap();
+        }
+    }
 }
 
 /// The database to be tested.
@@ -408,19 +420,17 @@ impl<D: AsyncDB + 'static> ParallelRunner<D> {
             }
         }
 
-        let mut handles = vec![];
-        for task in chunked_tasks {
-            handles.push(tokio::spawn(async move {
+        let tasks = chunked_tasks
+            .into_iter()
+            .map(|task| async {
                 for (db, filename) in task {
                     let mut tester = Runner::new(db);
                     tester.run_file_async(filename).await.unwrap();
                 }
-            }));
-        }
+            })
+            .collect_vec();
 
-        for handle in handles {
-            handle.await.unwrap();
-        }
+        D::run_task(tasks).await;
 
         Ok(())
     }
