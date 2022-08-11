@@ -35,6 +35,7 @@ pub trait AsyncDB: Send {
         std::thread::sleep(dur);
     }
 
+    /// Hook for parallel task running.
     async fn run_task<F>(futures: Vec<F>)
     where
         F: Future + Send + 'static,
@@ -341,7 +342,28 @@ impl<D: AsyncDB> Runner<D> {
     }
 }
 
-/// a parallel Sqllogictest runner
+/// A parallel Sqllogictest runner
+///
+/// before beginning the runner, we should use prepare(_async) to parse slt files and split task and
+/// then we can pass the tasks to runner for parallel running.
+///
+/// we can use AsyncDB::run_task hook to switch the backend runtime.
+///
+/// the db record is for the database creating, and hosts for target address. If there is multiple
+/// db address, we can use conn_builder to connect multiple target(in prepare).
+///
+/// ```no_run
+/// let db = DB::connect(hosts, dbname).await;
+/// let mut tester = sqllogictest::ParallelRunner::new(db, hosts.to_vec());
+/// let tasks = tester
+///     .prepare_async(glob, DB::connect)
+///     .await
+///     .expect("prepare failed");
+/// tester
+///     .run_parallel_async(tasks, jobs)
+///     .await
+///     .expect("test failed");
+/// ```
 
 pub struct ParallelRunner<D: AsyncDB> {
     db: D,
@@ -353,6 +375,9 @@ impl<D: AsyncDB + 'static> ParallelRunner<D> {
         ParallelRunner { db, hosts }
     }
 
+    /// parse slt files and create DB connection for multiple target. Here we use the conn_builder
+    /// parameter function for connection creating, the function accept two parameter which is host
+    /// and dbname in order.
     pub async fn prepare_async<F, Fut>(
         &mut self,
         glob: &str,
@@ -367,6 +392,7 @@ impl<D: AsyncDB + 'static> ParallelRunner<D> {
         let mut idx = 0;
 
         for file in files {
+            // for every slt file, we create a database against table conflict
             let file = file.unwrap();
             let db_name = file
                 .file_name()
@@ -377,6 +403,7 @@ impl<D: AsyncDB + 'static> ParallelRunner<D> {
                 .replace(' ', "_")
                 .replace('.', "_")
                 .replace('-', "_");
+
             self.db
                 .run(&format!("CREATE DATABASE {};", db_name))
                 .await
@@ -391,6 +418,7 @@ impl<D: AsyncDB + 'static> ParallelRunner<D> {
         Ok(tasks)
     }
 
+    /// sync version of `prepare_aync`
     pub fn prepare<F, Fut>(
         &mut self,
         glob: &str,
@@ -404,6 +432,8 @@ impl<D: AsyncDB + 'static> ParallelRunner<D> {
         )
     }
 
+    /// aceept the tasks, spawn jobs task to run slt test. the tasks are (AsyncDB, slt filename)
+    /// pairs.
     pub async fn run_parallel_async(
         &self,
         mut tasks: Vec<(D, String)>,
@@ -435,6 +465,7 @@ impl<D: AsyncDB + 'static> ParallelRunner<D> {
         Ok(())
     }
 
+    /// sync version of `run_parallel_async`
     pub fn run_parallel(&self, tasks: Vec<(D, String)>, jobs: usize) -> Result<(), TestError> {
         future::block_on(self.run_parallel_async(tasks, jobs))
     }
