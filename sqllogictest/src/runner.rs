@@ -34,19 +34,6 @@ pub trait AsyncDB: Send {
     async fn sleep(dur: Duration) {
         std::thread::sleep(dur);
     }
-
-    /// Hook for parallel task running.
-    async fn run_task<F>(futures: Vec<F>)
-    where
-        F: Future + Send + 'static,
-        <F as Future>::Output: Send + 'static,
-    {
-        let handles = futures.into_iter().map(|future| tokio::spawn(future));
-
-        for handle in handles {
-            handle.await.unwrap();
-        }
-    }
 }
 
 /// The database to be tested.
@@ -347,8 +334,6 @@ impl<D: AsyncDB> Runner<D> {
 /// before beginning the runner, we should use prepare(_async) to parse slt files and split task and
 /// then we can pass the tasks to runner for parallel running.
 ///
-/// we can use AsyncDB::run_task hook to switch the backend runtime.
-///
 /// the db record is for the database creating, and hosts for target address. If there is multiple
 /// db address, we can use conn_builder to connect multiple target(in prepare).
 ///
@@ -458,8 +443,7 @@ impl<D: AsyncDB + 'static> ParallelRunner<D> {
             })
             .collect_vec();
 
-        D::run_task(tasks).await;
-
+        futures::future::join_all(tasks.into_iter()).await;
         Ok(())
     }
 
