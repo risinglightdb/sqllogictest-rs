@@ -1,11 +1,14 @@
 //! Sqllogictest runner.
 
+use std::fmt::Display;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
+use std::vec;
 
 use async_trait::async_trait;
-use futures_lite::future;
+use futures::executor::block_on;
+use futures::{stream, Future, StreamExt};
 use itertools::Itertools;
 use tempfile::{tempdir, TempDir};
 
@@ -72,6 +75,29 @@ where
 pub struct TestError {
     kind: TestErrorKind,
     loc: Location,
+}
+
+#[derive(thiserror::Error, Debug, Clone)]
+#[error("test({filename}): {error}")]
+pub struct TestFileError {
+    filename: String,
+    error: String,
+}
+
+#[derive(Clone, Debug, thiserror::Error)]
+pub struct ParallelTestError {
+    errors: Vec<TestFileError>,
+}
+
+impl Display for ParallelTestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "parallel test failed")?;
+        write!(f, "Caused by:")?;
+        for i in &self.errors {
+            writeln!(f, "{}", i)?;
+        }
+        Ok(())
+    }
 }
 
 impl std::fmt::Debug for TestError {
@@ -260,7 +286,7 @@ impl<D: AsyncDB> Runner<D> {
 
     /// Run a single record.
     pub fn run(&mut self, record: Record) -> Result<(), TestError> {
-        future::block_on(self.run_async(record))
+        futures::executor::block_on(self.run_async(record))
     }
 
     /// Run multiple records.
@@ -286,7 +312,7 @@ impl<D: AsyncDB> Runner<D> {
         &mut self,
         records: impl IntoIterator<Item = Record>,
     ) -> Result<(), TestError> {
-        future::block_on(self.run_multi_async(records))
+        block_on(self.run_multi_async(records))
     }
 
     /// Run a sqllogictest script.
@@ -303,12 +329,87 @@ impl<D: AsyncDB> Runner<D> {
 
     /// Run a sqllogictest script.
     pub fn run_script(&mut self, script: &str) -> Result<(), TestError> {
-        future::block_on(self.run_script_async(script))
+        block_on(self.run_script_async(script))
     }
 
     /// Run a sqllogictest file.
     pub fn run_file(&mut self, filename: impl AsRef<Path>) -> Result<(), TestError> {
-        future::block_on(self.run_file_async(filename))
+        block_on(self.run_file_async(filename))
+    }
+
+    /// aceept the tasks, spawn jobs task to run slt test. the tasks are (AsyncDB, slt filename)
+    /// pairs.
+    pub async fn run_parallel_async<Fut>(
+        &mut self,
+        glob: &str,
+        hosts: Vec<String>,
+        conn_builder: fn(String, String) -> Fut,
+        jobs: usize,
+    ) -> Result<(), ParallelTestError>
+    where
+        Fut: Future<Output = D>,
+    {
+        let files = glob::glob(glob).expect("failed to read glob pattern");
+        let mut tasks = vec![];
+        // let conn_builder = Arc::new(conn_builder);
+
+        for (idx, file) in files.enumerate() {
+            // for every slt file, we create a database against table conflict
+            let file = file.unwrap();
+            let db_name = file
+                .file_name()
+                .expect("not a valid filename")
+                .to_str()
+                .expect("not a UTF-8 filename");
+            let db_name = db_name
+                .replace(' ', "_")
+                .replace('.', "_")
+                .replace('-', "_");
+
+            self.db
+                .run(&format!("CREATE DATABASE {};", db_name))
+                .await
+                .expect("create db failed");
+            let target = hosts[idx % hosts.len()].clone();
+            tasks.push(async move {
+                let db = conn_builder(target, db_name).await;
+                let mut tester = Runner::new(db);
+                let filename = file.to_string_lossy().to_string();
+                (filename.clone(), tester.run_file_async(filename).await)
+            })
+        }
+
+        let tasks = stream::iter(tasks).buffer_unordered(jobs);
+        let errors: Vec<_> = tasks
+            .map(|result| match result {
+                (filename, Err(error)) => Some(TestFileError {
+                    filename,
+                    error: error.to_string(),
+                }),
+                _ => None,
+            })
+            .collect()
+            .await;
+        let errors = errors.into_iter().flatten().collect_vec();
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ParallelTestError { errors })
+        }
+    }
+
+    /// sync version of `run_parallel_async`
+    pub fn run_parallel<Fut>(
+        &mut self,
+        glob: &str,
+        hosts: Vec<String>,
+        conn_builder: fn(String, String) -> Fut,
+        jobs: usize,
+    ) -> Result<(), ParallelTestError>
+    where
+        Fut: Future<Output = D>,
+    {
+        block_on(self.run_parallel_async(glob, hosts, conn_builder, jobs))
     }
 
     /// Replace all keywords in the SQL.
