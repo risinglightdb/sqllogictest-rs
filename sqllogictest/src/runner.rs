@@ -91,10 +91,10 @@ pub struct ParallelTestError {
 
 impl Display for ParallelTestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "parallel test failed\n")?;
+        writeln!(f, "parallel test failed")?;
         write!(f, "Caused by:")?;
         for i in &self.errors {
-            write!(f, "{}\n ", i)?;
+            writeln!(f, "{}", i)?;
         }
         Ok(())
     }
@@ -370,7 +370,6 @@ impl<D: AsyncDB> Runner<D> {
                 .run(&format!("CREATE DATABASE {};", db_name))
                 .await
                 .expect("create db failed");
-            let conn_builder = conn_builder.clone();
             let target = hosts[idx % hosts.len()].clone();
             tasks.push(async move {
                 let db = conn_builder(target, db_name).await;
@@ -391,7 +390,7 @@ impl<D: AsyncDB> Runner<D> {
             })
             .collect()
             .await;
-        let errors = errors.into_iter().flat_map(|i| i).collect_vec();
+        let errors = errors.into_iter().flatten().collect_vec();
         if errors.is_empty() {
             Ok(())
         } else {
