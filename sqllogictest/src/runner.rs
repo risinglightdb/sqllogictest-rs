@@ -6,7 +6,8 @@ use std::time::Duration;
 use std::vec;
 
 use async_trait::async_trait;
-use futures_lite::{future, Future};
+use futures::executor::block_on;
+use futures::Future;
 use itertools::Itertools;
 use tempfile::{tempdir, TempDir};
 
@@ -261,7 +262,7 @@ impl<D: AsyncDB> Runner<D> {
 
     /// Run a single record.
     pub fn run(&mut self, record: Record) -> Result<(), TestError> {
-        future::block_on(self.run_async(record))
+        futures::executor::block_on(self.run_async(record))
     }
 
     /// Run multiple records.
@@ -287,7 +288,7 @@ impl<D: AsyncDB> Runner<D> {
         &mut self,
         records: impl IntoIterator<Item = Record>,
     ) -> Result<(), TestError> {
-        future::block_on(self.run_multi_async(records))
+        block_on(self.run_multi_async(records))
     }
 
     /// Run a sqllogictest script.
@@ -304,12 +305,12 @@ impl<D: AsyncDB> Runner<D> {
 
     /// Run a sqllogictest script.
     pub fn run_script(&mut self, script: &str) -> Result<(), TestError> {
-        future::block_on(self.run_script_async(script))
+        block_on(self.run_script_async(script))
     }
 
     /// Run a sqllogictest file.
     pub fn run_file(&mut self, filename: impl AsRef<Path>) -> Result<(), TestError> {
-        future::block_on(self.run_file_async(filename))
+        block_on(self.run_file_async(filename))
     }
 
     /// aceept the tasks, spawn jobs task to run slt test. the tasks are (AsyncDB, slt filename)
@@ -390,7 +391,7 @@ impl<D: AsyncDB> Runner<D> {
         F: Fn(String, String) -> Fut,
         Fut: Future<Output = D>,
     {
-        future::block_on(self.run_parallel_async(glob, init_db, hosts, conn_builder, jobs))
+        block_on(self.run_parallel_async(glob, init_db, hosts, conn_builder, jobs))
     }
 
     /// Replace all keywords in the SQL.
