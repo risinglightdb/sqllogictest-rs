@@ -2,12 +2,13 @@
 
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 use std::vec;
 
 use async_trait::async_trait;
 use futures::executor::block_on;
-use futures::Future;
+use futures::{stream, Future, StreamExt};
 use itertools::Itertools;
 use tempfile::{tempdir, TempDir};
 
@@ -316,9 +317,8 @@ impl<D: AsyncDB> Runner<D> {
     /// aceept the tasks, spawn jobs task to run slt test. the tasks are (AsyncDB, slt filename)
     /// pairs.
     pub async fn run_parallel_async<F, Fut>(
-        &self,
+        &mut self,
         glob: &str,
-        mut init_db: D,
         hosts: Vec<String>,
         conn_builder: F,
         jobs: usize,
@@ -329,6 +329,7 @@ impl<D: AsyncDB> Runner<D> {
     {
         let files = glob::glob(glob).expect("failed to read glob pattern");
         let mut tasks = vec![];
+        let conn_builder = Arc::new(conn_builder);
 
         for (idx, file) in files.enumerate() {
             // for every slt file, we create a database against table conflict
@@ -343,46 +344,31 @@ impl<D: AsyncDB> Runner<D> {
                 .replace('.', "_")
                 .replace('-', "_");
 
-            init_db
+            self.db
                 .run(&format!("CREATE DATABASE {};", db_name))
                 .await
                 .expect("create db failed");
-            tasks.push((
-                conn_builder(hosts[idx % hosts.len()].clone(), db_name).await,
-                file.to_string_lossy().to_string(),
-            ));
-        }
-
-        let chunk_size = (tasks.len() + jobs - 1) / jobs;
-        let mut chunked_tasks = vec![];
-        loop {
-            if tasks.len() > chunk_size {
-                chunked_tasks.push(tasks.drain((tasks.len() - chunk_size)..).collect_vec());
-            } else {
-                chunked_tasks.push(tasks.drain(..).collect_vec());
-                break;
-            }
-        }
-
-        let tasks = chunked_tasks
-            .into_iter()
-            .map(|task| async {
-                for (db, filename) in task {
-                    let mut tester = Runner::new(db);
-                    tester.run_file_async(filename).await.unwrap();
-                }
+            let conn_builder = conn_builder.clone();
+            let target = hosts[idx % hosts.len()].clone();
+            tasks.push(async move {
+                let db = conn_builder(target, db_name).await;
+                let mut tester = Runner::new(db);
+                let filename = file.to_string_lossy().to_string();
+                tester.run_file_async(filename).await
             })
-            .collect_vec();
+        }
 
-        futures::future::join_all(tasks.into_iter()).await;
+        let mut tasks = stream::iter(tasks).buffer_unordered(jobs);
+        while let Some(result) = tasks.next().await {
+            result?;
+        }
         Ok(())
     }
 
     /// sync version of `run_parallel_async`
     pub fn run_parallel<F, Fut>(
-        &self,
+        &mut self,
         glob: &str,
-        init_db: D,
         hosts: Vec<String>,
         conn_builder: F,
         jobs: usize,
@@ -391,7 +377,7 @@ impl<D: AsyncDB> Runner<D> {
         F: Fn(String, String) -> Fut,
         Fut: Future<Output = D>,
     {
-        block_on(self.run_parallel_async(glob, init_db, hosts, conn_builder, jobs))
+        block_on(self.run_parallel_async(glob, hosts, conn_builder, jobs))
     }
 
     /// Replace all keywords in the SQL.
