@@ -183,14 +183,14 @@ async fn run_parallel(
         }
     }
 
-    {
-        let mut engine = engines::connect(&engine, &config).await?;
-        for db_name in create_databases.keys() {
-            let query = format!("CREATE DATABASE {};", db_name);
-            eprintln!("+ {}", query);
-            if let Err(err) = engine.run(&query).await {
-                eprintln!("  ignore error: {}", err);
-            }
+    let mut db = engines::connect(&engine, &config).await?;
+
+    let db_names: Vec<String> = create_databases.keys().cloned().collect();
+    for db_name in &db_names {
+        let query = format!("CREATE DATABASE {};", db_name);
+        eprintln!("+ {}", query);
+        if let Err(err) = db.run(&query).await {
+            eprintln!("  ignore error: {}", err);
         }
     }
 
@@ -257,6 +257,14 @@ async fn run_parallel(
         "\n All test cases finished in {} ms",
         start.elapsed().as_millis()
     );
+
+    for db_name in db_names {
+        let query = format!("DROP DATABASE {};", db_name);
+        eprintln!("+ {}", query);
+        if let Err(err) = db.run(&query).await {
+            eprintln!("  ignore error: {}", err);
+        }
+    }
 
     if !failed_case.is_empty() {
         Err(anyhow!("some test case failed:\n{:#?}", failed_case))
