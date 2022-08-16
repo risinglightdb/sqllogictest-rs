@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2022-08-16
+
+- Add parallel running to `Runner`.
+- Drop database after parallel run.
+
 ## [0.6.0] - 2022-08-06
 
 - Support postgres extended mode
