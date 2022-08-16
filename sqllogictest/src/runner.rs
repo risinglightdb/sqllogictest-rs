@@ -79,7 +79,8 @@ pub struct TestError {
 
 #[derive(thiserror::Error, Debug, Clone)]
 #[error("test({filename}): {error}")]
-pub struct TestFileError {
+// TODO(wrj): merge it to TestError
+struct TestFileError {
     filename: String,
     error: String,
 }
