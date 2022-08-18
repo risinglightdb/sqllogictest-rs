@@ -9,6 +9,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use chrono::Local;
 use clap::{ArgEnum, Parser};
 use console::style;
+use engines::EngineType;
 use futures::StreamExt;
 use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
@@ -38,8 +39,8 @@ struct Opt {
     files: String,
 
     /// The database engine name, used by the record conditions.
-    #[clap(short, long, default_value = "postgres")]
-    engine: String,
+    #[clap(short, long, arg_enum, default_value = "postgres")]
+    engine: EngineType,
 
     /// Whether to enable colorful output.
     #[clap(
@@ -126,10 +127,6 @@ pub async fn main_okk() -> Result<()> {
     }
     let addrs = host.into_iter().zip_eq(port).collect();
 
-    if !engines::ENGINES.contains(&engine.as_str()) {
-        return Err(anyhow!("engine {engine} is not yet supported."));
-    }
-
     match color {
         Color::Always => {
             console::set_colors_enabled(true);
@@ -180,7 +177,7 @@ async fn run_parallel(
     jobs: usize,
     test_suite: &mut TestSuite,
     files: Vec<PathBuf>,
-    engine: String,
+    engine: EngineType,
     config: DBConfig,
     junit: Option<String>,
 ) -> Result<()> {
@@ -201,7 +198,7 @@ async fn run_parallel(
         }
     }
 
-    let mut db = engines::connect(&engine, &config).await?;
+    let mut db = engines::connect(engine, &config).await?;
 
     let db_names: Vec<String> = create_databases.keys().cloned().collect();
     for db_name in &db_names {
@@ -217,10 +214,8 @@ async fn run_parallel(
             let mut config = config.clone();
             config.db = db_name;
             let file = filename.to_string_lossy().to_string();
-            let engine = engine.clone();
             async move {
-                let (buf, res) = tokio::spawn(async {
-                    let engine = engine;
+                let (buf, res) = tokio::spawn(async move {
                     let mut buf = vec![];
                     let res = connect_and_run_test_file(&mut buf, filename, engine, config).await;
                     (buf, res)
@@ -295,11 +290,11 @@ async fn run_parallel(
 async fn run_serial(
     test_suite: &mut TestSuite,
     files: Vec<PathBuf>,
-    engine: String,
+    engine: EngineType,
     config: DBConfig,
     junit: Option<String>,
 ) -> Result<()> {
-    let engine = engines::connect(&engine, &config).await?;
+    let engine = engines::connect(engine, &config).await?;
     let mut runner = Runner::new(engine);
 
     let mut failed_case = vec![];
@@ -351,10 +346,10 @@ async fn flush(out: &mut impl std::io::Write) -> std::io::Result<()> {
 async fn connect_and_run_test_file(
     out: &mut impl std::io::Write,
     filename: PathBuf,
-    engine: String,
+    engine: EngineType,
     config: DBConfig,
 ) -> Result<Duration> {
-    let engine = engines::connect(&engine, &config).await?;
+    let engine = engines::connect(engine, &config).await?;
     let mut runner = Runner::new(engine);
 
     let result = run_test_file(out, &mut runner, filename).await?;
@@ -449,7 +444,7 @@ async fn run_test_file<T: std::io::Write, D: AsyncDB>(
         out,
         &mut begin_times,
         &mut did_pop,
-        &*filename.to_string_lossy(),
+        &filename.to_string_lossy(),
     )?;
 
     writeln!(out)?;
