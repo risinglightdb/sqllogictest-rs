@@ -1,4 +1,5 @@
 mod postgres;
+use clap::ArgEnum;
 use postgres::Postgres;
 mod postgres_extended;
 use std::fmt::Display;
@@ -9,18 +10,23 @@ use sqllogictest::AsyncDB;
 
 use super::{DBConfig, Result};
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
+pub enum EngineType {
+    Postgres,
+    PostgresExtended,
+}
+
 enum Engines {
     Postgres(Postgres),
     PostgresExtended(PostgresExtended),
 }
 
-pub const ENGINES: [&str; 2] = ["postgres", "postgres-extended"];
-
-pub(super) async fn connect(engine: &str, config: &DBConfig) -> Result<impl AsyncDB> {
+pub(super) async fn connect(engine: EngineType, config: &DBConfig) -> Result<impl AsyncDB> {
     Ok(match engine {
-        "postgres" => Engines::Postgres(Postgres::connect(config).await?),
-        "postgres-extended" => Engines::PostgresExtended(PostgresExtended::connect(config).await?),
-        _ => unreachable!(),
+        EngineType::Postgres => Engines::Postgres(Postgres::connect(config).await?),
+        EngineType::PostgresExtended => {
+            Engines::PostgresExtended(PostgresExtended::connect(config).await?)
+        }
     })
 }
 
