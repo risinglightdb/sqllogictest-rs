@@ -5,13 +5,14 @@ use std::io::{stdout, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use chrono::Local;
 use clap::{ArgEnum, Parser};
 use console::style;
 use futures::StreamExt;
 use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
+use rand::seq::SliceRandom;
 use sqllogictest::{AsyncDB, Control, Record, Runner};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
@@ -60,11 +61,13 @@ struct Opt {
     junit: Option<String>,
 
     /// The database server host.
+    /// If multiple addresses are specified, one will be chosen randomly per session.
     #[clap(short, long, default_value = "localhost")]
-    host: String,
+    host: Vec<String>,
     /// The database server port.
+    /// If multiple addresses are specified, one will be chosen randomly per session.
     #[clap(short, long, default_value = "5432")]
-    port: u16,
+    port: Vec<u16>,
     /// The database name to connect.
     #[clap(short, long, default_value = "postgres")]
     db: String,
@@ -79,16 +82,23 @@ struct Opt {
 /// Connection configuration.
 #[derive(Clone)]
 struct DBConfig {
-    /// The database server host.
-    host: String,
-    /// The database server port.
-    port: u16,
+    /// The database server host and port. Will randomly choose one if multiple are given.
+    addrs: Vec<(String, u16)>,
     /// The database name to connect.
     db: String,
     /// The database username.
     user: String,
     /// The database password.
     pass: String,
+}
+
+impl DBConfig {
+    fn random_addr(&self) -> (&str, u16) {
+        self.addrs
+            .choose(&mut rand::thread_rng())
+            .map(|(host, port)| (host.as_ref(), *port))
+            .unwrap()
+    }
 }
 
 pub async fn main_okk() -> Result<()> {
@@ -107,6 +117,15 @@ pub async fn main_okk() -> Result<()> {
         pass,
     } = Opt::parse();
 
+    if host.len() != port.len() {
+        bail!(
+            "{} hosts are provided while {} ports are provided",
+            host.len(),
+            port.len(),
+        );
+    }
+    let addrs = host.into_iter().zip_eq(port).collect();
+
     if !engines::ENGINES.contains(&engine.as_str()) {
         return Err(anyhow!("engine {engine} is not yet supported."));
     }
@@ -123,15 +142,14 @@ pub async fn main_okk() -> Result<()> {
         Color::Auto => {}
     }
 
-    let files = glob::glob(&files).expect("failed to read glob pattern");
+    let files = glob::glob(&files).context("failed to read glob pattern")?;
     let files = files.into_iter().try_collect::<_, Vec<_>, _>()?;
     if files.is_empty() {
-        return Err(anyhow!("no test case found"));
+        bail!("no test case found");
     }
 
     let config = DBConfig {
-        host,
-        port,
+        addrs,
         db,
         user,
         pass,
