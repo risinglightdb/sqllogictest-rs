@@ -196,7 +196,6 @@ async fn run_parallel(
             let mut config = config.clone();
             config.db = db_name;
             let file = filename.to_string_lossy().to_string();
-            let engine = engine.clone();
             async move {
                 let (buf, res) = tokio::spawn(async move {
                     let mut buf = vec![];
@@ -427,7 +426,7 @@ async fn run_test_file<T: std::io::Write, D: AsyncDB>(
         out,
         &mut begin_times,
         &mut did_pop,
-        &*filename.to_string_lossy(),
+        &filename.to_string_lossy(),
     )?;
 
     writeln!(out)?;
