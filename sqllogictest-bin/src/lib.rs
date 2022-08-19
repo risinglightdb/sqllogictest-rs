@@ -62,13 +62,18 @@ struct Opt {
     junit: Option<String>,
 
     /// The database server host.
-    /// If multiple addresses are specified, one will be chosen randomly per session.
     #[clap(short, long, default_value = "localhost")]
-    host: Vec<String>,
+    host: String,
     /// The database server port.
-    /// If multiple addresses are specified, one will be chosen randomly per session.
     #[clap(short, long, default_value = "5432")]
-    port: Vec<u16>,
+    port: u16,
+    /// Multiple addresses to database servers.
+    ///
+    /// If specified, one will be chosen randomly per session. --host and --port will be ignored.
+    ///
+    /// [example: --hosts 192.168.1.2:5432 --hosts 192.168.1.2:5432]
+    #[clap(long)]
+    hosts: Vec<String>,
     /// The database name to connect.
     #[clap(short, long, default_value = "postgres")]
     db: String,
@@ -113,19 +118,30 @@ pub async fn main_okk() -> Result<()> {
         junit,
         host,
         port,
+        hosts,
         db,
         user,
         pass,
     } = Opt::parse();
 
-    if host.len() != port.len() {
-        bail!(
-            "{} hosts are provided while {} ports are provided",
-            host.len(),
-            port.len(),
-        );
-    }
-    let addrs = host.into_iter().zip_eq(port).collect();
+    let addrs = if hosts.is_empty() {
+        vec![(host, port)]
+    } else {
+        hosts
+            .iter()
+            .map(|s| {
+                let (host, port) = s
+                    .split_once(':')
+                    .ok_or_else(|| panic!("invalid host address: {s}"))
+                    .unwrap();
+                let port = port
+                    .parse()
+                    .map_err(|_| panic!("port is not a number: {port}"))
+                    .unwrap();
+                (host.into(), port)
+            })
+            .collect()
+    };
 
     match color {
         Color::Always => {
