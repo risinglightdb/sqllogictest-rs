@@ -195,6 +195,8 @@ pub enum ParseErrorKind {
     InvalidControl(String),
     #[error("invalid include file pattern: {0:?}")]
     InvalidIncludeFile(String),
+    #[error("no such file")]
+    FileNotFound,
 }
 
 impl ParseErrorKind {
@@ -360,6 +362,9 @@ pub fn parse_file(filename: impl AsRef<Path>) -> Result<Vec<Record>, ParseError>
 }
 
 fn parse_file_inner(filename: Arc<str>, path: &Path) -> Result<Vec<Record>, ParseError> {
+    if !path.exists() {
+        return Err(ParseErrorKind::FileNotFound.at(Location::new(filename, 0)));
+    }
     let script = std::fs::read_to_string(path).unwrap();
     let mut records = vec![];
     for rec in parse_inner(filename, &script)? {
