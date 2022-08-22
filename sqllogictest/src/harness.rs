@@ -3,9 +3,9 @@ use std::path::Path;
 pub use glob::glob;
 pub use libtest_mimic::{run, Arguments, Failed, Trial};
 
-use crate::{Runner, DB};
+use crate::{AsyncDB, Runner};
 
-/// * `db_fn`: `fn() -> sqllogictest::DB`
+/// * `db_fn`: `fn() -> sqllogictest::AsyncDB`
 /// * `pattern`: The glob used to match against and select each file to be tested. It is relative to
 ///   the root of the crate.
 #[macro_export]
@@ -32,7 +32,7 @@ macro_rules! harness {
     };
 }
 
-pub fn test(filename: impl AsRef<Path>, db: impl DB) -> Result<(), Failed> {
+pub fn test(filename: impl AsRef<Path>, db: impl AsyncDB) -> Result<(), Failed> {
     let mut tester = Runner::new(db);
     tester.run_file(filename)?;
     Ok(())
