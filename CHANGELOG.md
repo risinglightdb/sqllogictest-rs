@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2022-08-22
+
+- Support load balancing of multiple addr.
+- Integrate with libtest-mimic. Add the macro `sqllogictest::harness!`.
+- Improve error handling for parser.
+
 ## [0.6.1] - 2022-08-16
 
 - Add parallel running to `Runner`.
