@@ -122,6 +122,8 @@ impl TestError {
 /// The error kind for running sqllogictest.
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum TestErrorKind {
+    #[error("parse error: {0}")]
+    ParseError(ParseErrorKind),
     #[error("statement is expected to fail, but actually succeed:\n[SQL] {sql}")]
     StatementOk { sql: String },
     #[error("statement failed: {err}\n[SQL] {sql}")]
@@ -146,6 +148,15 @@ pub enum TestErrorKind {
         expected: String,
         actual: String,
     },
+}
+
+impl From<ParseError> for TestError {
+    fn from(e: ParseError) -> Self {
+        TestError {
+            kind: TestErrorKind::ParseError(e.kind()),
+            loc: e.location(),
+        }
+    }
 }
 
 impl TestErrorKind {
@@ -324,7 +335,7 @@ impl<D: AsyncDB> Runner<D> {
 
     /// Run a sqllogictest file.
     pub async fn run_file_async(&mut self, filename: impl AsRef<Path>) -> Result<(), TestError> {
-        let records = parse_file(filename).expect("failed to parse sqllogictest");
+        let records = parse_file(filename)?;
         self.run_multi_async(records).await
     }
 

@@ -195,6 +195,8 @@ pub enum ParseErrorKind {
     InvalidControl(String),
     #[error("invalid include file pattern: {0:?}")]
     InvalidIncludeFile(String),
+    #[error("no such file")]
+    FileNotFound,
 }
 
 impl ParseErrorKind {
@@ -207,11 +209,11 @@ const DEFAULT_FILENAME: &str = "<entry>";
 
 /// Parse a sqllogictest script into a list of records.
 pub fn parse(script: &str) -> Result<Vec<Record>, ParseError> {
-    parse_inner(Arc::from(DEFAULT_FILENAME), script)
+    parse_inner(DEFAULT_FILENAME, script)
 }
 
 #[allow(clippy::collapsible_match)]
-fn parse_inner(filename: Arc<str>, script: &str) -> Result<Vec<Record>, ParseError> {
+fn parse_inner(filename: &str, script: &str) -> Result<Vec<Record>, ParseError> {
     let mut lines = script.split('\n').enumerate();
     let mut records = vec![];
     let mut conditions = vec![];
@@ -219,7 +221,7 @@ fn parse_inner(filename: Arc<str>, script: &str) -> Result<Vec<Record>, ParseErr
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let loc = Location::new(filename.clone(), num as u32 + 1);
+        let loc = Location::new(filename, num as u32 + 1);
         let tokens: Vec<&str> = line.split_whitespace().collect();
         match tokens.as_slice() {
             [] => continue,
@@ -353,13 +355,16 @@ fn parse_inner(filename: Arc<str>, script: &str) -> Result<Vec<Record>, ParseErr
 
 /// Parse a sqllogictest file and link all included scripts together.
 pub fn parse_file(filename: impl AsRef<Path>) -> Result<Vec<Record>, ParseError> {
-    parse_file_inner(
-        Arc::from(filename.as_ref().to_str().unwrap()),
-        filename.as_ref(),
-    )
+    parse_file_inner(filename)
 }
 
-fn parse_file_inner(filename: Arc<str>, path: &Path) -> Result<Vec<Record>, ParseError> {
+fn parse_file_inner(filename: impl AsRef<Path>) -> Result<Vec<Record>, ParseError> {
+    let filename = filename.as_ref().to_str().unwrap();
+    let path: &Path = filename.as_ref();
+
+    if !path.exists() {
+        return Err(ParseErrorKind::FileNotFound.at(Location::new(filename, 0)));
+    }
     let script = std::fs::read_to_string(path).unwrap();
     let mut records = vec![];
     for rec in parse_inner(filename, &script)? {
@@ -376,17 +381,13 @@ fn parse_file_inner(filename: Arc<str>, path: &Path) -> Result<Vec<Record>, Pars
                 .map_err(|e| InvalidIncludeFile(format!("{:?}", e)).at(loc))?
                 .filter_map(Result::ok)
             {
-                let new_filename_str = included_file.as_os_str().to_string_lossy().to_string();
-                let new_filename = Arc::from(new_filename_str.clone());
-                let new_path = included_file.as_path();
+                let included_file = included_file.as_os_str().to_string_lossy().to_string();
 
                 records.push(Record::Control(Control::BeginInclude(
-                    new_filename_str.clone(),
+                    included_file.clone(),
                 )));
-                records.extend(parse_file_inner(new_filename, new_path)?);
-                records.push(Record::Control(Control::EndInclude(
-                    new_filename_str.clone(),
-                )));
+                records.extend(parse_file_inner(&included_file)?);
+                records.push(Record::Control(Control::EndInclude(included_file.clone())));
             }
         } else {
             records.push(rec);
