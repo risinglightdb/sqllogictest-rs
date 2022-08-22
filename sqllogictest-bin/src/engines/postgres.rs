@@ -13,15 +13,17 @@ pub struct Postgres {
 
 impl Postgres {
     pub(super) async fn connect(config: &DBConfig) -> Result<Self> {
+        let (host, port) = config.random_addr();
+
         let (client, connection) = tokio_postgres::Config::new()
-            .host(&config.host)
-            .port(config.port)
+            .host(host)
+            .port(port)
             .dbname(&config.db)
             .user(&config.user)
             .password(&config.pass)
             .connect(tokio_postgres::NoTls)
             .await
-            .context("failed to connect to postgres")?;
+            .context(format!("failed to connect to postgres at {host}:{port}"))?;
 
         let join_handle = tokio::spawn(async move {
             if let Err(e) = connection.await {
