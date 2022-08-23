@@ -179,10 +179,12 @@ pub struct Runner<D: AsyncDB> {
     testdir: Option<TempDir>,
     sort_mode: Option<SortMode>,
     /// An async function executed after each statement completes.
-    on_stmt_complete: Option<Box<dyn FnMut() -> BoxFuture<'static, ()> + Send>>,
+    on_stmt_complete: Option<HookFn>,
     /// An async function executed after each query completes.
-    on_query_complete: Option<Box<dyn FnMut() -> BoxFuture<'static, ()> + Send>>,
+    on_query_complete: Option<HookFn>,
 }
+
+type HookFn = Box<dyn FnMut(&str) -> BoxFuture<'static, ()> + Send>;
 
 impl<D: AsyncDB> Runner<D> {
     /// Create a new test runner on the database.
@@ -247,7 +249,7 @@ impl<D: AsyncDB> Runner<D> {
                     _ => {}
                 }
                 if let Some(f) = &mut self.on_stmt_complete {
-                    f().await;
+                    f(&sql).await;
                 }
             }
             Record::Query { conditions, .. } if self.should_skip(&conditions) => {}
@@ -288,7 +290,7 @@ impl<D: AsyncDB> Runner<D> {
                     .at(loc));
                 }
                 if let Some(f) = &mut self.on_query_complete {
-                    f().await;
+                    f(&sql).await;
                 }
             }
             Record::Sleep { duration, .. } => D::sleep(duration).await,
@@ -454,19 +456,19 @@ impl<D: AsyncDB> Runner<D> {
     /// Executes async function `f` after each query completes.
     pub fn set_on_query_complete<F, Fut>(&mut self, mut f: F)
     where
-        F: FnMut() -> Fut + Send + 'static,
+        F: FnMut(&str) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        self.on_query_complete = Some(Box::new(move || f().boxed()));
+        self.on_query_complete = Some(Box::new(move |sql| f(sql).boxed()));
     }
 
     /// Executes async function `f` after each statement completes.
     pub fn set_on_stmt_complete<F, Fut>(&mut self, mut f: F)
     where
-        F: FnMut() -> Fut + Send + 'static,
+        F: FnMut(&str) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        self.on_stmt_complete = Some(Box::new(move || f().boxed()));
+        self.on_stmt_complete = Some(Box::new(move |sql| f(sql).boxed()));
     }
 }
 
