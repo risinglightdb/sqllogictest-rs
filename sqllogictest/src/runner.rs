@@ -452,7 +452,7 @@ impl<D: AsyncDB> Runner<D> {
     }
 
     /// Executes async function `f` after each query completes.
-    pub fn on_query_complete<F, Fut>(&mut self, mut f: F)
+    pub fn set_on_query_complete<F, Fut>(&mut self, mut f: F)
     where
         F: FnMut() -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
@@ -461,7 +461,7 @@ impl<D: AsyncDB> Runner<D> {
     }
 
     /// Executes async function `f` after each statement completes.
-    pub fn on_stmt_complete<F, Fut>(&mut self, mut f: F)
+    pub fn set_on_stmt_complete<F, Fut>(&mut self, mut f: F)
     where
         F: FnMut() -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
