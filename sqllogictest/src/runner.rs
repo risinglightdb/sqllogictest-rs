@@ -7,8 +7,7 @@ use std::time::Duration;
 use std::vec;
 
 use async_trait::async_trait;
-use futures::executor::block_on;
-use futures::{stream, Future, StreamExt};
+use futures::{executor::block_on, future::BoxFuture, stream, Future, FutureExt, StreamExt};
 use itertools::Itertools;
 use tempfile::{tempdir, TempDir};
 
@@ -179,7 +178,13 @@ pub struct Runner<D: AsyncDB> {
     validator: Validator,
     testdir: Option<TempDir>,
     sort_mode: Option<SortMode>,
+    /// An async function executed after each statement completes.
+    on_stmt_complete: Option<HookFn>,
+    /// An async function executed after each query completes.
+    on_query_complete: Option<HookFn>,
 }
+
+type HookFn = Box<dyn FnMut(&str) -> BoxFuture<'static, ()> + Send>;
 
 impl<D: AsyncDB> Runner<D> {
     /// Create a new test runner on the database.
@@ -189,6 +194,8 @@ impl<D: AsyncDB> Runner<D> {
             validator: |x, y| x == y,
             testdir: None,
             sort_mode: None,
+            on_stmt_complete: None,
+            on_query_complete: None,
         }
     }
 
@@ -206,7 +213,7 @@ impl<D: AsyncDB> Runner<D> {
 
     /// Run a single record.
     pub async fn run_async(&mut self, record: Record) -> Result<(), TestError> {
-        info!("test: {:?}", record);
+        tracing::info!(?record, "testing");
         match record {
             Record::Statement { conditions, .. } if self.should_skip(&conditions) => {}
             Record::Statement {
@@ -240,6 +247,9 @@ impl<D: AsyncDB> Runner<D> {
                         .at(loc));
                     }
                     _ => {}
+                }
+                if let Some(f) = &mut self.on_stmt_complete {
+                    f(&sql).await;
                 }
             }
             Record::Query { conditions, .. } if self.should_skip(&conditions) => {}
@@ -278,6 +288,9 @@ impl<D: AsyncDB> Runner<D> {
                         actual: output.join("\n"),
                     }
                     .at(loc));
+                }
+                if let Some(f) = &mut self.on_query_complete {
+                    f(&sql).await;
                 }
             }
             Record::Sleep { duration, .. } => D::sleep(duration).await,
@@ -438,6 +451,24 @@ impl<D: AsyncDB> Runner<D> {
         conditions
             .iter()
             .any(|c| c.should_skip(self.db.engine_name()))
+    }
+
+    /// Executes async function `f` after each query completes.
+    pub fn set_on_query_complete<F, Fut>(&mut self, mut f: F)
+    where
+        F: FnMut(&str) -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.on_query_complete = Some(Box::new(move |sql| f(sql).boxed()));
+    }
+
+    /// Executes async function `f` after each statement completes.
+    pub fn set_on_stmt_complete<F, Fut>(&mut self, mut f: F)
+    where
+        F: FnMut(&str) -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.on_stmt_complete = Some(Box::new(move |sql| f(sql).boxed()));
     }
 }
 
