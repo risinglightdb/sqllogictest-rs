@@ -294,19 +294,19 @@ async fn run_serial(
     config: DBConfig,
     junit: Option<String>,
 ) -> Result<()> {
-    let engine = engines::connect(engine, &config).await?;
-    let mut runner = Runner::new(engine);
-
     let mut failed_case = vec![];
 
     for file in files {
+        let engine = engines::connect(engine, &config).await?;
+        let runner = Runner::new(engine);
+
         let filename = file.to_string_lossy().to_string();
         let test_case_name = filename
             .replace('/', "_")
             .replace(' ', "_")
             .replace('.', "_")
             .replace('-', "_");
-        let case = match run_test_file(&mut std::io::stdout(), &mut runner, &file).await {
+        let case = match run_test_file(&mut std::io::stdout(), runner, &file).await {
             Ok(duration) => {
                 let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
                 case.set_time(duration);
@@ -350,16 +350,15 @@ async fn connect_and_run_test_file(
     config: DBConfig,
 ) -> Result<Duration> {
     let engine = engines::connect(engine, &config).await?;
-    let mut runner = Runner::new(engine);
-
-    let result = run_test_file(out, &mut runner, filename).await?;
+    let runner = Runner::new(engine);
+    let result = run_test_file(out, runner, filename).await?;
 
     Ok(result)
 }
 
 async fn run_test_file<T: std::io::Write, D: AsyncDB>(
     out: &mut T,
-    runner: &mut Runner<D>,
+    mut runner: Runner<D>,
     filename: impl AsRef<Path>,
 ) -> Result<Duration> {
     let filename = filename.as_ref();
