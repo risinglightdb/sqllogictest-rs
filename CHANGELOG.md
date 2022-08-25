@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2022-08-25
+
+- Use one session for each file in serial mode.
+
 ## [0.6.3] - 2022-08-24
 
 - Support registering hook function after each query.
