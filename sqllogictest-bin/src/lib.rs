@@ -78,6 +78,9 @@ struct Opt {
     /// The database password.
     #[clap(short = 'w', long, default_value = "postgres")]
     pass: String,
+    /// To format file.
+    #[clap(long)]
+    format: bool,
 }
 
 /// Connection configuration.
@@ -116,7 +119,23 @@ pub async fn main_okk() -> Result<()> {
         db,
         user,
         pass,
+        format,
     } = Opt::parse();
+
+    let files = glob::glob(&files).context("failed to read glob pattern")?;
+    let files = files.into_iter().try_collect::<_, Vec<_>, _>()?;
+    if files.is_empty() {
+        bail!("no test case found");
+    }
+
+    if format {
+        for file in files {
+            let script = std::fs::read_to_string(&file).context("failed to read file")?;
+            let formatted_script = sqllogictest::format(&script);
+            std::fs::write(&file, formatted_script).context("failed to write file")?;
+        }
+        return Ok(());
+    }
 
     if host.len() != port.len() {
         bail!(
@@ -137,12 +156,6 @@ pub async fn main_okk() -> Result<()> {
             console::set_colors_enabled_stderr(false);
         }
         Color::Auto => {}
-    }
-
-    let files = glob::glob(&files).context("failed to read glob pattern")?;
-    let files = files.into_iter().try_collect::<_, Vec<_>, _>()?;
-    if files.is_empty() {
-        bail!("no test case found");
     }
 
     let config = DBConfig {

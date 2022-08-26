@@ -34,9 +34,13 @@
 //! }
 //! ```
 
+#[cfg(feature = "fmt")]
+mod fmt;
 pub mod harness;
 pub mod parser;
 pub mod runner;
 
+#[cfg(feature = "fmt")]
+pub use self::fmt::*;
 pub use self::parser::*;
 pub use self::runner::*;

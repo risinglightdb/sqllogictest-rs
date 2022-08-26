@@ -8,16 +8,20 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/risinglightdb/sqllogictest-rs"
 description = "Sqllogictest parser and runner."
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+fmt = ["sqlformat"]
+
 [dependencies]
 async-trait = "0.1"
 difference = "2.0"
+futures = "0.3"
 glob = "0.3"
 humantime = "2"
 itertools = "0.10"
-tracing = "0.1"
+libtest-mimic = "0.5"
+sqlformat = { version = "0.2", optional = true }
 tempfile = "3"
 thiserror = "1"
-futures = "0.3"
-libtest-mimic = "0.5"
+tracing = "0.1"

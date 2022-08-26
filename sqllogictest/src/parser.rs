@@ -1,6 +1,6 @@
 //! Sqllogictest parser.
 
-use std::fmt;
+use std::fmt::{self, Display};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -77,10 +77,10 @@ pub enum Record {
         conditions: Vec<Condition>,
         /// The SQL command is expected to fail instead of to succeed.
         error: bool,
-        /// The SQL command.
-        sql: String,
         /// Expected rows affected.
         expected_count: Option<u64>,
+        /// The SQL command.
+        sql: String,
     },
     /// A query is an SQL command from which we expect to receive results. The result set might be
     /// empty.
@@ -177,6 +177,12 @@ impl FromStr for SortMode {
             "valuesort" => Ok(Self::ValueSort),
             _ => Err(ParseErrorKind::InvalidSortMode(s.to_string())),
         }
+    }
+}
+
+impl Display for SortMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
