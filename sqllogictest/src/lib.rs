@@ -34,10 +34,9 @@
 //! }
 //! ```
 
+pub mod harness;
 pub mod parser;
 pub mod runner;
 
 pub use self::parser::*;
 pub use self::runner::*;
-
-pub mod harness;

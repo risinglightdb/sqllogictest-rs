@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -65,6 +66,8 @@ impl Location {
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[non_exhaustive]
 pub enum Record {
+    /// A comment line.
+    Comment { loc: Location, text: String },
     /// An include copies all records from another files.
     Include { loc: Location, filename: String },
     /// A statement is an SQL command that is to be evaluated but from which we do not expect to
@@ -150,13 +153,9 @@ pub enum SortMode {
 }
 
 impl SortMode {
+    #[deprecated(since = "0.7.0", note = "use `FromStr` instead.")]
     pub fn try_from_str(s: &str) -> Result<Self, ParseErrorKind> {
-        match s {
-            "nosort" => Ok(Self::NoSort),
-            "rowsort" => Ok(Self::RowSort),
-            "valuesort" => Ok(Self::ValueSort),
-            _ => Err(ParseErrorKind::InvalidSortMode(s.to_string())),
-        }
+        Self::from_str(s)
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -164,6 +163,19 @@ impl SortMode {
             Self::NoSort => "nosort",
             Self::RowSort => "rowsort",
             Self::ValueSort => "valuesort",
+        }
+    }
+}
+
+impl FromStr for SortMode {
+    type Err = ParseErrorKind;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "nosort" => Ok(Self::NoSort),
+            "rowsort" => Ok(Self::RowSort),
+            "valuesort" => Ok(Self::ValueSort),
+            _ => Err(ParseErrorKind::InvalidSortMode(s.to_string())),
         }
     }
 }
@@ -230,11 +242,19 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
     let mut records = vec![];
     let mut conditions = vec![];
     while let Some((num, line)) = lines.next() {
-        if line.is_empty() || line.starts_with('#') {
+        if line.is_empty() {
             continue;
         }
         let mut loc = loc.clone();
         loc.line = num as u32 + 1;
+
+        if let Some(text) = line.strip_prefix('#') {
+            records.push(Record::Comment {
+                loc,
+                text: text.to_string(),
+            });
+            continue;
+        }
         let tokens: Vec<&str> = line.split_whitespace().collect();
         match tokens.as_slice() {
             [] => continue,
@@ -303,7 +323,7 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                 });
             }
             ["query", type_string, res @ ..] => {
-                let sort_mode = match res.first().map(|&s| SortMode::try_from_str(s)).transpose() {
+                let sort_mode = match res.first().map(|&s| s.parse::<SortMode>()).transpose() {
                     Ok(sm) => sm,
                     Err(k) => return Err(k.at(loc)),
                 };
@@ -348,7 +368,7 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                 });
             }
             ["control", res @ ..] => match res {
-                ["sortmode", sort_mode] => match SortMode::try_from_str(sort_mode) {
+                ["sortmode", sort_mode] => match sort_mode.parse() {
                     Ok(sort_mode) => records.push(Record::Control(Control::SortMode(sort_mode))),
                     Err(k) => return Err(k.at(loc)),
                 },

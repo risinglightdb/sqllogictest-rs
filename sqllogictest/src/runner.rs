@@ -292,6 +292,7 @@ impl<D: AsyncDB> Runner<D> {
             Record::Sleep { duration, .. } => D::sleep(duration).await,
             Record::Halt { .. } => {}
             Record::Subtest { .. } => {}
+            Record::Comment { .. } => {}
             Record::Include { loc, .. } => {
                 unreachable!("include should be rewritten during link: at {}", loc)
             }
