@@ -2,7 +2,7 @@
 
 use std::fmt::Display;
 use std::path::Path;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 use std::vec;
 
@@ -17,7 +17,7 @@ use crate::parser::*;
 #[async_trait]
 pub trait AsyncDB: Send {
     /// The error type of SQL execution.
-    type Error: std::error::Error + Send + 'static;
+    type Error: std::error::Error + Send + Sync + 'static;
 
     /// Async run a SQL query and return the output.
     async fn run(&mut self, sql: &str) -> Result<String, Self::Error>;
@@ -40,7 +40,7 @@ pub trait AsyncDB: Send {
 /// The database to be tested.
 pub trait DB: Send {
     /// The error type of SQL execution.
-    type Error: std::error::Error + Send + 'static;
+    type Error: std::error::Error + Send + Sync + 'static;
 
     /// Run a SQL query and return the output.
     fn run(&mut self, sql: &str) -> Result<String, Self::Error>;
@@ -70,23 +70,15 @@ where
 
 /// The error type for running sqllogictest.
 #[derive(thiserror::Error, Clone)]
-#[error("test error at {loc}: {kind}")]
+#[error("{kind}\nat {loc}\n")]
 pub struct TestError {
     kind: TestErrorKind,
     loc: Location,
 }
 
-#[derive(thiserror::Error, Debug, Clone)]
-#[error("test({filename}): {error}")]
-// TODO(wrj): merge it to TestError
-struct TestFileError {
-    filename: String,
-    error: String,
-}
-
 #[derive(Clone, Debug, thiserror::Error)]
 pub struct ParallelTestError {
-    errors: Vec<TestFileError>,
+    errors: Vec<TestError>,
 }
 
 impl Display for ParallelTestError {
@@ -128,7 +120,7 @@ pub enum TestErrorKind {
     #[error("statement failed: {err}\n[SQL] {sql}")]
     StatementFail {
         sql: String,
-        err: Rc<dyn std::error::Error>,
+        err: Arc<dyn std::error::Error + Send + Sync>,
     },
     #[error("statement is expected to affect {expected} rows, but actually {actual}\n[SQL] {sql}")]
     StatementResultMismatch {
@@ -139,7 +131,7 @@ pub enum TestErrorKind {
     #[error("query failed: {err}\n[SQL] {sql}")]
     QueryFail {
         sql: String,
-        err: Rc<dyn std::error::Error>,
+        err: Arc<dyn std::error::Error + Send + Sync>,
     },
     #[error("query result mismatch:\n[SQL] {sql}\n[Diff]\n{}", difference::Changeset::new(.expected, .actual, "\n"))]
     QueryResultMismatch {
@@ -246,7 +238,7 @@ impl<D: AsyncDB> Runner<D> {
                     Err(e) if !error => {
                         return Err(TestErrorKind::StatementFail {
                             sql,
-                            err: Rc::new(e),
+                            err: Arc::new(e),
                         }
                         .at(loc));
                     }
@@ -270,7 +262,7 @@ impl<D: AsyncDB> Runner<D> {
                     Err(e) => {
                         return Err(TestErrorKind::QueryFail {
                             sql,
-                            err: Rc::new(e),
+                            err: Arc::new(e),
                         }
                         .at(loc));
                     }
@@ -404,22 +396,15 @@ impl<D: AsyncDB> Runner<D> {
                 let db = conn_builder(target, db_name).await;
                 let mut tester = Runner::new(db);
                 let filename = file.to_string_lossy().to_string();
-                (filename.clone(), tester.run_file_async(filename).await)
+                tester.run_file_async(filename).await
             })
         }
 
         let tasks = stream::iter(tasks).buffer_unordered(jobs);
         let errors: Vec<_> = tasks
-            .map(|result| match result {
-                (filename, Err(error)) => Some(TestFileError {
-                    filename,
-                    error: error.to_string(),
-                }),
-                _ => None,
-            })
+            .filter_map(|result| async { result.err() })
             .collect()
             .await;
-        let errors = errors.into_iter().flatten().collect_vec();
         if errors.is_empty() {
             Ok(())
         } else {
