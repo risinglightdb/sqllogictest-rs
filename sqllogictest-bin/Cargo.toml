@@ -1,15 +1,13 @@
 [package]
 name = "sqllogictest-bin"
-version = "0.6.4"
-edition = "2021"
-homepage = "https://github.com/risinglightdb/sqllogictest-rs"
-keywords = ["sql", "database", "parser", "cli"]
-license = "MIT OR Apache-2.0"
-readme = "README.md"
-repository = "https://github.com/risinglightdb/sqllogictest-rs"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 description = "Sqllogictest CLI."
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 anyhow = { version = "1" }
 async-trait = "0.1"
@@ -31,5 +29,11 @@ rust_decimal = { version = "1.7.0", features = ["tokio-pg"] }
 sqllogictest = { path = "../sqllogictest", version = "0.6" }
 tempfile = "3"
 thiserror = "1"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "fs"] }
+tokio = { version = "1", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "fs",
+] }
 tokio-postgres = { version = "0.7" }
