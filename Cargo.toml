@@ -1,2 +1,10 @@
 [workspace]
 members = ["sqllogictest", "sqllogictest-bin", "examples/*", "tests"]
+
+[workspace.package]
+version = "0.6.4"
+edition = "2021"
+homepage = "https://github.com/risinglightdb/sqllogictest-rs"
+keywords = ["sql", "database", "parser", "cli"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/risinglightdb/sqllogictest-rs"
