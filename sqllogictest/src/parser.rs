@@ -12,11 +12,16 @@ use crate::ParseErrorKind::InvalidIncludeFile;
 pub struct Location {
     file: Arc<str>,
     line: u32,
+    upper: Option<Arc<Location>>,
 }
 
 impl fmt::Display for Location {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.file, self.line)
+        write!(f, "{}:{}", self.file, self.line)?;
+        if let Some(upper) = &self.upper {
+            write!(f, "\nat {}", upper)?;
+        }
+        Ok(())
     }
 }
 
@@ -35,14 +40,23 @@ impl Location {
         Self {
             file: file.into(),
             line,
+            upper: None,
         }
     }
 
+    /// Returns the location of next line.
     #[must_use]
-    fn map_line(self, op: impl Fn(u32) -> u32) -> Self {
+    fn next_line(mut self) -> Self {
+        self.line += 1;
+        self
+    }
+
+    /// Returns the location of next level file.
+    fn include(&self, file: &str) -> Self {
         Self {
-            file: self.file,
-            line: op(self.line),
+            file: file.into(),
+            line: 0,
+            upper: Some(Arc::new(self.clone())),
         }
     }
 }
@@ -205,15 +219,13 @@ impl ParseErrorKind {
     }
 }
 
-const DEFAULT_FILENAME: &str = "<entry>";
-
 /// Parse a sqllogictest script into a list of records.
 pub fn parse(script: &str) -> Result<Vec<Record>, ParseError> {
-    parse_inner(DEFAULT_FILENAME, script)
+    parse_inner(&Location::new("<unknown>", 0), script)
 }
 
 #[allow(clippy::collapsible_match)]
-fn parse_inner(filename: &str, script: &str) -> Result<Vec<Record>, ParseError> {
+fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> {
     let mut lines = script.split('\n').enumerate();
     let mut records = vec![];
     let mut conditions = vec![];
@@ -221,7 +233,8 @@ fn parse_inner(filename: &str, script: &str) -> Result<Vec<Record>, ParseError> 
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let loc = Location::new(filename, num as u32 + 1);
+        let mut loc = loc.clone();
+        loc.line = num as u32 + 1;
         let tokens: Vec<&str> = line.split_whitespace().collect();
         match tokens.as_slice() {
             [] => continue,
@@ -270,13 +283,10 @@ fn parse_inner(filename: &str, script: &str) -> Result<Vec<Record>, ParseError> 
                     }
                     _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
                 };
-                let mut sql = lines
-                    .next()
-                    .ok_or_else(|| {
-                        ParseErrorKind::UnexpectedEOF.at(loc.clone().map_line(|line| line + 1))
-                    })?
-                    .1
-                    .into();
+                let mut sql = match lines.next() {
+                    Some((_, line)) => line.into(),
+                    None => return Err(ParseErrorKind::UnexpectedEOF.at(loc.next_line())),
+                };
                 for (_, line) in &mut lines {
                     if line.is_empty() {
                         break;
@@ -300,13 +310,10 @@ fn parse_inner(filename: &str, script: &str) -> Result<Vec<Record>, ParseError> 
                 let label = res.get(1).map(|s| s.to_string());
                 // The SQL for the query is found on second an subsequent lines of the record
                 // up to first line of the form "----" or until the end of the record.
-                let mut sql = lines
-                    .next()
-                    .ok_or_else(|| {
-                        ParseErrorKind::UnexpectedEOF.at(loc.clone().map_line(|line| line + 1))
-                    })?
-                    .1
-                    .into();
+                let mut sql = match lines.next() {
+                    Some((_, line)) => line.into(),
+                    None => return Err(ParseErrorKind::UnexpectedEOF.at(loc.next_line())),
+                };
                 let mut has_result = false;
                 for (_, line) in &mut lines {
                     if line.is_empty() {
@@ -355,30 +362,28 @@ fn parse_inner(filename: &str, script: &str) -> Result<Vec<Record>, ParseError> 
 
 /// Parse a sqllogictest file and link all included scripts together.
 pub fn parse_file(filename: impl AsRef<Path>) -> Result<Vec<Record>, ParseError> {
-    parse_file_inner(filename)
+    let filename = filename.as_ref().to_str().unwrap();
+    parse_file_inner(Location::new(filename, 0))
 }
 
-fn parse_file_inner(filename: impl AsRef<Path>) -> Result<Vec<Record>, ParseError> {
-    let filename = filename.as_ref().to_str().unwrap();
-    let path: &Path = filename.as_ref();
-
+fn parse_file_inner(loc: Location) -> Result<Vec<Record>, ParseError> {
+    let path = Path::new(loc.file());
     if !path.exists() {
-        return Err(ParseErrorKind::FileNotFound.at(Location::new(filename, 0)));
+        return Err(ParseErrorKind::FileNotFound.at(loc.clone()));
     }
     let script = std::fs::read_to_string(path).unwrap();
     let mut records = vec![];
-    for rec in parse_inner(filename, &script)? {
+    for rec in parse_inner(&loc, &script)? {
         if let Record::Include { filename, loc } = rec {
             let complete_filename = {
                 let mut path_buf = path.to_path_buf();
                 path_buf.pop();
                 path_buf.push(filename.clone());
-
                 path_buf.as_os_str().to_string_lossy().to_string()
             };
 
             for included_file in glob::glob(&complete_filename)
-                .map_err(|e| InvalidIncludeFile(format!("{:?}", e)).at(loc))?
+                .map_err(|e| InvalidIncludeFile(format!("{:?}", e)).at(loc.clone()))?
                 .filter_map(Result::ok)
             {
                 let included_file = included_file.as_os_str().to_string_lossy().to_string();
@@ -386,8 +391,8 @@ fn parse_file_inner(filename: impl AsRef<Path>) -> Result<Vec<Record>, ParseErro
                 records.push(Record::Control(Control::BeginInclude(
                     included_file.clone(),
                 )));
-                records.extend(parse_file_inner(&included_file)?);
-                records.push(Record::Control(Control::EndInclude(included_file.clone())));
+                records.extend(parse_file_inner(loc.include(&included_file))?);
+                records.push(Record::Control(Control::EndInclude(included_file)));
             }
         } else {
             records.push(rec);
