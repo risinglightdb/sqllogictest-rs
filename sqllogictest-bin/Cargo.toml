@@ -23,6 +23,7 @@ humantime = "2"
 itertools = "0.10"
 log = "0.4"
 postgres-types = { version = "0.2.3", features = ["derive", "with-chrono-0_4"] }
+pg_interval = "0.4"
 quick-junit = { version = "0.2" }
 rand = "0.8"
 rust_decimal = { version = "1.7.0", features = ["tokio-pg"] }

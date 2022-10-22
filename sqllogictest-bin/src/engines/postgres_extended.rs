@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime, DateTime};
+use pg_interval::Interval;
 use postgres_types::Type;
 use rust_decimal::Decimal;
 use tokio::task::JoinHandle;
@@ -89,6 +90,24 @@ macro_rules! single_process {
     };
 }
 
+macro_rules! str_process {
+    ($self:ident, $row:ident, $output:ident, $idx:ident, $t:ty, $ty_name:expr) => {
+        let value: Option<$t> = $row.get($idx);
+        match value {
+            Some(value) => {
+                let sql = format!("select ($1::{})::varchar", stringify!($ty_name));
+                let tmp_rows = $self.client.query(&sql, &[&value]).await.unwrap();
+                let value: &str = tmp_rows.get(0).unwrap().get(0);
+                assert!(value.len()>0);
+                write!($output, "{}", value).unwrap();
+            }
+            None => {
+                write!($output, "NULL").unwrap();
+            }
+        }
+    };
+}
+
 #[async_trait]
 impl sqllogictest::AsyncDB for PostgresExtended {
     type Error = tokio_postgres::error::Error;
@@ -113,8 +132,46 @@ impl sqllogictest::AsyncDB for PostgresExtended {
                     if idx != 0 {
                         write!(output, " ").unwrap();
                     }
-
                     match column.type_().clone() {
+                        Type::INT2 => {
+                            single_process!(row, output, idx, i16);
+                        }
+                        Type::INT4 => {
+                            single_process!(row, output, idx, i32);
+                        }
+                        Type::INT8 => {
+                            single_process!(row, output, idx, i64);
+                        }
+                        Type::NUMERIC => {
+                            single_process!(row, output, idx, Decimal);
+                        }
+                        Type::DATE => {
+                            single_process!(row, output, idx, NaiveDate);
+                        }
+                        Type::TIME => {
+                            single_process!(row, output, idx, NaiveTime);
+                        }
+                        Type::TIMESTAMP => {
+                            single_process!(row, output, idx, NaiveDateTime);
+                        }
+                        Type::INT2_ARRAY => {
+                            array_process!(row, output, idx, i16);
+                        }
+                        Type::INT4_ARRAY => {
+                            array_process!(row, output, idx, i32);
+                        }
+                        Type::INT8_ARRAY => {
+                            array_process!(row, output, idx, i64);
+                        }
+                        Type::FLOAT4_ARRAY => {
+                            array_process!(row, output, idx, f32);
+                        }
+                        Type::FLOAT8_ARRAY => {
+                            array_process!(row, output, idx, f64);
+                        }
+                        Type::NUMERIC_ARRAY => {
+                            array_process!(row, output, idx, Decimal);
+                        }
                         Type::VARCHAR | Type::TEXT => {
                             let value: Option<&str> = row.get(idx);
                             match value {
@@ -129,15 +186,6 @@ impl sqllogictest::AsyncDB for PostgresExtended {
                                     write!(output, "NULL").unwrap();
                                 }
                             }
-                        }
-                        Type::INT2 => {
-                            single_process!(row, output, idx, i16);
-                        }
-                        Type::INT4 => {
-                            single_process!(row, output, idx, i32);
-                        }
-                        Type::INT8 => {
-                            single_process!(row, output, idx, i64);
                         }
                         Type::BOOL => {
                             let value: Option<bool> = row.get(idx);
@@ -188,35 +236,11 @@ impl sqllogictest::AsyncDB for PostgresExtended {
                                 }
                             }
                         }
-                        Type::NUMERIC => {
-                            single_process!(row, output, idx, Decimal);
+                        Type::INTERVAL => {
+                            str_process!(self,row, output, idx, Interval,INTERVAL);
                         }
-                        Type::TIMESTAMP => {
-                            single_process!(row, output, idx, NaiveDateTime);
-                        }
-                        Type::DATE => {
-                            single_process!(row, output, idx, NaiveDate);
-                        }
-                        Type::TIME => {
-                            single_process!(row, output, idx, NaiveTime);
-                        }
-                        Type::INT2_ARRAY => {
-                            array_process!(row, output, idx, i16);
-                        }
-                        Type::INT4_ARRAY => {
-                            array_process!(row, output, idx, i32);
-                        }
-                        Type::INT8_ARRAY => {
-                            array_process!(row, output, idx, i64);
-                        }
-                        Type::FLOAT4_ARRAY => {
-                            array_process!(row, output, idx, f32);
-                        }
-                        Type::FLOAT8_ARRAY => {
-                            array_process!(row, output, idx, f64);
-                        }
-                        Type::NUMERIC_ARRAY => {
-                            array_process!(row, output, idx, Decimal);
+                        Type::TIMESTAMPTZ => {
+                            str_process!(self,row, output, idx, DateTime<chrono::Utc> ,TIMESTAMPTZ);
                         }
                         _ => {
                             todo!("Don't support {} type now.", column.type_().name())

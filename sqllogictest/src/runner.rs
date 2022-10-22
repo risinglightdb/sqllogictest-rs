@@ -7,7 +7,8 @@ use std::time::Duration;
 use std::vec;
 
 use async_trait::async_trait;
-use futures::{executor::block_on, stream, Future, StreamExt};
+use futures::executor::block_on;
+use futures::{stream, Future, StreamExt};
 use itertools::Itertools;
 use tempfile::{tempdir, TempDir};
 
