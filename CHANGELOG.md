@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.5] - 2022-11-14
+
+- Add support for external driver.
+- Support more type in postgres-extended.
+- Record file stack in location.
+
 ## [0.6.4] - 2022-08-25
 
 - Use one session for each file in serial mode.
