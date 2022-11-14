@@ -48,10 +48,7 @@ pub(super) async fn connect(engine: &EngineConfig, config: &DBConfig) -> Result<
                 .replace("{user}", &config.user)
                 .replace("{pass}", &config.pass);
             let mut cmd = Command::new("bash");
-            let cmd = cmd.args([
-                "-c",
-                &cmd_str,
-            ]);
+            let cmd = cmd.args(["-c", &cmd_str]);
             Engines::External(ExternalDriver::connect(cmd).await?)
         }
     })

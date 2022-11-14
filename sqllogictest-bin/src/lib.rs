@@ -42,8 +42,9 @@ struct Opt {
     #[clap(short, long, arg_enum, default_value = "postgres")]
     engine: EngineType,
 
-    /// Example: "java -cp a.jar com.risingwave.sqllogictest.App jdbc:postgresql://{host}:{port}/{db}
-    /// {user}" The items in `{}` will be replaced by [`DBConfig`].
+    /// Example: "java -cp a.jar com.risingwave.sqllogictest.App
+    /// jdbc:postgresql://{host}:{port}/{db} {user}" The items in `{}` will be replaced by
+    /// [`DBConfig`].
     #[clap(long, env)]
     external_engine_command_template: String,
 
