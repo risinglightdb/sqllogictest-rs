@@ -47,7 +47,6 @@ pub(super) async fn connect(engine: &EngineConfig, config: &DBConfig) -> Result<
                 .replace("{port}", &port.to_string())
                 .replace("{user}", &config.user)
                 .replace("{pass}", &config.pass);
-            dbg!(&cmd_str);
             let mut cmd = Command::new("bash");
             let cmd = cmd.args([
                 "-c",
