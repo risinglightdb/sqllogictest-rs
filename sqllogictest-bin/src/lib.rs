@@ -201,17 +201,14 @@ async fn run_parallel(
             .ok_or_else(|| anyhow!("not a valid filename"))?
             .to_str()
             .ok_or_else(|| anyhow!("not a UTF-8 filename"))?;
-        let db_name = db_name
-            .replace(' ', "_")
-            .replace('.', "_")
-            .replace('-', "_");
+        let db_name = db_name.replace([' ', '.', '-'], "_");
         eprintln!("+ Discovered Test: {}", db_name);
         if create_databases.insert(db_name.to_string(), file).is_some() {
             return Err(anyhow!("duplicated file name found: {}", db_name));
         }
     }
 
-    let mut db = engines::connect(&engine, &config).await?;
+    let mut db = engines::connect(engine, &config).await?;
 
     let db_names: Vec<String> = create_databases.keys().cloned().collect();
     for db_name in &db_names {
@@ -248,11 +245,7 @@ async fn run_parallel(
     let start = Instant::now();
 
     while let Some((file, res, mut buf)) = stream.next().await {
-        let test_case_name = file
-            .replace('/', "_")
-            .replace(' ', "_")
-            .replace('.', "_")
-            .replace('-', "_");
+        let test_case_name = file.replace(['/', ' ', '.', '-'], "_");
         let case = match res {
             Ok(duration) => {
                 let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
@@ -315,11 +308,7 @@ async fn run_serial(
         let runner = Runner::new(engine);
 
         let filename = file.to_string_lossy().to_string();
-        let test_case_name = filename
-            .replace('/', "_")
-            .replace(' ', "_")
-            .replace('.', "_")
-            .replace('-', "_");
+        let test_case_name = filename.replace(['/', ' ', '.', '-'], "_");
         let case = match run_test_file(&mut std::io::stdout(), runner, &file).await {
             Ok(duration) => {
                 let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
@@ -377,7 +366,7 @@ async fn run_test_file<T: std::io::Write, D: AsyncDB>(
 ) -> Result<Duration> {
     let filename = filename.as_ref();
     let records = tokio::task::block_in_place(|| {
-        sqllogictest::parse_file(&filename).map_err(|e| anyhow!("{:?}", e))
+        sqllogictest::parse_file(filename).map_err(|e| anyhow!("{:?}", e))
     })
     .context("failed to parse sqllogictest file")?;
 

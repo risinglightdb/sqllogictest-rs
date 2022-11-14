@@ -79,7 +79,7 @@ impl AsyncDB for ExternalDriver {
         self.stdin.write_all(input.as_bytes()).await?;
         let output = match self.stdout.next().await {
             Some(Ok(output)) => output,
-            Some(Err(e)) => return Err(e.into()),
+            Some(Err(e)) => return Err(e),
             None => return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into()),
         };
         match output {
