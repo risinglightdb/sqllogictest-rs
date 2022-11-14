@@ -383,10 +383,7 @@ impl<D: AsyncDB> Runner<D> {
                 .expect("not a valid filename")
                 .to_str()
                 .expect("not a UTF-8 filename");
-            let db_name = db_name
-                .replace(' ', "_")
-                .replace('.', "_")
-                .replace('-', "_");
+            let db_name = db_name.replace([' ', '.', '-'], "_");
 
             self.db
                 .run(&format!("CREATE DATABASE {};", db_name))

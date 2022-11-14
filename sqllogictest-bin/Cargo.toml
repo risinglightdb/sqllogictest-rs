@@ -11,6 +11,7 @@ description = "Sqllogictest CLI."
 [dependencies]
 anyhow = { version = "1" }
 async-trait = "0.1"
+bytes = "1"
 chrono = { version = "0.4" }
 clap = { version = "3", features = ["derive", "env"] }
 console = { version = "0.15" }
@@ -27,6 +28,8 @@ pg_interval = "0.4"
 quick-junit = { version = "0.2" }
 rand = "0.8"
 rust_decimal = { version = "1.7.0", features = ["tokio-pg"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sqllogictest = { path = "../sqllogictest", version = "0.6" }
 tempfile = "3"
 thiserror = "1"
@@ -36,5 +39,7 @@ tokio = { version = "1", features = [
     "sync",
     "macros",
     "fs",
+    "process",
 ] }
 tokio-postgres = { version = "0.7" }
+tokio-util = { version = "0.7", features = ["codec"] }

@@ -9,7 +9,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use chrono::Local;
 use clap::{ArgEnum, Parser};
 use console::style;
-use engines::EngineType;
+use engines::{EngineConfig, EngineType};
 use futures::StreamExt;
 use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
@@ -41,6 +41,12 @@ struct Opt {
     /// The database engine name, used by the record conditions.
     #[clap(short, long, arg_enum, default_value = "postgres")]
     engine: EngineType,
+
+    /// Example: "java -cp a.jar com.risingwave.sqllogictest.App
+    /// jdbc:postgresql://{host}:{port}/{db} {user}" The items in `{}` will be replaced by
+    /// [`DBConfig`].
+    #[clap(long, env)]
+    external_engine_command_template: String,
 
     /// Whether to enable colorful output.
     #[clap(
@@ -108,6 +114,7 @@ pub async fn main_okk() -> Result<()> {
     let Opt {
         files,
         engine,
+        external_engine_command_template,
         color,
         jobs,
         junit,
@@ -126,6 +133,12 @@ pub async fn main_okk() -> Result<()> {
         );
     }
     let addrs = host.into_iter().zip_eq(port).collect();
+
+    let engine = match engine {
+        EngineType::Postgres => EngineConfig::Postgres,
+        EngineType::PostgresExtended => EngineConfig::PostgresExtended,
+        EngineType::External => EngineConfig::External(external_engine_command_template),
+    };
 
     match color {
         Color::Always => {
@@ -159,9 +172,9 @@ pub async fn main_okk() -> Result<()> {
     test_suite.set_timestamp(Local::now());
 
     let result = if let Some(jobs) = jobs {
-        run_parallel(jobs, &mut test_suite, files, engine, config, junit.clone()).await
+        run_parallel(jobs, &mut test_suite, files, &engine, config, junit.clone()).await
     } else {
-        run_serial(&mut test_suite, files, engine, config, junit.clone()).await
+        run_serial(&mut test_suite, files, &engine, config, junit.clone()).await
     };
 
     report.add_test_suite(test_suite);
@@ -177,7 +190,7 @@ async fn run_parallel(
     jobs: usize,
     test_suite: &mut TestSuite,
     files: Vec<PathBuf>,
-    engine: EngineType,
+    engine: &EngineConfig,
     config: DBConfig,
     junit: Option<String>,
 ) -> Result<()> {
@@ -188,10 +201,7 @@ async fn run_parallel(
             .ok_or_else(|| anyhow!("not a valid filename"))?
             .to_str()
             .ok_or_else(|| anyhow!("not a UTF-8 filename"))?;
-        let db_name = db_name
-            .replace(' ', "_")
-            .replace('.', "_")
-            .replace('-', "_");
+        let db_name = db_name.replace([' ', '.', '-'], "_");
         eprintln!("+ Discovered Test: {}", db_name);
         if create_databases.insert(db_name.to_string(), file).is_some() {
             return Err(anyhow!("duplicated file name found: {}", db_name));
@@ -214,10 +224,11 @@ async fn run_parallel(
             let mut config = config.clone();
             config.db = db_name;
             let file = filename.to_string_lossy().to_string();
+            let engine = engine.clone();
             async move {
                 let (buf, res) = tokio::spawn(async move {
                     let mut buf = vec![];
-                    let res = connect_and_run_test_file(&mut buf, filename, engine, config).await;
+                    let res = connect_and_run_test_file(&mut buf, filename, &engine, config).await;
                     (buf, res)
                 })
                 .await
@@ -234,11 +245,7 @@ async fn run_parallel(
     let start = Instant::now();
 
     while let Some((file, res, mut buf)) = stream.next().await {
-        let test_case_name = file
-            .replace('/', "_")
-            .replace(' ', "_")
-            .replace('.', "_")
-            .replace('-', "_");
+        let test_case_name = file.replace(['/', ' ', '.', '-'], "_");
         let case = match res {
             Ok(duration) => {
                 let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
@@ -290,7 +297,7 @@ async fn run_parallel(
 async fn run_serial(
     test_suite: &mut TestSuite,
     files: Vec<PathBuf>,
-    engine: EngineType,
+    engine: &EngineConfig,
     config: DBConfig,
     junit: Option<String>,
 ) -> Result<()> {
@@ -301,11 +308,7 @@ async fn run_serial(
         let runner = Runner::new(engine);
 
         let filename = file.to_string_lossy().to_string();
-        let test_case_name = filename
-            .replace('/', "_")
-            .replace(' ', "_")
-            .replace('.', "_")
-            .replace('-', "_");
+        let test_case_name = filename.replace(['/', ' ', '.', '-'], "_");
         let case = match run_test_file(&mut std::io::stdout(), runner, &file).await {
             Ok(duration) => {
                 let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
@@ -346,7 +349,7 @@ async fn flush(out: &mut impl std::io::Write) -> std::io::Result<()> {
 async fn connect_and_run_test_file(
     out: &mut impl std::io::Write,
     filename: PathBuf,
-    engine: EngineType,
+    engine: &EngineConfig,
     config: DBConfig,
 ) -> Result<Duration> {
     let engine = engines::connect(engine, &config).await?;
@@ -363,7 +366,7 @@ async fn run_test_file<T: std::io::Write, D: AsyncDB>(
 ) -> Result<Duration> {
     let filename = filename.as_ref();
     let records = tokio::task::block_in_place(|| {
-        sqllogictest::parse_file(&filename).map_err(|e| anyhow!("{:?}", e))
+        sqllogictest::parse_file(filename).map_err(|e| anyhow!("{:?}", e))
     })
     .context("failed to parse sqllogictest file")?;
 
