@@ -46,7 +46,7 @@ struct Opt {
     /// jdbc:postgresql://{host}:{port}/{db} {user}" The items in `{}` will be replaced by
     /// [`DBConfig`].
     #[clap(long, env)]
-    external_engine_command_template: String,
+    external_engine_command_template: Option<String>,
 
     /// Whether to enable colorful output.
     #[clap(
@@ -137,7 +137,13 @@ pub async fn main_okk() -> Result<()> {
     let engine = match engine {
         EngineType::Postgres => EngineConfig::Postgres,
         EngineType::PostgresExtended => EngineConfig::PostgresExtended,
-        EngineType::External => EngineConfig::External(external_engine_command_template),
+        EngineType::External => {
+            if let Some(external_engine_command_template) = external_engine_command_template {
+                EngineConfig::External(external_engine_command_template)
+            } else {
+                bail!("`--external-engine-command-template` is required for `--engine=external`")
+            }
+        }
     };
 
     match color {

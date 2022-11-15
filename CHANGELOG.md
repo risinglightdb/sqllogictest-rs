@@ -6,7 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.6.5] - 2022-11-14
+## [0.7.1] - 2022-11-15
+
+- Fix: `--external-engine-command-template` should not be required
+
+## [0.7.0] - 2022-11-14
 
 - Add support for external driver.
 - Support more type in postgres-extended.
