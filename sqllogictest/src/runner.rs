@@ -134,7 +134,7 @@ pub enum TestErrorKind {
         sql: String,
         err: Arc<dyn std::error::Error + Send + Sync>,
     },
-    #[error("query result mismatch:\n[SQL] {sql}\n[Diff]\n{}", difference::Changeset::new(.expected, .actual, "\n"))]
+    #[error("query result mismatch:\n[SQL] {sql}\n[Diff]\n{}", difference::Changeset::new(.actual, .expected, "\n"))]
     QueryResultMismatch {
         sql: String,
         expected: String,
