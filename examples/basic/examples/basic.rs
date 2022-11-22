@@ -29,7 +29,7 @@ impl sqllogictest::DB for FakeDB {
         if sql.starts_with("drop") {
             return Ok("".into());
         }
-        return Err(FakeDBError);
+        Err(FakeDBError)
     }
 }
 
