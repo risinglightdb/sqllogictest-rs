@@ -5,6 +5,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use regex::Regex;
+
 use crate::ParseErrorKind::InvalidIncludeFile;
 
 /// The location in source file.
@@ -62,7 +64,7 @@ impl Location {
 }
 
 /// A single directive in a sqllogictest file.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum Record {
     /// An include copies all records from another files.
@@ -72,8 +74,9 @@ pub enum Record {
     Statement {
         loc: Location,
         conditions: Vec<Condition>,
-        /// The SQL command is expected to fail instead of to succeed.
-        error: bool,
+        /// The SQL command is expected to fail with an error messages that matches the given regex.
+        /// If the regex is an empty string, any error message is accepted.
+        error: Option<Regex>,
         /// The SQL command.
         sql: String,
         /// Expected rows affected.
@@ -203,6 +206,8 @@ pub enum ParseErrorKind {
     InvalidType(String),
     #[error("invalid number: {0:?}")]
     InvalidNumber(String),
+    #[error("invalid error message: {0:?}")]
+    InvalidErrorMessage(String),
     #[error("invalid duration: {0:?}")]
     InvalidDuration(String),
     #[error("invalid control: {0:?}")]
@@ -272,14 +277,19 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
             }
             ["statement", res @ ..] => {
                 let mut expected_count = None;
-                let error = match res {
-                    ["ok"] => false,
-                    ["error"] => true,
+                let mut error = None;
+                match res {
+                    ["ok"] => {}
+                    ["error", err_str @ ..] => {
+                        let err_str = err_str.join(" ");
+                        error = Some(Regex::new(&err_str).map_err(|_| {
+                            ParseErrorKind::InvalidErrorMessage(err_str).at(loc.clone())
+                        })?);
+                    }
                     ["count", count_str] => {
                         expected_count = Some(count_str.parse::<u64>().map_err(|_| {
                             ParseErrorKind::InvalidNumber((*count_str).into()).at(loc.clone())
                         })?);
-                        false
                     }
                     _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
                 };

@@ -123,6 +123,12 @@ pub enum TestErrorKind {
         sql: String,
         err: Arc<dyn std::error::Error + Send + Sync>,
     },
+    #[error("statement is expected to fail with error:\"{expected_err}\", but got error: {err}\n[SQL] {sql}")]
+    StatementErrorMismatch {
+        sql: String,
+        err: Arc<dyn std::error::Error + Send + Sync>,
+        expected_err: String,
+    },
     #[error("statement is expected to affect {expected} rows, but actually {actual}\n[SQL] {sql}")]
     StatementResultMismatch {
         sql: String,
@@ -223,7 +229,9 @@ impl<D: AsyncDB> Runner<D> {
                 let sql = self.replace_keywords(sql);
                 let ret = self.db.run(&sql).await;
                 match ret {
-                    Ok(_) if error => return Err(TestErrorKind::StatementOk { sql }.at(loc)),
+                    Ok(_) if error.is_some() => {
+                        return Err(TestErrorKind::StatementOk { sql }.at(loc))
+                    }
                     Ok(count_str) => {
                         if let Some(expected_count) = expected_count {
                             if expected_count.to_string() != count_str {
@@ -236,14 +244,25 @@ impl<D: AsyncDB> Runner<D> {
                             }
                         }
                     }
-                    Err(e) if !error => {
-                        return Err(TestErrorKind::StatementFail {
-                            sql,
-                            err: Arc::new(e),
+                    Err(e) => match error {
+                        Some(error) => {
+                            if !error.is_match(&e.to_string()) {
+                                return Err(TestErrorKind::StatementErrorMismatch {
+                                    sql,
+                                    err: Arc::new(e),
+                                    expected_err: error.to_string(),
+                                }
+                                .at(loc));
+                            }
                         }
-                        .at(loc));
-                    }
-                    _ => {}
+                        None => {
+                            return Err(TestErrorKind::StatementFail {
+                                sql,
+                                err: Arc::new(e),
+                            }
+                            .at(loc));
+                        }
+                    },
                 }
                 if let Some(hook) = &mut self.hook {
                     hook.on_stmt_complete(&sql).await;

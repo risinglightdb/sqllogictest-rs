@@ -14,3 +14,21 @@ Eve
 
 statement ok
 drop table t
+
+# The error message is: Hey you got FakeDBError!
+
+statement error
+give me an error
+
+statement error FakeDB
+give me an error
+
+statement error (?i)fakedb
+give me an error
+
+statement error Hey you
+give me an error
+
+# statement is expected to fail with error: "Hey we", but got error: "Hey you got FakeDBError!"
+# statement error Hey we
+# give me an error
