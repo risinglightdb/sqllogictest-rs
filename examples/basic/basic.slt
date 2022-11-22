@@ -32,3 +32,7 @@ give me an error
 # statement is expected to fail with error: "Hey we", but got error: "Hey you got FakeDBError!"
 # statement error Hey we
 # give me an error
+
+# query error is actually equivalent to statement error
+query error Hey you
+give me an error
