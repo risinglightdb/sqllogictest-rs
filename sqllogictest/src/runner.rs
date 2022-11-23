@@ -139,7 +139,7 @@ pub enum TestErrorKind {
         err: Arc<dyn std::error::Error + Send + Sync>,
         kind: RecordKind,
     },
-    #[error("{kind} is expected to fail with error:\"{expected_err}\", but got error: {err}\n[SQL] {sql}")]
+    #[error("{kind} is expected to fail with error:\n\t\x1b[91m{expected_err}\x1b[0m\nbut got error:\n\t\x1b[91m{err}\x1b[0m\n[SQL] {sql}")]
     ErrorMismatch {
         sql: String,
         err: Arc<dyn std::error::Error + Send + Sync>,
