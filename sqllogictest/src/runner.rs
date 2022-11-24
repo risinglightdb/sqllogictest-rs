@@ -7,6 +7,7 @@ use std::time::Duration;
 use std::vec;
 
 use async_trait::async_trait;
+use difference::Difference;
 use futures::executor::block_on;
 use futures::{stream, Future, StreamExt};
 use itertools::Itertools;
@@ -152,7 +153,23 @@ pub enum TestErrorKind {
         expected: u64,
         actual: String,
     },
-    #[error("query result mismatch:\n[SQL] {sql}\n[Diff]\n{}", difference::Changeset::new(.expected, .actual, "\n"))]
+    #[error(
+        "query result mismatch:\n[SQL] {sql}\n[Diff] (\x1b[91m-excepted\x1b[0m|\x1b[92m+actual\x1b[0m)\n{}",
+        difference::Changeset::new(.expected, .actual, "\n").diffs.iter().format_with("\n", |diff, f| {
+            match *diff {
+                Difference::Same(ref x) => {
+                    f(&format_args!(" {}", x))
+                }
+                Difference::Add(ref x) => {
+                    f(&format_args!("\x1b[92m+{}\x1b[0m", x))
+                }
+                Difference::Rem(ref x) => {
+                    f(&format_args!("\x1b[91m-{}\x1b[0m", x))
+
+                }
+            }
+        })
+    )]
     QueryResultMismatch {
         sql: String,
         expected: String,
