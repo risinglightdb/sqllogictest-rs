@@ -111,28 +111,46 @@ impl TestError {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum RecordKind {
+    Statement,
+    Query,
+}
+
+impl std::fmt::Display for RecordKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RecordKind::Statement => write!(f, "statement"),
+            RecordKind::Query => write!(f, "query"),
+        }
+    }
+}
+
 /// The error kind for running sqllogictest.
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum TestErrorKind {
     #[error("parse error: {0}")]
     ParseError(ParseErrorKind),
-    #[error("statement is expected to fail, but actually succeed:\n[SQL] {sql}")]
-    StatementOk { sql: String },
-    #[error("statement failed: {err}\n[SQL] {sql}")]
-    StatementFail {
+    #[error("{kind} is expected to fail, but actually succeed:\n[SQL] {sql}")]
+    Ok { sql: String, kind: RecordKind },
+    #[error("{kind} failed: {err}\n[SQL] {sql}")]
+    Fail {
         sql: String,
         err: Arc<dyn std::error::Error + Send + Sync>,
+        kind: RecordKind,
+    },
+    #[error("{kind} is expected to fail with error:\n\t\x1b[91m{expected_err}\x1b[0m\nbut got error:\n\t\x1b[91m{err}\x1b[0m\n[SQL] {sql}")]
+    ErrorMismatch {
+        sql: String,
+        err: Arc<dyn std::error::Error + Send + Sync>,
+        expected_err: String,
+        kind: RecordKind,
     },
     #[error("statement is expected to affect {expected} rows, but actually {actual}\n[SQL] {sql}")]
     StatementResultMismatch {
         sql: String,
         expected: u64,
         actual: String,
-    },
-    #[error("query failed: {err}\n[SQL] {sql}")]
-    QueryFail {
-        sql: String,
-        err: Arc<dyn std::error::Error + Send + Sync>,
     },
     #[error(
         "query result mismatch:\n[SQL] {sql}\n[Diff] (\x1b[91m-excepted\x1b[0m|\x1b[92m+actual\x1b[0m)\n{}",
@@ -230,17 +248,24 @@ impl<D: AsyncDB> Runner<D> {
         match record {
             Record::Statement { conditions, .. } if self.should_skip(&conditions) => {}
             Record::Statement {
-                error,
+                conditions: _,
+
+                expected_error,
                 sql,
                 loc,
                 expected_count,
-                ..
             } => {
                 let sql = self.replace_keywords(sql);
                 let ret = self.db.run(&sql).await;
-                match ret {
-                    Ok(_) if error => return Err(TestErrorKind::StatementOk { sql }.at(loc)),
-                    Ok(count_str) => {
+                match (ret, expected_error) {
+                    (Ok(_), Some(_)) => {
+                        return Err(TestErrorKind::Ok {
+                            sql,
+                            kind: RecordKind::Statement,
+                        }
+                        .at(loc))
+                    }
+                    (Ok(count_str), None) => {
                         if let Some(expected_count) = expected_count {
                             if expected_count.to_string() != count_str {
                                 return Err(TestErrorKind::StatementResultMismatch {
@@ -252,14 +277,25 @@ impl<D: AsyncDB> Runner<D> {
                             }
                         }
                     }
-                    Err(e) if !error => {
-                        return Err(TestErrorKind::StatementFail {
+                    (Err(e), Some(expected_error)) => {
+                        if !expected_error.is_match(&e.to_string()) {
+                            return Err(TestErrorKind::ErrorMismatch {
+                                sql,
+                                err: Arc::new(e),
+                                expected_err: expected_error.to_string(),
+                                kind: RecordKind::Statement,
+                            }
+                            .at(loc));
+                        }
+                    }
+                    (Err(e), None) => {
+                        return Err(TestErrorKind::Fail {
                             sql,
                             err: Arc::new(e),
+                            kind: RecordKind::Statement,
                         }
                         .at(loc));
                     }
-                    _ => {}
                 }
                 if let Some(hook) = &mut self.hook {
                     hook.on_stmt_complete(&sql).await;
@@ -267,23 +303,50 @@ impl<D: AsyncDB> Runner<D> {
             }
             Record::Query { conditions, .. } if self.should_skip(&conditions) => {}
             Record::Query {
+                conditions: _,
+
                 loc,
                 sql,
+                expected_error,
                 expected_results,
                 sort_mode,
-                ..
+
+                // not handle yet,
+                type_string: _,
+                label: _,
             } => {
                 let sql = self.replace_keywords(sql);
-                let output = match self.db.run(&sql).await {
-                    Ok(output) => output,
-                    Err(e) => {
-                        return Err(TestErrorKind::QueryFail {
+                let output = match (self.db.run(&sql).await, expected_error) {
+                    (Ok(_), Some(_)) => {
+                        return Err(TestErrorKind::Ok {
+                            sql,
+                            kind: RecordKind::Query,
+                        }
+                        .at(loc))
+                    }
+                    (Ok(output), None) => output,
+                    (Err(e), Some(expected_error)) => {
+                        if !expected_error.is_match(&e.to_string()) {
+                            return Err(TestErrorKind::ErrorMismatch {
+                                sql,
+                                err: Arc::new(e),
+                                expected_err: expected_error.to_string(),
+                                kind: RecordKind::Query,
+                            }
+                            .at(loc));
+                        }
+                        return Ok(());
+                    }
+                    (Err(e), None) => {
+                        return Err(TestErrorKind::Fail {
                             sql,
                             err: Arc::new(e),
+                            kind: RecordKind::Query,
                         }
                         .at(loc));
                     }
                 };
+
                 let mut output = split_lines_and_normalize(&output);
                 let mut expected_results = split_lines_and_normalize(&expected_results);
                 match sort_mode.as_ref().or(self.sort_mode.as_ref()) {

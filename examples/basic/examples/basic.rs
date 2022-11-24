@@ -7,7 +7,7 @@ pub struct FakeDBError;
 
 impl std::fmt::Display for FakeDBError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{:?}", "Hey you got FakeDBError!")
     }
 }
 
@@ -29,7 +29,7 @@ impl sqllogictest::DB for FakeDB {
         if sql.starts_with("drop") {
             return Ok("".into());
         }
-        unimplemented!("unsupported SQL: {}", sql);
+        Err(FakeDBError)
     }
 }
 

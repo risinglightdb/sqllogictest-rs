@@ -6,7 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.6.5] - 2022-11-14
+## [0.8.0] - 2022-11-22
+
+- Support checking error message using `statement error <regex>` and `query error <regex>` syntax.
+  - Breaking change: `Record::Statement`, `Record::Query` and `TestErrorKind` are changed accordingly.
+
+## [0.7.1] - 2022-11-15
+
+- Fix: `--external-engine-command-template` should not be required
+
+## [0.7.0] - 2022-11-14
 
 - Add support for external driver.
 - Support more type in postgres-extended.

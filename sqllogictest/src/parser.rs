@@ -5,6 +5,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use regex::Regex;
+
 use crate::ParseErrorKind::InvalidIncludeFile;
 
 /// The location in source file.
@@ -62,7 +64,7 @@ impl Location {
 }
 
 /// A single directive in a sqllogictest file.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum Record {
     /// An include copies all records from another files.
@@ -72,8 +74,9 @@ pub enum Record {
     Statement {
         loc: Location,
         conditions: Vec<Condition>,
-        /// The SQL command is expected to fail instead of to succeed.
-        error: bool,
+        /// The SQL command is expected to fail with an error messages that matches the given regex.
+        /// If the regex is an empty string, any error message is accepted.
+        expected_error: Option<Regex>,
         /// The SQL command.
         sql: String,
         /// Expected rows affected.
@@ -87,6 +90,9 @@ pub enum Record {
         type_string: String,
         sort_mode: Option<SortMode>,
         label: Option<String>,
+        /// The SQL command is expected to fail with an error messages that matches the given regex.
+        /// If the regex is an empty string, any error message is accepted.
+        expected_error: Option<Regex>,
         /// The SQL command.
         sql: String,
         /// The expected results.
@@ -203,6 +209,8 @@ pub enum ParseErrorKind {
     InvalidType(String),
     #[error("invalid number: {0:?}")]
     InvalidNumber(String),
+    #[error("invalid error message: {0:?}")]
+    InvalidErrorMessage(String),
     #[error("invalid duration: {0:?}")]
     InvalidDuration(String),
     #[error("invalid control: {0:?}")]
@@ -272,14 +280,19 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
             }
             ["statement", res @ ..] => {
                 let mut expected_count = None;
-                let error = match res {
-                    ["ok"] => false,
-                    ["error"] => true,
+                let mut expected_error = None;
+                match res {
+                    ["ok"] => {}
+                    ["error", err_str @ ..] => {
+                        let err_str = err_str.join(" ");
+                        expected_error = Some(Regex::new(&err_str).map_err(|_| {
+                            ParseErrorKind::InvalidErrorMessage(err_str).at(loc.clone())
+                        })?);
+                    }
                     ["count", count_str] => {
                         expected_count = Some(count_str.parse::<u64>().map_err(|_| {
                             ParseErrorKind::InvalidNumber((*count_str).into()).at(loc.clone())
                         })?);
-                        false
                     }
                     _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
                 };
@@ -297,17 +310,35 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                 records.push(Record::Statement {
                     loc,
                     conditions: std::mem::take(&mut conditions),
-                    error,
+                    expected_error,
                     sql,
                     expected_count,
                 });
             }
-            ["query", type_string, res @ ..] => {
-                let sort_mode = match res.first().map(|&s| SortMode::try_from_str(s)).transpose() {
-                    Ok(sm) => sm,
-                    Err(k) => return Err(k.at(loc)),
-                };
-                let label = res.get(1).map(|s| s.to_string());
+            ["query", res @ ..] => {
+                let mut type_string = "";
+                let mut sort_mode = None;
+                let mut label = None;
+                let mut expected_error = None;
+                match res {
+                    ["error", err_str @ ..] => {
+                        let err_str = err_str.join(" ");
+                        expected_error = Some(Regex::new(&err_str).map_err(|_| {
+                            ParseErrorKind::InvalidErrorMessage(err_str).at(loc.clone())
+                        })?);
+                    }
+                    [type_str, res @ ..] => {
+                        type_string = type_str;
+                        sort_mode =
+                            match res.first().map(|&s| SortMode::try_from_str(s)).transpose() {
+                                Ok(sm) => sm,
+                                Err(k) => return Err(k.at(loc)),
+                            };
+                        label = res.get(1).map(|s| s.to_string());
+                    }
+                    _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
+                }
+
                 // The SQL for the query is found on second an subsequent lines of the record
                 // up to first line of the form "----" or until the end of the record.
                 let mut sql = match lines.next() {
@@ -345,6 +376,7 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                     label,
                     sql,
                     expected_results,
+                    expected_error,
                 });
             }
             ["control", res @ ..] => match res {
