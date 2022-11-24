@@ -439,7 +439,7 @@ async fn run_test_file<T: std::io::Write, D: AsyncDB>(
         runner
             .run_async(record)
             .await
-            .map_err(|e| anyhow!("{:?}", e))
+            .map_err(|e| anyhow!("{}", e.display(console::colors_enabled())))
             .context(format!(
                 "failed to run `{}`",
                 style(filename.to_string_lossy()).bold()
