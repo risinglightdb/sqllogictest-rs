@@ -11,6 +11,7 @@ use difference::Difference;
 use futures::executor::block_on;
 use futures::{stream, Future, StreamExt};
 use itertools::Itertools;
+use owo_colors::OwoColorize;
 use tempfile::{tempdir, TempDir};
 
 use crate::parser::*;
@@ -71,6 +72,8 @@ where
 }
 
 /// The error type for running sqllogictest.
+///
+/// For colored error message, use `self.display()`.
 #[derive(thiserror::Error, Clone)]
 #[error("{kind}\nat {loc}\n")]
 pub struct TestError {
@@ -78,6 +81,33 @@ pub struct TestError {
     loc: Location,
 }
 
+impl TestError {
+    pub fn display(&self, colorize: bool) -> TestErrorDisplay<'_> {
+        TestErrorDisplay {
+            err: self,
+            colorize,
+        }
+    }
+}
+
+/// Overrides the `Display` implementation of [`TestError`] to support controlling colorization.
+pub struct TestErrorDisplay<'a> {
+    err: &'a TestError,
+    colorize: bool,
+}
+
+impl<'a> Display for TestErrorDisplay<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}\nat {}\n",
+            self.err.kind.display(self.colorize),
+            self.err.loc
+        )
+    }
+}
+
+/// For colored error message, use `self.display()`.
 #[derive(Clone, Debug, thiserror::Error)]
 pub struct ParallelTestError {
     errors: Vec<TestError>,
@@ -91,6 +121,32 @@ impl Display for ParallelTestError {
             writeln!(f, "{}", i)?;
         }
         Ok(())
+    }
+}
+
+/// Overrides the `Display` implementation of [`ParallelTestError`] to support controlling colorization.
+pub struct ParallelTestErrorDisplay<'a> {
+    err: &'a ParallelTestError,
+    colorize: bool,
+}
+
+impl<'a> Display for ParallelTestErrorDisplay<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "parallel test failed")?;
+        write!(f, "Caused by:")?;
+        for i in &self.err.errors {
+            writeln!(f, "{}", i.display(self.colorize))?;
+        }
+        Ok(())
+    }
+}
+
+impl ParallelTestError {
+    pub fn display(&self, colorize: bool) -> ParallelTestErrorDisplay<'_> {
+        ParallelTestErrorDisplay {
+            err: self,
+            colorize,
+        }
     }
 }
 
@@ -128,6 +184,8 @@ impl std::fmt::Display for RecordKind {
 }
 
 /// The error kind for running sqllogictest.
+///
+/// For colored error message, use `self.display()`.
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum TestErrorKind {
     #[error("parse error: {0}")]
@@ -140,7 +198,8 @@ pub enum TestErrorKind {
         err: Arc<dyn std::error::Error + Send + Sync>,
         kind: RecordKind,
     },
-    #[error("{kind} is expected to fail with error:\n\t\x1b[91m{expected_err}\x1b[0m\nbut got error:\n\t\x1b[91m{err}\x1b[0m\n[SQL] {sql}")]
+    // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
+    #[error("{kind} is expected to fail with error:\n\t{expected_err}\nbut got error:\n\t{err}\n[SQL] {sql}")]
     ErrorMismatch {
         sql: String,
         err: Arc<dyn std::error::Error + Send + Sync>,
@@ -153,18 +212,19 @@ pub enum TestErrorKind {
         expected: u64,
         actual: String,
     },
+    // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
     #[error(
-        "query result mismatch:\n[SQL] {sql}\n[Diff] (\x1b[91m-excepted\x1b[0m|\x1b[92m+actual\x1b[0m)\n{}",
+        "query result mismatch:\n[SQL] {sql}\n[Diff] (-excepted|+actual)\n{}",
         difference::Changeset::new(.expected, .actual, "\n").diffs.iter().format_with("\n", |diff, f| {
             match *diff {
                 Difference::Same(ref x) => {
-                    f(&format_args!(" {}", x))
+                    f(&format_args!("    {x}"))
                 }
                 Difference::Add(ref x) => {
-                    f(&format_args!("\x1b[92m+{}\x1b[0m", x))
+                    f(&format_args!("+   {x}"))
                 }
                 Difference::Rem(ref x) => {
-                    f(&format_args!("\x1b[91m-{}\x1b[0m", x))
+                    f(&format_args!("-   {x}"))
 
                 }
             }
@@ -189,6 +249,61 @@ impl From<ParseError> for TestError {
 impl TestErrorKind {
     fn at(self, loc: Location) -> TestError {
         TestError { kind: self, loc }
+    }
+
+    pub fn display(&self, colorize: bool) -> TestErrorKindDisplay<'_> {
+        TestErrorKindDisplay {
+            error: self,
+            colorize,
+        }
+    }
+}
+
+/// Overrides the `Display` implementation of [`TestErrorKind`] to support controlling colorization.
+pub struct TestErrorKindDisplay<'a> {
+    error: &'a TestErrorKind,
+    colorize: bool,
+}
+
+impl<'a> Display for TestErrorKindDisplay<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if !self.colorize {
+            return write!(f, "{}", self.error);
+        }
+        match self.error {
+            TestErrorKind::ErrorMismatch {
+                sql,
+                err,
+                expected_err,
+                kind,
+            } => write!(
+                f,
+                "{kind} is expected to fail with error:\n\t{}\nbut got error:\n\t{}\n[SQL] {sql}",
+                expected_err.bright_green(),
+                err.bright_red(),
+            ),
+            TestErrorKind::QueryResultMismatch {
+                sql,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "query result mismatch:\n[SQL] {sql}\n[Diff] ({}|{})\n{}",
+                "-excepted".bright_red(),
+                "+actual".bright_green(),
+                difference::Changeset::new(expected, actual, "\n")
+                    .diffs
+                    .iter()
+                    .format_with("\n", |diff, f| {
+                        match *diff {
+                            Difference::Same(ref x) => f(&format_args!("    {x}")),
+                            Difference::Add(ref x) => f(&format_args!("+   {x}").bright_green()),
+                            Difference::Rem(ref x) => f(&format_args!("-   {x}").bright_red()),
+                        }
+                    })
+            ),
+            _ => write!(f, "{}", self.error),
+        }
     }
 }
 
