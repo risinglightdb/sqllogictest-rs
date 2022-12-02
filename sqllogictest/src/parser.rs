@@ -74,8 +74,8 @@ pub enum Record {
     Statement {
         loc: Location,
         conditions: Vec<Condition>,
-        /// The SQL command is expected to fail with an error messages that matches the given regex.
-        /// If the regex is an empty string, any error message is accepted.
+        /// The SQL command is expected to fail with an error messages that matches the given
+        /// regex. If the regex is an empty string, any error message is accepted.
         expected_error: Option<Regex>,
         /// The SQL command.
         sql: String,
@@ -90,8 +90,8 @@ pub enum Record {
         type_string: String,
         sort_mode: Option<SortMode>,
         label: Option<String>,
-        /// The SQL command is expected to fail with an error messages that matches the given regex.
-        /// If the regex is an empty string, any error message is accepted.
+        /// The SQL command is expected to fail with an error messages that matches the given
+        /// regex. If the regex is an empty string, any error message is accepted.
         expected_error: Option<Regex>,
         /// The SQL command.
         sql: String,
@@ -107,6 +107,13 @@ pub enum Record {
     Halt { loc: Location },
     /// Control statements.
     Control(Control),
+    /// Set the maximum number of result values that will be accepted
+    /// for a query.  If the number of result values exceeds this number,
+    /// then an MD5 hash is computed of all values, and the resulting hash
+    /// is the only result.
+    ///
+    /// If the threshold is 0, then hashing is never used.
+    HashThreshold { loc: Location, threshold: u64 },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -386,6 +393,14 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                 },
                 _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
             },
+            ["hash-threshold", threshold] => {
+                records.push(Record::HashThreshold {
+                    loc: loc.clone(),
+                    threshold: threshold.parse::<u64>().map_err(|_| {
+                        ParseErrorKind::InvalidNumber((*threshold).into()).at(loc.clone())
+                    })?,
+                });
+            }
             _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
         }
     }

@@ -36,3 +36,28 @@ give me an error
 # query error is actually equivalent to statement error
 query error Hey you
 give me an error
+
+hash-threshold 3
+
+query I
+select * from example_basic
+----
+Alice
+Bob
+Eve
+
+hash-threshold 1
+
+query I
+select * from example_basic
+----
+3 values hashing to b5b44edac84d34d6af3be2a88bfae352
+
+hash-threshold 0
+
+query I
+select * from example_basic
+----
+Alice
+Bob
+Eve

@@ -124,7 +124,8 @@ impl Display for ParallelTestError {
     }
 }
 
-/// Overrides the `Display` implementation of [`ParallelTestError`] to support controlling colorization.
+/// Overrides the `Display` implementation of [`ParallelTestError`] to support controlling
+/// colorization.
 pub struct ParallelTestErrorDisplay<'a> {
     err: &'a ParallelTestError,
     colorize: bool,
@@ -215,20 +216,7 @@ pub enum TestErrorKind {
     // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
     #[error(
         "query result mismatch:\n[SQL] {sql}\n[Diff] (-excepted|+actual)\n{}",
-        difference::Changeset::new(.expected, .actual, "\n").diffs.iter().format_with("\n", |diff, f| {
-            match *diff {
-                Difference::Same(ref x) => {
-                    f(&format_args!("    {x}"))
-                }
-                Difference::Add(ref x) => {
-                    f(&format_args!("+   {x}"))
-                }
-                Difference::Rem(ref x) => {
-                    f(&format_args!("-   {x}"))
-
-                }
-            }
-        })
+        difference::Changeset::new(.expected, .actual, "\n").diffs.iter().format_with("\n", |diff, f| format_diff(diff, f, false))
     )]
     QueryResultMismatch {
         sql: String,
@@ -294,16 +282,36 @@ impl<'a> Display for TestErrorKindDisplay<'a> {
                 difference::Changeset::new(expected, actual, "\n")
                     .diffs
                     .iter()
-                    .format_with("\n", |diff, f| {
-                        match *diff {
-                            Difference::Same(ref x) => f(&format_args!("    {x}")),
-                            Difference::Add(ref x) => f(&format_args!("+   {x}").bright_green()),
-                            Difference::Rem(ref x) => f(&format_args!("-   {x}").bright_red()),
-                        }
-                    })
+                    .format_with("\n", |diff, f| format_diff(diff, f, true))
             ),
             _ => write!(f, "{}", self.error),
         }
+    }
+}
+
+fn format_diff(
+    diff: &Difference,
+    f: &mut dyn FnMut(&dyn std::fmt::Display) -> std::fmt::Result,
+    colorize: bool,
+) -> std::fmt::Result {
+    match *diff {
+        Difference::Same(ref x) => f(&x
+            .lines()
+            .format_with("\n", |line, f| f(&format_args!("    {line}")))),
+        Difference::Add(ref x) => f(&x.lines().format_with("\n", |line, f| {
+            if colorize {
+                f(&format_args!("+   {line}").bright_green())
+            } else {
+                f(&format_args!("+   {line}"))
+            }
+        })),
+        Difference::Rem(ref x) => f(&x.lines().format_with("\n", |line, f| {
+            if colorize {
+                f(&format_args!("-   {line}").bright_red())
+            } else {
+                f(&format_args!("-   {line}"))
+            }
+        })),
     }
 }
 
@@ -332,6 +340,8 @@ pub struct Runner<D: AsyncDB> {
     testdir: Option<TempDir>,
     sort_mode: Option<SortMode>,
     hook: Option<Box<dyn Hook>>,
+    /// 0 means never hashing
+    hash_threshold: usize,
 }
 
 impl<D: AsyncDB> Runner<D> {
@@ -343,6 +353,7 @@ impl<D: AsyncDB> Runner<D> {
             testdir: None,
             sort_mode: None,
             hook: None,
+            hash_threshold: 0,
         }
     }
 
@@ -465,6 +476,7 @@ impl<D: AsyncDB> Runner<D> {
 
                 let mut output = split_lines_and_normalize(&output);
                 let mut expected_results = split_lines_and_normalize(&expected_results);
+
                 match sort_mode.as_ref().or(self.sort_mode.as_ref()) {
                     None | Some(SortMode::NoSort) => {}
                     Some(SortMode::RowSort) => {
@@ -473,6 +485,17 @@ impl<D: AsyncDB> Runner<D> {
                     }
                     Some(SortMode::ValueSort) => todo!("value sort"),
                 };
+
+                if self.hash_threshold > 0 && output.len() > self.hash_threshold {
+                    let mut md5 = md5::Context::new();
+                    for line in &output {
+                        md5.consume(line.as_bytes());
+                        md5.consume(b"\n");
+                    }
+                    let hash = md5.compute();
+                    output = vec![format!("{} values hashing to {:?}", output.len(), hash)];
+                }
+
                 if !(self.validator)(&output, &expected_results) {
                     return Err(TestErrorKind::QueryResultMismatch {
                         sql,
@@ -497,6 +520,7 @@ impl<D: AsyncDB> Runner<D> {
                 }
                 Control::BeginInclude(_) | Control::EndInclude(_) => {}
             },
+            Record::HashThreshold { loc: _, threshold } => self.hash_threshold = threshold as usize,
         }
         Ok(())
     }
