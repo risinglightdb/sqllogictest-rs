@@ -492,7 +492,7 @@ impl<D: AsyncDB> Runner<D> {
                 loc,
                 sql,
                 expected_error,
-                expected_results,
+                mut expected_results,
                 sort_mode,
                 type_string,
 
@@ -531,7 +531,7 @@ impl<D: AsyncDB> Runner<D> {
                     }
                 };
 
-                let (types, output) = match output {
+                let (types, mut output) = match output {
                     DBOutput::Rows { types, rows } => (types, rows),
                     DBOutput::StatementComplete(_) => {
                         return Err(TestErrorKind::QueryResultMismatch {
@@ -553,7 +553,7 @@ impl<D: AsyncDB> Runner<D> {
                     // }
                     // .at(loc));
                 }
-                for (t_actual, t_expected) in types.iter().zip_eq(type_string.iter()) {
+                for (t_actual, t_expected) in types.iter().zip(type_string.iter()) {
                     if t_actual != &ColumnType::Any
                         && t_expected != &ColumnType::Any
                         && t_actual != t_expected
@@ -561,14 +561,6 @@ impl<D: AsyncDB> Runner<D> {
                         // FIXME: do not validate type-string now
                     }
                 }
-
-                // We compare normalized results. Whitespace characters are ignored.
-                let mut output = output
-                    .into_iter()
-                    .map(|strs| strs.iter().map(normalize_string).join(" "))
-                    .collect_vec();
-                let mut expected_results =
-                    expected_results.iter().map(normalize_string).collect_vec();
 
                 match sort_mode.as_ref().or(self.sort_mode.as_ref()) {
                     None | Some(SortMode::NoSort) => {}
@@ -582,12 +574,25 @@ impl<D: AsyncDB> Runner<D> {
                 if self.hash_threshold > 0 && output.len() > self.hash_threshold {
                     let mut md5 = md5::Context::new();
                     for line in &output {
-                        md5.consume(line.as_bytes());
-                        md5.consume(b"\n");
+                        for value in line {
+                            md5.consume(value.as_bytes());
+                            md5.consume(b"\n");
+                        }
                     }
                     let hash = md5.compute();
-                    output = vec![format!("{} values hashing to {:?}", output.len(), hash)];
+                    output = vec![vec![format!(
+                        "{} values hashing to {:?}",
+                        output.len() * output[0].len(),
+                        hash
+                    )]];
                 }
+
+                // We compare normalized results. Whitespace characters are ignored.
+                let output = output
+                    .into_iter()
+                    .map(|strs| strs.iter().map(normalize_string).join(" "))
+                    .collect_vec();
+                let expected_results = expected_results.iter().map(normalize_string).collect_vec();
 
                 if !(self.validator)(&output, &expected_results) {
                     return Err(TestErrorKind::QueryResultMismatch {
