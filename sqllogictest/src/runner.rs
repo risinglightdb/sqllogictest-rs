@@ -492,7 +492,7 @@ impl<D: AsyncDB> Runner<D> {
                 loc,
                 sql,
                 expected_error,
-                mut expected_results,
+                expected_results,
                 sort_mode,
                 type_string,
 
@@ -566,7 +566,6 @@ impl<D: AsyncDB> Runner<D> {
                     None | Some(SortMode::NoSort) => {}
                     Some(SortMode::RowSort) => {
                         output.sort_unstable();
-                        expected_results.sort_unstable();
                     }
                     Some(SortMode::ValueSort) => todo!("value sort"),
                 };
