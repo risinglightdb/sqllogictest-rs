@@ -537,7 +537,7 @@ impl<D: AsyncDB> Runner<D> {
                         return Err(TestErrorKind::QueryResultMismatch {
                             sql,
                             expected: expected_results.join("\n"),
-                            actual: format!("statement complete"),
+                            actual: "statement complete".to_string(),
                         }
                         .at(loc))
                     }
@@ -764,6 +764,7 @@ impl<D: AsyncDB> Runner<D> {
 }
 
 /// Trim and replace multiple whitespaces with one.
+#[allow(clippy::ptr_arg)]
 fn normalize_string(s: &String) -> String {
     s.trim().split_ascii_whitespace().join(" ")
 }
