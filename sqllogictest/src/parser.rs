@@ -5,8 +5,10 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use itertools::Itertools;
 use regex::Regex;
 
+use crate::ColumnType;
 use crate::ParseErrorKind::InvalidIncludeFile;
 
 /// The location in source file.
@@ -87,7 +89,7 @@ pub enum Record {
     Query {
         loc: Location,
         conditions: Vec<Condition>,
-        type_string: String,
+        type_string: Vec<ColumnType>,
         sort_mode: Option<SortMode>,
         label: Option<String>,
         /// The SQL command is expected to fail with an error messages that matches the given
@@ -96,7 +98,7 @@ pub enum Record {
         /// The SQL command.
         sql: String,
         /// The expected results.
-        expected_results: String,
+        expected_results: Vec<String>,
     },
     /// A sleep period.
     Sleep { loc: Location, duration: Duration },
@@ -212,8 +214,8 @@ pub enum ParseErrorKind {
     InvalidSortMode(String),
     #[error("invalid line: {0:?}")]
     InvalidLine(String),
-    #[error("invalid type string: {0:?}")]
-    InvalidType(String),
+    #[error("invalid type character: {0:?} in type string")]
+    InvalidType(char),
     #[error("invalid number: {0:?}")]
     InvalidNumber(String),
     #[error("invalid error message: {0:?}")]
@@ -323,7 +325,7 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                 });
             }
             ["query", res @ ..] => {
-                let mut type_string = "";
+                let mut type_string = vec![];
                 let mut sort_mode = None;
                 let mut label = None;
                 let mut expected_error = None;
@@ -335,12 +337,16 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                         })?);
                     }
                     [type_str, res @ ..] => {
-                        type_string = type_str;
-                        sort_mode =
-                            match res.first().map(|&s| SortMode::try_from_str(s)).transpose() {
-                                Ok(sm) => sm,
-                                Err(k) => return Err(k.at(loc)),
-                            };
+                        type_string = type_str
+                            .chars()
+                            .map(ColumnType::try_from)
+                            .try_collect()
+                            .map_err(|e| e.at(loc.clone()))?;
+                        sort_mode = res
+                            .first()
+                            .map(|&s| SortMode::try_from_str(s))
+                            .transpose()
+                            .map_err(|e| e.at(loc.clone()))?;
                         label = res.get(1).map(|s| s.to_string());
                     }
                     _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
@@ -365,20 +371,19 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                     sql += line;
                 }
                 // Lines following the "----" are expected results of the query, one value per line.
-                let mut expected_results = String::new();
+                let mut expected_results = vec![];
                 if has_result {
                     for (_, line) in &mut lines {
                         if line.is_empty() {
                             break;
                         }
-                        expected_results += line;
-                        expected_results.push('\n');
+                        expected_results.push(line.to_string());
                     }
                 }
                 records.push(Record::Query {
                     loc,
                     conditions: std::mem::take(&mut conditions),
-                    type_string: type_string.to_string(),
+                    type_string,
                     sort_mode,
                     label,
                     sql,

@@ -8,7 +8,7 @@ mod external;
 
 use async_trait::async_trait;
 use postgres_extended::PostgresExtended;
-use sqllogictest::AsyncDB;
+use sqllogictest::{AsyncDB, DBOutput};
 
 use self::external::ExternalDriver;
 use super::{DBConfig, Result};
@@ -70,7 +70,7 @@ impl std::error::Error for AnyhowError {
 }
 
 impl Engines {
-    async fn run(&mut self, sql: &str) -> Result<String, anyhow::Error> {
+    async fn run(&mut self, sql: &str) -> Result<DBOutput, anyhow::Error> {
         Ok(match self {
             Engines::Postgres(e) => e.run(sql).await?,
             Engines::PostgresExtended(e) => e.run(sql).await?,
@@ -83,7 +83,7 @@ impl Engines {
 impl AsyncDB for Engines {
     type Error = AnyhowError;
 
-    async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
+    async fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error> {
         self.run(sql).await.map_err(AnyhowError)
     }
 }

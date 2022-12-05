@@ -16,6 +16,45 @@ use tempfile::{tempdir, TempDir};
 
 use crate::parser::*;
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[non_exhaustive]
+pub enum ColumnType {
+    Text,
+    Integer,
+    FloatingPoint,
+    /// Do not check the type of the column.
+    Any,
+}
+
+impl TryFrom<char> for ColumnType {
+    type Error = ParseErrorKind;
+
+    fn try_from(c: char) -> Result<Self, Self::Error> {
+        match c {
+            'T' => Ok(Self::Text),
+            'I' => Ok(Self::Integer),
+            'F' => Ok(Self::FloatingPoint),
+            // FIXME:
+            // _ => Err(ParseErrorKind::InvalidType(c)),
+            _ => Ok(Self::Any),
+        }
+    }
+}
+
+#[non_exhaustive]
+pub enum DBOutput {
+    Rows {
+        types: Vec<ColumnType>,
+        rows: Vec<Vec<String>>,
+    },
+    /// A statement in the query has completed.
+    ///
+    /// The number of rows modified or selected is returned.
+    ///
+    /// If the test case doesn't specify `statement count <n>`, the number is simply ignored.
+    StatementComplete(u64),
+}
+
 /// The async database to be tested.
 #[async_trait]
 pub trait AsyncDB: Send {
@@ -23,7 +62,7 @@ pub trait AsyncDB: Send {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Async run a SQL query and return the output.
-    async fn run(&mut self, sql: &str) -> Result<String, Self::Error>;
+    async fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error>;
 
     /// Engine name of current database.
     fn engine_name(&self) -> &str {
@@ -46,7 +85,7 @@ pub trait DB: Send {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Run a SQL query and return the output.
-    fn run(&mut self, sql: &str) -> Result<String, Self::Error>;
+    fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error>;
 
     /// Engine name of current database.
     fn engine_name(&self) -> &str {
@@ -62,7 +101,7 @@ where
 {
     type Error = <D as DB>::Error;
 
-    async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
+    async fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error> {
         <D as DB>::run(self, sql)
     }
 
@@ -222,6 +261,12 @@ pub enum TestErrorKind {
         sql: String,
         expected: String,
         actual: String,
+    },
+    #[error("expected results are invalid: expected {expected} columns, got {actual} columns\n[SQL] {sql}")]
+    QueryResultColumnCountMismatch {
+        sql: String,
+        expected: usize,
+        actual: usize,
     },
 }
 
@@ -392,13 +437,25 @@ impl<D: AsyncDB> Runner<D> {
                         }
                         .at(loc))
                     }
-                    (Ok(count_str), None) => {
+                    (Ok(result), None) => {
                         if let Some(expected_count) = expected_count {
-                            if expected_count.to_string() != count_str {
+                            let count = match result {
+                                DBOutput::Rows { types: _, rows } => {
+                                    return Err(TestErrorKind::StatementResultMismatch {
+                                        sql,
+                                        expected: expected_count,
+                                        actual: format!("got rows {:?}", rows),
+                                    }
+                                    .at(loc));
+                                }
+                                DBOutput::StatementComplete(count) => count,
+                            };
+
+                            if expected_count != count {
                                 return Err(TestErrorKind::StatementResultMismatch {
                                     sql,
                                     expected: expected_count,
-                                    actual: count_str,
+                                    actual: format!("affected {count} rows"),
                                 }
                                 .at(loc));
                             }
@@ -437,9 +494,9 @@ impl<D: AsyncDB> Runner<D> {
                 expected_error,
                 expected_results,
                 sort_mode,
+                type_string,
 
                 // not handle yet,
-                type_string: _,
                 label: _,
             } => {
                 let sql = self.replace_keywords(sql);
@@ -474,8 +531,44 @@ impl<D: AsyncDB> Runner<D> {
                     }
                 };
 
-                let mut output = split_lines_and_normalize(&output);
-                let mut expected_results = split_lines_and_normalize(&expected_results);
+                let (types, output) = match output {
+                    DBOutput::Rows { types, rows } => (types, rows),
+                    DBOutput::StatementComplete(_) => {
+                        return Err(TestErrorKind::QueryResultMismatch {
+                            sql,
+                            expected: expected_results.join("\n"),
+                            actual: format!("statement complete"),
+                        }
+                        .at(loc))
+                    }
+                };
+
+                // check number of columns
+                if types.len() != type_string.len() {
+                    // FIXME: do not validate type-string now
+                    // return Err(TestErrorKind::QueryResultColumnCountMismatch {
+                    //     sql,
+                    //     expected: type_string.len(),
+                    //     actual: types.len(),
+                    // }
+                    // .at(loc));
+                }
+                for (t_actual, t_expected) in types.iter().zip_eq(type_string.iter()) {
+                    if t_actual != &ColumnType::Any
+                        && t_expected != &ColumnType::Any
+                        && t_actual != t_expected
+                    {
+                        // FIXME: do not validate type-string now
+                    }
+                }
+
+                // We compare normalized results. Whitespace characters are ignored.
+                let mut output = output
+                    .into_iter()
+                    .map(|strs| strs.iter().map(normalize_string).join(" "))
+                    .collect_vec();
+                let mut expected_results =
+                    expected_results.iter().map(normalize_string).collect_vec();
 
                 match sort_mode.as_ref().or(self.sort_mode.as_ref()) {
                     None | Some(SortMode::NoSort) => {}
@@ -666,13 +759,6 @@ impl<D: AsyncDB> Runner<D> {
 }
 
 /// Trim and replace multiple whitespaces with one.
-fn normalize_string(s: &str) -> String {
+fn normalize_string(s: &String) -> String {
     s.trim().split_ascii_whitespace().join(" ")
-}
-
-fn split_lines_and_normalize(s: &str) -> Vec<String> {
-    s.split('\n')
-        .map(normalize_string)
-        .filter(|line| !line.is_empty())
-        .collect()
 }

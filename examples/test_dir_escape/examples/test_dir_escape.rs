@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use sqllogictest::DBOutput;
+
 pub struct FakeDB;
 
 #[derive(Debug)]
@@ -16,11 +18,11 @@ impl std::error::Error for FakeDBError {}
 impl sqllogictest::DB for FakeDB {
     type Error = FakeDBError;
 
-    fn run(&mut self, sql: &str) -> Result<String, FakeDBError> {
+    fn run(&mut self, sql: &str) -> Result<DBOutput, FakeDBError> {
         // Output will be: sqllogictests yields copy test to '/tmp/.tmp6xSyMa/test.csv';
         println!("sqllogictests yields {}", sql);
         assert!(!sql.contains("__TEST_DIR__"));
-        Ok("".into())
+        Ok(DBOutput::StatementComplete(0))
     }
 }
 

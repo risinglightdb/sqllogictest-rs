@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use async_trait::async_trait;
+use sqllogictest::{ColumnType, DBOutput};
 use tokio::task::JoinHandle;
 
 use crate::{DBConfig, Result};
@@ -48,10 +49,18 @@ impl Drop for Postgres {
 impl sqllogictest::AsyncDB for Postgres {
     type Error = tokio_postgres::error::Error;
 
-    async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
-        use std::fmt::Write;
+    async fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error> {
+        let mut output = vec![];
 
-        let mut output = String::new();
+        let is_query_sql = {
+            let lower_sql = sql.to_ascii_lowercase();
+            lower_sql.starts_with("select")
+                || lower_sql.starts_with("values")
+                || lower_sql.starts_with("show")
+                || lower_sql.starts_with("with")
+                || lower_sql.starts_with("describe")
+        };
+
         // NOTE:
         // We use `simple_query` API which returns the query results as strings.
         // This means that we can not reformat values based on their type,
@@ -60,30 +69,45 @@ impl sqllogictest::AsyncDB for Postgres {
         // thus we have to write `t`/`f` in the expected results.
         let rows = self.client.simple_query(sql).await?;
         for row in rows {
+            let mut row_vec = vec![];
             match row {
                 tokio_postgres::SimpleQueryMessage::Row(row) => {
                     for i in 0..row.len() {
-                        if i != 0 {
-                            write!(output, " ").unwrap();
-                        }
                         match row.get(i) {
                             Some(v) => {
                                 if v.is_empty() {
-                                    write!(output, "(empty)").unwrap()
+                                    row_vec.push("(empty)".to_string());
                                 } else {
-                                    write!(output, "{}", v).unwrap()
+                                    row_vec.push(v.to_string());
                                 }
                             }
-                            None => write!(output, "NULL").unwrap(),
+                            None => row_vec.push("NULL".to_string()),
                         }
                     }
                 }
-                tokio_postgres::SimpleQueryMessage::CommandComplete(_) => {}
+                tokio_postgres::SimpleQueryMessage::CommandComplete(cnt) => {
+                    if is_query_sql {
+                        break;
+                    } else {
+                        return Ok(DBOutput::StatementComplete(cnt));
+                    }
+                }
                 _ => unreachable!(),
             }
-            writeln!(output).unwrap();
+            output.push(row_vec);
         }
-        Ok(output)
+
+        if output.is_empty() {
+            Ok(DBOutput::Rows {
+                types: vec![],
+                rows: vec![],
+            })
+        } else {
+            Ok(DBOutput::Rows {
+                types: vec![ColumnType::Any; output[0].len()],
+                rows: output,
+            })
+        }
     }
 
     fn engine_name(&self) -> &str {
