@@ -70,7 +70,10 @@ impl Location {
 #[non_exhaustive]
 pub enum Record {
     /// An include copies all records from another files.
-    Include { loc: Location, filename: String },
+    Include {
+        loc: Location,
+        filename: String,
+    },
     /// A statement is an SQL command that is to be evaluated but from which we do not expect to
     /// get results (other than success or failure).
     Statement {
@@ -101,12 +104,20 @@ pub enum Record {
         expected_results: Vec<String>,
     },
     /// A sleep period.
-    Sleep { loc: Location, duration: Duration },
+    Sleep {
+        loc: Location,
+        duration: Duration,
+    },
     /// Subtest.
-    Subtest { loc: Location, name: String },
+    Subtest {
+        loc: Location,
+        name: String,
+    },
     /// A halt record merely causes sqllogictest to ignore the rest of the test script.
     /// For debugging use only.
-    Halt { loc: Location },
+    Halt {
+        loc: Location,
+    },
     /// Control statements.
     Control(Control),
     /// Set the maximum number of result values that will be accepted
@@ -115,13 +126,129 @@ pub enum Record {
     /// is the only result.
     ///
     /// If the threshold is 0, then hashing is never used.
-    HashThreshold { loc: Location, threshold: u64 },
+    HashThreshold {
+        loc: Location,
+        threshold: u64,
+    },
+    Condition(Condition),
+    Comment(Vec<String>),
+    /// Internally injected record which should not occur in the test file.
+    Injected(Injected),
+}
+
+impl Record {
+    /// Unparses the record to its string representation in the test file.
+    ///
+    /// # Panics
+    /// If the record is an internally injected record which should not occur in the test file.
+    pub fn unparse(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
+        match self {
+            Record::Include { loc: _, filename } => {
+                write!(w, "include {}", filename)
+            }
+            Record::Statement {
+                loc: _,
+                conditions: _,
+                expected_error,
+                sql,
+                expected_count,
+            } => {
+                write!(w, "statement ")?;
+                match (expected_count, expected_error) {
+                    (None, None) => write!(w, "ok")?,
+                    (None, Some(err)) => {
+                        if err.as_str().is_empty() {
+                            write!(w, "error")?;
+                        } else {
+                            write!(w, "error {}", err)?;
+                        }
+                    }
+                    (Some(cnt), None) => write!(w, "count {}", cnt)?,
+                    (Some(_), Some(_)) => unreachable!(),
+                }
+                writeln!(w)?;
+                write!(w, "{}", sql)
+            }
+            Record::Query {
+                loc: _,
+                conditions: _,
+                type_string,
+                sort_mode,
+                label,
+                expected_error,
+                sql,
+                expected_results,
+            } => {
+                write!(w, "query",)?;
+                if let Some(err) = expected_error {
+                    writeln!(w, " error {}", err)?;
+                    return write!(w, "{}", sql);
+                }
+
+                write!(
+                    w,
+                    " {}",
+                    type_string.iter().map(|c| format!("{c}")).join("")
+                )?;
+                if let Some(sort_mode) = sort_mode {
+                    write!(w, " {}", sort_mode.as_str())?;
+                }
+                if let Some(label) = label {
+                    write!(w, " {}", label)?;
+                }
+                writeln!(w)?;
+                writeln!(w, "{}", sql)?;
+
+                write!(w, "----")?;
+                for result in expected_results {
+                    write!(w, "\n{}", result)?;
+                }
+                Ok(())
+            }
+            Record::Sleep { loc: _, duration } => {
+                write!(w, "sleep {}", humantime::format_duration(*duration))
+            }
+            Record::Subtest { loc: _, name } => {
+                write!(w, "subtest {}", name)
+            }
+            Record::Halt { loc: _ } => {
+                write!(w, "halt")
+            }
+            Record::Control(c) => match c {
+                Control::SortMode(m) => write!(w, "control sortmode {}", m.as_str()),
+            },
+            Record::Condition(cond) => match cond {
+                Condition::OnlyIf { engine_name } => {
+                    write!(w, "onlyif {}", engine_name)
+                }
+                Condition::SkipIf { engine_name } => {
+                    write!(w, "skipif {}", engine_name)
+                }
+            },
+            Record::HashThreshold { loc: _, threshold } => {
+                write!(w, "hash-threshold {}", threshold)
+            }
+            Record::Comment(comment) => {
+                let mut iter = comment.iter();
+                write!(w, "#{}", iter.next().unwrap().trim_end())?;
+                for line in iter {
+                    write!(w, "\n#{}", line.trim_end())?;
+                }
+                Ok(())
+            }
+            Record::Injected(p) => panic!("unexpected injected record: {:?}", p),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Control {
     /// Control sort mode.
     SortMode(SortMode),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Injected {
     /// Pseudo control command to indicate the begin of an include statement. Automatically
     /// injected by sqllogictest parser.
     BeginInclude(String),
@@ -246,12 +373,30 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
     let mut lines = script.split('\n').enumerate();
     let mut records = vec![];
     let mut conditions = vec![];
-    while let Some((num, line)) = lines.next() {
-        if line.is_empty() || line.starts_with('#') {
+
+    while let Some((mut num, mut line)) = lines.next() {
+        if let Some(text) = line.strip_prefix('#') {
+            let mut comments = vec![text.to_string()];
+            for (num_, line_) in lines.by_ref() {
+                num = num_;
+                line = line_;
+                if let Some(text) = line.strip_prefix('#') {
+                    comments.push(text.to_string());
+                } else {
+                    break;
+                }
+            }
+
+            records.push(Record::Comment(comments));
+        }
+
+        if line.is_empty() {
             continue;
         }
+
         let mut loc = loc.clone();
         loc.line = num as u32 + 1;
+
         let tokens: Vec<&str> = line.split_whitespace().collect();
         match tokens.as_slice() {
             [] => continue,
@@ -261,7 +406,6 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
             }),
             ["halt"] => {
                 records.push(Record::Halt { loc });
-                break;
             }
             ["subtest", name] => {
                 records.push(Record::Subtest {
@@ -278,14 +422,18 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                 });
             }
             ["skipif", engine_name] => {
-                conditions.push(Condition::SkipIf {
+                let cond = Condition::SkipIf {
                     engine_name: engine_name.to_string(),
-                });
+                };
+                conditions.push(cond.clone());
+                records.push(Record::Condition(cond));
             }
             ["onlyif", engine_name] => {
-                conditions.push(Condition::OnlyIf {
+                let cond = Condition::OnlyIf {
                     engine_name: engine_name.to_string(),
-                });
+                };
+                conditions.push(cond.clone());
+                records.push(Record::Condition(cond));
             }
             ["statement", res @ ..] => {
                 let mut expected_count = None;
@@ -412,7 +560,7 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
     Ok(records)
 }
 
-/// Parse a sqllogictest file and link all included scripts together.
+/// Parse a sqllogictest file. The included scripts are inserted after the `include` record.
 pub fn parse_file(filename: impl AsRef<Path>) -> Result<Vec<Record>, ParseError> {
     let filename = filename.as_ref().to_str().unwrap();
     parse_file_inner(Location::new(filename, 0))
@@ -426,6 +574,8 @@ fn parse_file_inner(loc: Location) -> Result<Vec<Record>, ParseError> {
     let script = std::fs::read_to_string(path).unwrap();
     let mut records = vec![];
     for rec in parse_inner(&loc, &script)? {
+        records.push(rec.clone());
+
         if let Record::Include { filename, loc } = rec {
             let complete_filename = {
                 let mut path_buf = path.to_path_buf();
@@ -440,14 +590,12 @@ fn parse_file_inner(loc: Location) -> Result<Vec<Record>, ParseError> {
             {
                 let included_file = included_file.as_os_str().to_string_lossy().to_string();
 
-                records.push(Record::Control(Control::BeginInclude(
+                records.push(Record::Injected(Injected::BeginInclude(
                     included_file.clone(),
                 )));
                 records.extend(parse_file_inner(loc.include(&included_file))?);
-                records.push(Record::Control(Control::EndInclude(included_file)));
+                records.push(Record::Injected(Injected::EndInclude(included_file)));
             }
-        } else {
-            records.push(rec);
         }
     }
     Ok(records)

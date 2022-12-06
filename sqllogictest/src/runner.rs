@@ -26,6 +26,17 @@ pub enum ColumnType {
     Any,
 }
 
+impl Display for ColumnType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ColumnType::Text => write!(f, "T"),
+            ColumnType::Integer => write!(f, "I"),
+            ColumnType::FloatingPoint => write!(f, "R"),
+            ColumnType::Any => write!(f, "?"),
+        }
+    }
+}
+
 impl TryFrom<char> for ColumnType {
     type Error = ParseErrorKind;
 
@@ -33,7 +44,8 @@ impl TryFrom<char> for ColumnType {
         match c {
             'T' => Ok(Self::Text),
             'I' => Ok(Self::Integer),
-            'F' => Ok(Self::FloatingPoint),
+            'R' => Ok(Self::FloatingPoint),
+            '?' => Ok(Self::Any),
             // FIXME:
             // _ => Err(ParseErrorKind::InvalidType(c)),
             _ => Ok(Self::Any),
@@ -606,18 +618,18 @@ impl<D: AsyncDB> Runner<D> {
                 }
             }
             Record::Sleep { duration, .. } => D::sleep(duration).await,
-            Record::Halt { .. } => {}
-            Record::Subtest { .. } => {}
-            Record::Include { loc, .. } => {
-                unreachable!("include should be rewritten during link: at {}", loc)
-            }
+            Record::Include { .. } => {}
             Record::Control(control) => match control {
                 Control::SortMode(sort_mode) => {
                     self.sort_mode = Some(sort_mode);
                 }
-                Control::BeginInclude(_) | Control::EndInclude(_) => {}
             },
             Record::HashThreshold { loc: _, threshold } => self.hash_threshold = threshold as usize,
+            Record::Comment(_)
+            | Record::Subtest { .. }
+            | Record::Halt { .. }
+            | Record::Injected(_)
+            | Record::Condition(_) => {}
         }
         Ok(())
     }

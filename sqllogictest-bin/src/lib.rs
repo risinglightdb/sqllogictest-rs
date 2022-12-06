@@ -1,6 +1,7 @@
 mod engines;
 
 use std::collections::BTreeMap;
+use std::fs::File;
 use std::io::{stdout, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -14,7 +15,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
 use rand::seq::SliceRandom;
-use sqllogictest::{AsyncDB, Control, Record, Runner};
+use sqllogictest::{AsyncDB, Injected, Record, Runner};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
 #[must_use]
@@ -84,6 +85,13 @@ struct Opt {
     /// The database password.
     #[clap(short = 'w', long, default_value = "postgres")]
     pass: String,
+
+    /// Overrides the test files with the actual output of the database.
+    #[clap(long)]
+    r#override: bool,
+    /// Reformats the test files.
+    #[clap(long)]
+    format: bool,
 }
 
 /// Connection configuration.
@@ -123,6 +131,8 @@ pub async fn main_okk() -> Result<()> {
         db,
         user,
         pass,
+        r#override,
+        format,
     } = Opt::parse();
 
     if host.len() != port.len() {
@@ -170,6 +180,10 @@ pub async fn main_okk() -> Result<()> {
         user,
         pass,
     };
+
+    if r#override || format {
+        return update_test_files(files, &engine, config, format).await;
+    }
 
     let mut report = Report::new(junit.clone().unwrap_or_else(|| "sqllogictest".to_string()));
     report.set_timestamp(Local::now());
@@ -348,6 +362,28 @@ async fn run_serial(
     }
 }
 
+/// * `format` - If true, will not run sqls, only formats the file.
+async fn update_test_files(
+    files: Vec<PathBuf>,
+    engine: &EngineConfig,
+    config: DBConfig,
+    format: bool,
+) -> Result<()> {
+    for file in files {
+        let engine = engines::connect(engine, &config).await?;
+        let runner = Runner::new(engine);
+
+        if let Err(e) = update_test_file(&mut std::io::stdout(), runner, &file, format).await {
+            {
+                println!("{}\n\n{:?}", style("[FAILED]").red().bold(), e);
+                println!();
+            }
+        };
+    }
+
+    Ok(())
+}
+
 async fn flush(out: &mut impl std::io::Write) -> std::io::Result<()> {
     tokio::task::block_in_place(|| out.flush())
 }
@@ -384,38 +420,9 @@ async fn run_test_file<T: std::io::Write, D: AsyncDB>(
 
     begin_times.push(Instant::now());
 
-    let finish = |out: &mut T, time_stack: &mut Vec<Instant>, did_pop: &mut bool, file: &str| {
-        let begin_time = time_stack.pop().unwrap();
-
-        if *did_pop {
-            // start a new line if the result is not immediately after the item
-            write!(
-                out,
-                "\n{}{} {: <54} .. {} in {} ms",
-                "| ".repeat(time_stack.len()),
-                style("[END]").blue().bold(),
-                file,
-                style("[OK]").green().bold(),
-                begin_time.elapsed().as_millis()
-            )?;
-        } else {
-            // otherwise, append time to the previous line
-            write!(
-                out,
-                "{} in {} ms",
-                style("[OK]").green().bold(),
-                begin_time.elapsed().as_millis()
-            )?;
-        }
-
-        *did_pop = true;
-
-        Ok::<_, anyhow::Error>(())
-    };
-
     for record in records {
         match &record {
-            Record::Control(Control::BeginInclude(file)) => {
+            Record::Injected(Injected::BeginInclude(file)) => {
                 begin_times.push(Instant::now());
                 if !did_pop {
                     writeln!(out, "{}", style("[BEGIN]").blue().bold())?;
@@ -431,11 +438,12 @@ async fn run_test_file<T: std::io::Write, D: AsyncDB>(
                 )?;
                 flush(out).await?;
             }
-            Record::Control(Control::EndInclude(file)) => {
-                finish(out, &mut begin_times, &mut did_pop, file)?;
+            Record::Injected(Injected::EndInclude(file)) => {
+                finish_test_file(out, &mut begin_times, &mut did_pop, file)?;
             }
             _ => {}
         }
+
         runner
             .run_async(record)
             .await
@@ -448,7 +456,7 @@ async fn run_test_file<T: std::io::Write, D: AsyncDB>(
 
     let duration = begin_times[0].elapsed();
 
-    finish(
+    finish_test_file(
         out,
         &mut begin_times,
         &mut did_pop,
@@ -458,4 +466,170 @@ async fn run_test_file<T: std::io::Write, D: AsyncDB>(
     writeln!(out)?;
 
     Ok(duration)
+}
+
+fn finish_test_file<T: std::io::Write>(
+    out: &mut T,
+    time_stack: &mut Vec<Instant>,
+    did_pop: &mut bool,
+    file: &str,
+) -> Result<()> {
+    let begin_time = time_stack.pop().unwrap();
+
+    if *did_pop {
+        // start a new line if the result is not immediately after the item
+        write!(
+            out,
+            "\n{}{} {: <54} .. {} in {} ms",
+            "| ".repeat(time_stack.len()),
+            style("[END]").blue().bold(),
+            file,
+            style("[OK]").green().bold(),
+            begin_time.elapsed().as_millis()
+        )?;
+    } else {
+        // otherwise, append time to the previous line
+        write!(
+            out,
+            "{} in {} ms",
+            style("[OK]").green().bold(),
+            begin_time.elapsed().as_millis()
+        )?;
+    }
+
+    *did_pop = true;
+
+    Ok::<_, anyhow::Error>(())
+}
+
+async fn update_test_file<T: std::io::Write, D: AsyncDB>(
+    out: &mut T,
+    _runner: Runner<D>,
+    filename: impl AsRef<Path>,
+    format: bool,
+) -> Result<()> {
+    let filename = filename.as_ref();
+    let records = tokio::task::block_in_place(|| {
+        sqllogictest::parse_file(filename).map_err(|e| anyhow!("{:?}", e))
+    })
+    .context("failed to parse sqllogictest file")?;
+
+    let mut begin_times = vec![];
+    let mut did_pop = false;
+
+    write!(out, "{: <60} .. ", filename.to_string_lossy())?;
+    flush(out).await?;
+
+    begin_times.push(Instant::now());
+
+    fn create_outfile(filename: impl AsRef<Path>) -> std::io::Result<(PathBuf, File)> {
+        let filename = filename.as_ref();
+        let outfilename = filename.file_name().unwrap().to_str().unwrap().to_owned() + ".temp";
+        let outfilename = filename.parent().unwrap().join(&outfilename);
+        let outfile = File::create(&outfilename)?;
+        Ok((outfilename, outfile))
+    }
+
+    struct Item {
+        filename: String,
+        outfilename: PathBuf,
+        outfile: File,
+        first_record: bool,
+    }
+    let (outfilename, outfile) = create_outfile(filename)?;
+    let mut stack = vec![Item {
+        filename: filename.to_string_lossy().to_string(),
+        outfilename,
+        outfile,
+        first_record: true,
+    }];
+
+    for record in records {
+        let Item {
+            filename,
+            outfilename,
+            outfile,
+            first_record,
+        } = stack.last_mut().unwrap();
+
+        match &record {
+            Record::Injected(Injected::BeginInclude(filename)) => {
+                let (outfilename, outfile) = create_outfile(filename)?;
+                stack.push(Item {
+                    filename: filename.clone(),
+                    outfilename,
+                    outfile,
+                    first_record: true,
+                });
+
+                begin_times.push(Instant::now());
+                if !did_pop {
+                    writeln!(out, "{}", style("[BEGIN]").blue().bold())?;
+                } else {
+                    writeln!(out)?;
+                }
+                did_pop = false;
+                write!(
+                    out,
+                    "{}{: <60} .. ",
+                    "| ".repeat(begin_times.len() - 1),
+                    filename
+                )?;
+                flush(out).await?;
+            }
+            Record::Injected(Injected::EndInclude(file)) => {
+                // override the original file with the updated one
+                std::fs::rename(outfilename, filename)?;
+                stack.pop();
+                finish_test_file(out, &mut begin_times, &mut did_pop, file)?;
+            }
+            _ => {
+                if !*first_record {
+                    writeln!(outfile)?;
+                }
+
+                update_record(outfile, record, format)
+                    .context(format!("failed to run `{}`", style(filename).bold()))?;
+                *first_record = false;
+            }
+        }
+    }
+
+    finish_test_file(
+        out,
+        &mut begin_times,
+        &mut did_pop,
+        &filename.to_string_lossy(),
+    )?;
+
+    writeln!(out)?;
+
+    // override the original file with the updated one
+    let Item {
+        filename,
+        outfilename,
+        outfile: _,
+        first_record: _,
+    } = stack.last().unwrap();
+    std::fs::rename(outfilename, filename)?;
+
+    Ok(())
+}
+
+fn update_record(outfile: &mut File, record: Record, format: bool) -> Result<()> {
+    if format {
+        todo!()
+    }
+
+    match record {
+        Record::Injected(_) => {
+            unreachable!()
+        }
+        _ => {
+            record.unparse(outfile)?;
+            writeln!(outfile)?;
+        }
+    }
+
+    Ok(())
 }
