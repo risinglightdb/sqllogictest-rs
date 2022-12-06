@@ -53,7 +53,7 @@ impl sqllogictest::AsyncDB for Postgres {
         let mut output = vec![];
 
         let is_query_sql = {
-            let lower_sql = sql.to_ascii_lowercase();
+            let lower_sql = sql.trim_start().to_ascii_lowercase();
             lower_sql.starts_with("select")
                 || lower_sql.starts_with("values")
                 || lower_sql.starts_with("show")
