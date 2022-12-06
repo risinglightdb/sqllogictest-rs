@@ -24,6 +24,7 @@ pub enum ColumnType {
     FloatingPoint,
     /// Do not check the type of the column.
     Any,
+    Unknown(char),
 }
 
 impl Display for ColumnType {
@@ -33,6 +34,7 @@ impl Display for ColumnType {
             ColumnType::Integer => write!(f, "I"),
             ColumnType::FloatingPoint => write!(f, "R"),
             ColumnType::Any => write!(f, "?"),
+            ColumnType::Unknown(c) => write!(f, "{}", c),
         }
     }
 }
@@ -48,7 +50,7 @@ impl TryFrom<char> for ColumnType {
             '?' => Ok(Self::Any),
             // FIXME:
             // _ => Err(ParseErrorKind::InvalidType(c)),
-            _ => Ok(Self::Any),
+            _ => Ok(Self::Unknown(c)),
         }
     }
 }

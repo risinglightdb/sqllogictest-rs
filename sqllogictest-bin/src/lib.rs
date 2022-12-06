@@ -693,6 +693,7 @@ async fn update_record<D: AsyncDB>(
                 }
             };
 
+            // FIXME: use output's types instead of orignal query's types
             write!(
                 outfile,
                 "query {}",
