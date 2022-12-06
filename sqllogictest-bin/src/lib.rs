@@ -637,6 +637,29 @@ async fn update_record<D: AsyncDB>(
             writeln!(outfile)?;
         }
         (
+            Record::Statement { sql, .. },
+            RecordOutput::Query {
+                types,
+                rows,
+                error: None,
+            },
+        ) => {
+            writeln!(
+                outfile,
+                "query {}",
+                types.iter().map(|c| format!("{c}")).join("")
+            )?;
+            writeln!(outfile, "{}", sql)?;
+            writeln!(outfile, "----")?;
+            for result in rows {
+                writeln!(outfile, "{}", result.iter().format("\t"))?;
+            }
+        }
+        (Record::Query { sql, .. }, RecordOutput::Statement { error: None, .. }) => {
+            writeln!(outfile, "statement ok")?;
+            writeln!(outfile, "{}", sql)?;
+        }
+        (
             Record::Statement {
                 loc: _,
                 conditions: _,

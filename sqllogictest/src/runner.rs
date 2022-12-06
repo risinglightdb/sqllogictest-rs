@@ -459,7 +459,11 @@ impl<D: AsyncDB> Runner<D> {
                 let ret = self.db.run(&sql).await;
                 let ret = match ret {
                     Ok(out) => match out {
-                        DBOutput::Rows { .. } => panic!("DB should not return rows for statement"),
+                        DBOutput::Rows { types, rows } => RecordOutput::Query {
+                            types,
+                            rows,
+                            error: None,
+                        },
                         DBOutput::StatementComplete(count) => {
                             RecordOutput::Statement { count, error: None }
                         }
@@ -495,7 +499,9 @@ impl<D: AsyncDB> Runner<D> {
                 let (types, mut rows) = match self.db.run(&sql).await {
                     Ok(out) => match out {
                         DBOutput::Rows { types, rows } => (types, rows),
-                        DBOutput::StatementComplete(_) => panic!("DB should return rows for query"),
+                        DBOutput::StatementComplete(count) => {
+                            return RecordOutput::Statement { count, error: None }
+                        }
                     },
                     Err(e) => {
                         return RecordOutput::Query {
@@ -569,6 +575,26 @@ impl<D: AsyncDB> Runner<D> {
 
         match (record.clone(), self.apply_record(record).await) {
             (_, RecordOutput::Nothing) => {}
+            // Tolerate the mismatched return type...
+            (Record::Statement { .. }, RecordOutput::Query { error: None, .. }) => {}
+            (
+                Record::Query {
+                    expected_results,
+                    loc,
+                    sql,
+                    ..
+                },
+                RecordOutput::Statement { error: None, .. },
+            ) => {
+                if !expected_results.is_empty() {
+                    return Err(TestErrorKind::QueryResultMismatch {
+                        sql,
+                        expected: expected_results.join("\n"),
+                        actual: "".to_string(),
+                    }
+                    .at(loc));
+                }
+            }
             (
                 Record::Statement {
                     loc,
