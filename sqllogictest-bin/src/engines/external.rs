@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use bytes::{Buf, BytesMut};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use sqllogictest::AsyncDB;
+use sqllogictest::{AsyncDB, ColumnType, DBOutput};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -71,7 +71,7 @@ impl Drop for ExternalDriver {
 impl AsyncDB for ExternalDriver {
     type Error = ExternalDriverError;
 
-    async fn run(&mut self, sql: &str) -> Result<String> {
+    async fn run(&mut self, sql: &str) -> Result<DBOutput> {
         let input = Input {
             sql: sql.to_string(),
         };
@@ -83,7 +83,11 @@ impl AsyncDB for ExternalDriver {
             None => return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into()),
         };
         match output {
-            Output::Success { result } => Ok(result),
+            // FIXME: split result into columns and rows?
+            Output::Success { result } => Ok(DBOutput::Rows {
+                types: vec![ColumnType::Any],
+                rows: vec![vec![result]],
+            }),
             Output::Failed { err } => Err(ExternalDriverError::Sql(err)),
         }
     }

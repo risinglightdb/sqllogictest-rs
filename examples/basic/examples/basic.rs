@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use sqllogictest::{ColumnType, DBOutput};
+
 pub struct FakeDB;
 
 #[derive(Debug)]
@@ -16,18 +18,25 @@ impl std::error::Error for FakeDBError {}
 impl sqllogictest::DB for FakeDB {
     type Error = FakeDBError;
 
-    fn run(&mut self, sql: &str) -> Result<String, FakeDBError> {
+    fn run(&mut self, sql: &str) -> Result<DBOutput, FakeDBError> {
         if sql == "select * from example_basic" {
-            return Ok("Alice\nBob\nEve".into());
+            return Ok(DBOutput::Rows {
+                types: vec![ColumnType::Text],
+                rows: vec![
+                    vec!["Alice".to_string()],
+                    vec!["Bob".to_string()],
+                    vec!["Eve".to_string()],
+                ],
+            });
         }
         if sql.starts_with("create") {
-            return Ok("".into());
+            return Ok(DBOutput::StatementComplete(0));
         }
         if sql.starts_with("insert") {
-            return Ok("".into());
+            return Ok(DBOutput::StatementComplete(0));
         }
         if sql.starts_with("drop") {
-            return Ok("".into());
+            return Ok(DBOutput::StatementComplete(0));
         }
         Err(FakeDBError)
     }

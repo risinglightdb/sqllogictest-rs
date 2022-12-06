@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use sqllogictest::{ColumnType, DBOutput};
+
 pub struct FakeDB;
 
 #[derive(Debug)]
@@ -16,11 +18,22 @@ impl std::error::Error for FakeDBError {}
 impl sqllogictest::DB for FakeDB {
     type Error = FakeDBError;
 
-    fn run(&mut self, sql: &str) -> Result<String, FakeDBError> {
+    fn run(&mut self, sql: &str) -> Result<DBOutput, FakeDBError> {
         if sql == "select * from example_file_level_sort_mode" {
             // Even if the order is not the same as `slt` file, sqllogictest will sort them before
             // comparing.
-            return Ok("1 10 2333\n2 20 2333\n10 100 2333".into());
+            return Ok(DBOutput::Rows {
+                types: vec![
+                    ColumnType::Integer,
+                    ColumnType::Integer,
+                    ColumnType::Integer,
+                ],
+                rows: vec![
+                    vec!["1".to_string(), "10".to_string(), "2333".to_string()],
+                    vec!["2".to_string(), "20".to_string(), "2333".to_string()],
+                    vec!["10".to_string(), "100".to_string(), "2333".to_string()],
+                ],
+            });
         }
         unimplemented!("unsupported SQL: {}", sql);
     }

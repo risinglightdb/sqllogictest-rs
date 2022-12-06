@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use sqllogictest::{ColumnType, DBOutput};
+
 pub struct FakeDB {
     engine_name: &'static str,
 }
@@ -18,9 +20,16 @@ impl std::error::Error for FakeDBError {}
 impl sqllogictest::DB for FakeDB {
     type Error = FakeDBError;
 
-    fn run(&mut self, sql: &str) -> Result<String, FakeDBError> {
+    fn run(&mut self, sql: &str) -> Result<DBOutput, FakeDBError> {
         if sql.contains(self.engine_name) {
-            Ok("Alice\nBob\nEve".into())
+            Ok(DBOutput::Rows {
+                types: vec![ColumnType::Text],
+                rows: vec![
+                    vec!["Alice".to_string()],
+                    vec!["Bob".to_string()],
+                    vec!["Eve".to_string()],
+                ],
+            })
         } else {
             Err(FakeDBError)
         }

@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use sqllogictest::{ColumnType, DBOutput};
+
 pub struct FakeDB;
 
 #[derive(Debug)]
@@ -16,8 +18,11 @@ impl std::error::Error for FakeDBError {}
 impl sqllogictest::DB for FakeDB {
     type Error = FakeDBError;
 
-    fn run(&mut self, _sql: &str) -> Result<String, FakeDBError> {
-        Ok("Hello, world!".to_string())
+    fn run(&mut self, _sql: &str) -> Result<DBOutput, FakeDBError> {
+        Ok(DBOutput::Rows {
+            types: vec![ColumnType::Text],
+            rows: vec![vec!["Hello, world!".to_string()]],
+        })
     }
 }
 
