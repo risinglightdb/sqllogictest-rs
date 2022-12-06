@@ -179,7 +179,7 @@ impl Record {
                 sql,
                 expected_results,
             } => {
-                write!(w, "query",)?;
+                write!(w, "query")?;
                 if let Some(err) = expected_error {
                     writeln!(w, " error {}", err)?;
                     return write!(w, "{}", sql);
@@ -608,6 +608,6 @@ mod tests {
     #[test]
     fn test_include_glob() {
         let records = parse_file("../examples/include/include_1.slt").unwrap();
-        assert_eq!(12, records.len());
+        assert_eq!(14, records.len());
     }
 }
