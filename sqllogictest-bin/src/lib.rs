@@ -713,7 +713,7 @@ async fn update_record<D: AsyncDB>(
             }
 
             let normalized_rows = rows
-                .into_iter()
+                .iter()
                 .map(|strs| strs.iter().map(normalize_string).join(" "))
                 .collect_vec();
 
@@ -727,8 +727,8 @@ async fn update_record<D: AsyncDB>(
                     writeln!(outfile, "{}", result)?;
                 }
             } else {
-                for result in normalized_rows {
-                    writeln!(outfile, "{}", result)?;
+                for result in rows {
+                    writeln!(outfile, "{}", result.iter().format("\t"))?;
                 }
             };
         }
