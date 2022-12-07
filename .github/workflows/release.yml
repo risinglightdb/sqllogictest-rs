@@ -28,6 +28,6 @@ jobs:
         uses: anton-yurchenko/git-release@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_NAME: Release ${{ github.ref }}
+          RELEASE_NAME_PREFIX: "Release: "
         with:
           args: sqllogictest-linux-amd64.tar.gz
