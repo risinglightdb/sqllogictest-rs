@@ -394,16 +394,6 @@ fn format_diff(
 /// By default, we will use `|x, y| x == y`.
 pub type Validator = fn(&Vec<String>, &Vec<String>) -> bool;
 
-/// A collection of hook functions.
-#[async_trait]
-pub trait Hook: Send {
-    /// Called after each statement completes.
-    async fn on_stmt_complete(&mut self, _sql: &str) {}
-
-    /// Called after each query completes.
-    async fn on_query_complete(&mut self, _sql: &str) {}
-}
-
 /// Sqllogictest runner.
 pub struct Runner<D: AsyncDB> {
     db: D,
@@ -411,7 +401,6 @@ pub struct Runner<D: AsyncDB> {
     validator: Validator,
     testdir: Option<TempDir>,
     sort_mode: Option<SortMode>,
-    hook: Option<Box<dyn Hook>>,
     /// 0 means never hashing
     hash_threshold: usize,
 }
@@ -424,7 +413,6 @@ impl<D: AsyncDB> Runner<D> {
             validator: |x, y| x == y,
             testdir: None,
             sort_mode: None,
-            hook: None,
             hash_threshold: 0,
         }
     }
@@ -457,7 +445,7 @@ impl<D: AsyncDB> Runner<D> {
             } => {
                 let sql = self.replace_keywords(sql);
                 let ret = self.db.run(&sql).await;
-                let ret = match ret {
+                match ret {
                     Ok(out) => match out {
                         DBOutput::Rows { types, rows } => RecordOutput::Query {
                             types,
@@ -472,11 +460,7 @@ impl<D: AsyncDB> Runner<D> {
                         count: 0,
                         error: Some(Arc::new(e)),
                     },
-                };
-                if let Some(hook) = &mut self.hook {
-                    hook.on_stmt_complete(&sql).await;
                 }
-                ret
             }
             Record::Query { conditions, .. } if self.should_skip(&conditions) => {
                 RecordOutput::Nothing
@@ -534,10 +518,6 @@ impl<D: AsyncDB> Runner<D> {
                         rows.len() * rows[0].len(),
                         hash
                     )]];
-                }
-
-                if let Some(hook) = &mut self.hook {
-                    hook.on_query_complete(&sql).await;
                 }
 
                 RecordOutput::Query {
@@ -861,11 +841,6 @@ impl<D: AsyncDB> Runner<D> {
         conditions
             .iter()
             .any(|c| c.should_skip(self.db.engine_name()))
-    }
-
-    /// Set hook functions.
-    pub fn set_hook(&mut self, hook: impl Hook + 'static) {
-        self.hook = Some(Box::new(hook));
     }
 }
 
