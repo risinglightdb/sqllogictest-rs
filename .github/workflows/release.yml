@@ -1,7 +1,5 @@
 on:
   push:
-    branches:
-      - release
     tags:
       - "v*"
 
@@ -26,22 +24,10 @@ jobs:
           args: --workspace --release
       - name: create tar
         run: tar -cvzf sqllogictest-linux-amd64.tar.gz -C target/release sqllogictest
-      - uses: actions/create-release@latest
-        id: create_release
+      - name: release
+        uses: anton-yurchenko/git-release@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NAME: Release ${{ github.ref }}
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          body: ${{ github.event.head_commit.message }}
-          draft: false
-          prerelease: true
-      - name: upload release (tar)
-        uses: actions/upload-release-asset@v1.0.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: sqllogictest-linux-amd64.tar.gz
-          asset_name: sqllogictest-linux-amd64.tar.gz
-          asset_content_type: application/tar+gzip
+          args: sqllogictest-linux-amd64.tar.gz

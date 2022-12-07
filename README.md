@@ -16,7 +16,7 @@ Add the following lines to your `Cargo.toml` file:
 
 ```toml
 [dependencies]
-sqllogictest = "0.8"
+sqllogictest = "0.9"
 ```
 
 Implement `DB` trait for your database structure:

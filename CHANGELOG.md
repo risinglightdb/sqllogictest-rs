@@ -1,15 +1,30 @@
 # Changelog
+
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), 
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] - 2022-12-07
+
+- Improve the format and color handling for errors.
+- Support `hash-threshold`.
+- Fix `statement count <n>` for postgres engines.
+- **Breaking change**: use `Vec<Vec<String>>` instead of `String` as the query results by `DB`. This allows the runner to verify the results more precisely.
+  + For `rowsort`, runner will only sort actual results now, which means the result in the test cases should be sorted.
+- **Breaking change**: `Hook` is removed.
+- **Breaking change**: `Record` and parser's behavior are tweaked:
+  + retain `Include` record when linking its content
+  + keep parsing after `Halt`
+  + move `Begin/EndInclude` to `Injected`
+- Added CLI options `--override` and `--format`, which can override the test files with the actual output of the database, or reformat the test files.
+
 ## [0.8.0] - 2022-11-22
 
 - Support checking error message using `statement error <regex>` and `query error <regex>` syntax.
-  - Breaking change: `Record::Statement`, `Record::Query` and `TestErrorKind` are changed accordingly.
+  - **Breaking change**: `Record::Statement`,  `Record::Query` and `TestErrorKind` are changed accordingly.
 
 ## [0.7.1] - 2022-11-15
 
@@ -60,7 +75,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Add junit support. Use `--junit <filename>` to generate junit xml.
-
 
 ## [0.5.2] - 2022-06-16
 
