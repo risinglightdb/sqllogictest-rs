@@ -24,6 +24,19 @@ pub enum ColumnType {
     FloatingPoint,
     /// Do not check the type of the column.
     Any,
+    Unknown(char),
+}
+
+impl Display for ColumnType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ColumnType::Text => write!(f, "T"),
+            ColumnType::Integer => write!(f, "I"),
+            ColumnType::FloatingPoint => write!(f, "R"),
+            ColumnType::Any => write!(f, "?"),
+            ColumnType::Unknown(c) => write!(f, "{}", c),
+        }
+    }
 }
 
 impl TryFrom<char> for ColumnType {
@@ -33,12 +46,26 @@ impl TryFrom<char> for ColumnType {
         match c {
             'T' => Ok(Self::Text),
             'I' => Ok(Self::Integer),
-            'F' => Ok(Self::FloatingPoint),
+            'R' => Ok(Self::FloatingPoint),
+            '?' => Ok(Self::Any),
             // FIXME:
             // _ => Err(ParseErrorKind::InvalidType(c)),
-            _ => Ok(Self::Any),
+            _ => Ok(Self::Unknown(c)),
         }
     }
+}
+
+pub enum RecordOutput {
+    Nothing,
+    Query {
+        types: Vec<ColumnType>,
+        rows: Vec<Vec<String>>,
+        error: Option<Arc<dyn std::error::Error + Send + Sync>>,
+    },
+    Statement {
+        count: u64,
+        error: Option<Arc<dyn std::error::Error + Send + Sync>>,
+    },
 }
 
 #[non_exhaustive]
@@ -367,16 +394,6 @@ fn format_diff(
 /// By default, we will use `|x, y| x == y`.
 pub type Validator = fn(&Vec<String>, &Vec<String>) -> bool;
 
-/// A collection of hook functions.
-#[async_trait]
-pub trait Hook: Send {
-    /// Called after each statement completes.
-    async fn on_stmt_complete(&mut self, _sql: &str) {}
-
-    /// Called after each query completes.
-    async fn on_query_complete(&mut self, _sql: &str) {}
-}
-
 /// Sqllogictest runner.
 pub struct Runner<D: AsyncDB> {
     db: D,
@@ -384,7 +401,6 @@ pub struct Runner<D: AsyncDB> {
     validator: Validator,
     testdir: Option<TempDir>,
     sort_mode: Option<SortMode>,
-    hook: Option<Box<dyn Hook>>,
     /// 0 means never hashing
     hash_threshold: usize,
 }
@@ -397,7 +413,6 @@ impl<D: AsyncDB> Runner<D> {
             validator: |x, y| x == y,
             testdir: None,
             sort_mode: None,
-            hook: None,
             hash_threshold: 0,
         }
     }
@@ -414,102 +429,224 @@ impl<D: AsyncDB> Runner<D> {
         self.validator = validator;
     }
 
-    /// Run a single record.
-    pub async fn run_async(&mut self, record: Record) -> Result<(), TestError> {
-        tracing::info!(?record, "testing");
+    pub async fn apply_record(&mut self, record: Record) -> RecordOutput {
         match record {
-            Record::Statement { conditions, .. } if self.should_skip(&conditions) => {}
+            Record::Statement { conditions, .. } if self.should_skip(&conditions) => {
+                RecordOutput::Nothing
+            }
             Record::Statement {
                 conditions: _,
-
-                expected_error,
                 sql,
-                loc,
-                expected_count,
+
+                // compare result in run_async
+                expected_error: _,
+                expected_count: _,
+                loc: _,
             } => {
                 let sql = self.replace_keywords(sql);
                 let ret = self.db.run(&sql).await;
-                match (ret, expected_error) {
-                    (Ok(_), Some(_)) => {
-                        return Err(TestErrorKind::Ok {
-                            sql,
-                            kind: RecordKind::Statement,
+                match ret {
+                    Ok(out) => match out {
+                        DBOutput::Rows { types, rows } => RecordOutput::Query {
+                            types,
+                            rows,
+                            error: None,
+                        },
+                        DBOutput::StatementComplete(count) => {
+                            RecordOutput::Statement { count, error: None }
                         }
-                        .at(loc))
-                    }
-                    (Ok(result), None) => {
-                        if let Some(expected_count) = expected_count {
-                            let count = match result {
-                                DBOutput::Rows { types: _, rows } => {
-                                    return Err(TestErrorKind::StatementResultMismatch {
-                                        sql,
-                                        expected: expected_count,
-                                        actual: format!("got rows {:?}", rows),
-                                    }
-                                    .at(loc));
-                                }
-                                DBOutput::StatementComplete(count) => count,
-                            };
-
-                            if expected_count != count {
-                                return Err(TestErrorKind::StatementResultMismatch {
-                                    sql,
-                                    expected: expected_count,
-                                    actual: format!("affected {count} rows"),
-                                }
-                                .at(loc));
-                            }
-                        }
-                    }
-                    (Err(e), Some(expected_error)) => {
-                        if !expected_error.is_match(&e.to_string()) {
-                            return Err(TestErrorKind::ErrorMismatch {
-                                sql,
-                                err: Arc::new(e),
-                                expected_err: expected_error.to_string(),
-                                kind: RecordKind::Statement,
-                            }
-                            .at(loc));
-                        }
-                    }
-                    (Err(e), None) => {
-                        return Err(TestErrorKind::Fail {
-                            sql,
-                            err: Arc::new(e),
-                            kind: RecordKind::Statement,
-                        }
-                        .at(loc));
-                    }
-                }
-                if let Some(hook) = &mut self.hook {
-                    hook.on_stmt_complete(&sql).await;
+                    },
+                    Err(e) => RecordOutput::Statement {
+                        count: 0,
+                        error: Some(Arc::new(e)),
+                    },
                 }
             }
-            Record::Query { conditions, .. } if self.should_skip(&conditions) => {}
+            Record::Query { conditions, .. } if self.should_skip(&conditions) => {
+                RecordOutput::Nothing
+            }
             Record::Query {
                 conditions: _,
-
-                loc,
                 sql,
-                expected_error,
-                expected_results,
                 sort_mode,
-                type_string,
+
+                // compare result in run_async
+                type_string: _,
+                expected_error: _,
+                expected_results: _,
+                loc: _,
 
                 // not handle yet,
                 label: _,
             } => {
                 let sql = self.replace_keywords(sql);
-                let output = match (self.db.run(&sql).await, expected_error) {
-                    (Ok(_), Some(_)) => {
+                let (types, mut rows) = match self.db.run(&sql).await {
+                    Ok(out) => match out {
+                        DBOutput::Rows { types, rows } => (types, rows),
+                        DBOutput::StatementComplete(count) => {
+                            return RecordOutput::Statement { count, error: None }
+                        }
+                    },
+                    Err(e) => {
+                        return RecordOutput::Query {
+                            error: Some(Arc::new(e)),
+                            types: vec![],
+                            rows: vec![],
+                        }
+                    }
+                };
+
+                match sort_mode.as_ref().or(self.sort_mode.as_ref()) {
+                    None | Some(SortMode::NoSort) => {}
+                    Some(SortMode::RowSort) => {
+                        rows.sort_unstable();
+                    }
+                    Some(SortMode::ValueSort) => todo!("value sort"),
+                };
+
+                if self.hash_threshold > 0 && rows.len() > self.hash_threshold {
+                    let mut md5 = md5::Context::new();
+                    for line in &rows {
+                        for value in line {
+                            md5.consume(value.as_bytes());
+                            md5.consume(b"\n");
+                        }
+                    }
+                    let hash = md5.compute();
+                    rows = vec![vec![format!(
+                        "{} values hashing to {:?}",
+                        rows.len() * rows[0].len(),
+                        hash
+                    )]];
+                }
+
+                RecordOutput::Query {
+                    error: None,
+                    types,
+                    rows,
+                }
+            }
+            Record::Sleep { duration, .. } => {
+                D::sleep(duration).await;
+                RecordOutput::Nothing
+            }
+            Record::Control(control) => match control {
+                Control::SortMode(sort_mode) => {
+                    self.sort_mode = Some(sort_mode);
+                    RecordOutput::Nothing
+                }
+            },
+            Record::HashThreshold { loc: _, threshold } => {
+                self.hash_threshold = threshold as usize;
+                RecordOutput::Nothing
+            }
+            Record::Include { .. }
+            | Record::Comment(_)
+            | Record::Subtest { .. }
+            | Record::Halt { .. }
+            | Record::Injected(_)
+            | Record::Condition(_) => RecordOutput::Nothing,
+        }
+    }
+
+    /// Run a single record.
+    pub async fn run_async(&mut self, record: Record) -> Result<(), TestError> {
+        tracing::info!(?record, "testing");
+
+        match (record.clone(), self.apply_record(record).await) {
+            (_, RecordOutput::Nothing) => {}
+            // Tolerate the mismatched return type...
+            (Record::Statement { .. }, RecordOutput::Query { error: None, .. }) => {}
+            (
+                Record::Query {
+                    expected_results,
+                    loc,
+                    sql,
+                    ..
+                },
+                RecordOutput::Statement { error: None, .. },
+            ) => {
+                if !expected_results.is_empty() {
+                    return Err(TestErrorKind::QueryResultMismatch {
+                        sql,
+                        expected: expected_results.join("\n"),
+                        actual: "".to_string(),
+                    }
+                    .at(loc));
+                }
+            }
+            (
+                Record::Statement {
+                    loc,
+                    conditions: _,
+                    expected_error,
+                    sql,
+                    expected_count,
+                },
+                RecordOutput::Statement { count, error },
+            ) => match (error, expected_error) {
+                (None, Some(_)) => {
+                    return Err(TestErrorKind::Ok {
+                        sql,
+                        kind: RecordKind::Statement,
+                    }
+                    .at(loc))
+                }
+                (None, None) => {
+                    if let Some(expected_count) = expected_count {
+                        if expected_count != count {
+                            return Err(TestErrorKind::StatementResultMismatch {
+                                sql,
+                                expected: expected_count,
+                                actual: format!("affected {count} rows"),
+                            }
+                            .at(loc));
+                        }
+                    }
+                }
+                (Some(e), Some(expected_error)) => {
+                    if !expected_error.is_match(&e.to_string()) {
+                        return Err(TestErrorKind::ErrorMismatch {
+                            sql,
+                            err: Arc::new(e),
+                            expected_err: expected_error.to_string(),
+                            kind: RecordKind::Statement,
+                        }
+                        .at(loc));
+                    }
+                }
+                (Some(e), None) => {
+                    return Err(TestErrorKind::Fail {
+                        sql,
+                        err: Arc::new(e),
+                        kind: RecordKind::Statement,
+                    }
+                    .at(loc));
+                }
+            },
+            (
+                Record::Query {
+                    loc,
+                    conditions: _,
+                    type_string,
+                    sort_mode: _,
+                    label: _,
+                    expected_error,
+                    sql,
+                    expected_results,
+                },
+                RecordOutput::Query { types, rows, error },
+            ) => {
+                match (error, expected_error) {
+                    (None, Some(_)) => {
                         return Err(TestErrorKind::Ok {
                             sql,
                             kind: RecordKind::Query,
                         }
                         .at(loc))
                     }
-                    (Ok(output), None) => output,
-                    (Err(e), Some(expected_error)) => {
+                    (None, None) => {}
+                    (Some(e), Some(expected_error)) => {
                         if !expected_error.is_match(&e.to_string()) {
                             return Err(TestErrorKind::ErrorMismatch {
                                 sql,
@@ -521,25 +658,13 @@ impl<D: AsyncDB> Runner<D> {
                         }
                         return Ok(());
                     }
-                    (Err(e), None) => {
+                    (Some(e), None) => {
                         return Err(TestErrorKind::Fail {
                             sql,
                             err: Arc::new(e),
                             kind: RecordKind::Query,
                         }
                         .at(loc));
-                    }
-                };
-
-                let (types, mut output) = match output {
-                    DBOutput::Rows { types, rows } => (types, rows),
-                    DBOutput::StatementComplete(_) => {
-                        return Err(TestErrorKind::QueryResultMismatch {
-                            sql,
-                            expected: expected_results.join("\n"),
-                            actual: "statement complete".to_string(),
-                        }
-                        .at(loc))
                     }
                 };
 
@@ -562,63 +687,25 @@ impl<D: AsyncDB> Runner<D> {
                     }
                 }
 
-                match sort_mode.as_ref().or(self.sort_mode.as_ref()) {
-                    None | Some(SortMode::NoSort) => {}
-                    Some(SortMode::RowSort) => {
-                        output.sort_unstable();
-                    }
-                    Some(SortMode::ValueSort) => todo!("value sort"),
-                };
-
-                if self.hash_threshold > 0 && output.len() > self.hash_threshold {
-                    let mut md5 = md5::Context::new();
-                    for line in &output {
-                        for value in line {
-                            md5.consume(value.as_bytes());
-                            md5.consume(b"\n");
-                        }
-                    }
-                    let hash = md5.compute();
-                    output = vec![vec![format!(
-                        "{} values hashing to {:?}",
-                        output.len() * output[0].len(),
-                        hash
-                    )]];
-                }
-
                 // We compare normalized results. Whitespace characters are ignored.
-                let output = output
+                let normalized_rows = rows
                     .into_iter()
                     .map(|strs| strs.iter().map(normalize_string).join(" "))
                     .collect_vec();
-                let expected_results = expected_results.iter().map(normalize_string).collect_vec();
 
-                if !(self.validator)(&output, &expected_results) {
+                let expected_results = expected_results.iter().map(normalize_string).collect_vec();
+                if !(self.validator)(&normalized_rows, &expected_results) {
                     return Err(TestErrorKind::QueryResultMismatch {
                         sql,
                         expected: expected_results.join("\n"),
-                        actual: output.join("\n"),
+                        actual: normalized_rows.join("\n"),
                     }
                     .at(loc));
                 }
-                if let Some(hook) = &mut self.hook {
-                    hook.on_query_complete(&sql).await;
-                }
             }
-            Record::Sleep { duration, .. } => D::sleep(duration).await,
-            Record::Halt { .. } => {}
-            Record::Subtest { .. } => {}
-            Record::Include { loc, .. } => {
-                unreachable!("include should be rewritten during link: at {}", loc)
-            }
-            Record::Control(control) => match control {
-                Control::SortMode(sort_mode) => {
-                    self.sort_mode = Some(sort_mode);
-                }
-                Control::BeginInclude(_) | Control::EndInclude(_) => {}
-            },
-            Record::HashThreshold { loc: _, threshold } => self.hash_threshold = threshold as usize,
+            _ => unreachable!(),
         }
+
         Ok(())
     }
 
@@ -754,11 +841,6 @@ impl<D: AsyncDB> Runner<D> {
         conditions
             .iter()
             .any(|c| c.should_skip(self.db.engine_name()))
-    }
-
-    /// Set hook functions.
-    pub fn set_hook(&mut self, hook: impl Hook + 'static) {
-        self.hook = Some(Box::new(hook));
     }
 }
 

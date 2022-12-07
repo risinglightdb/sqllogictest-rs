@@ -1,6 +1,7 @@
 mod engines;
 
 use std::collections::BTreeMap;
+use std::fs::File;
 use std::io::{stdout, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -14,7 +15,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
 use rand::seq::SliceRandom;
-use sqllogictest::{AsyncDB, Control, Record, Runner};
+use sqllogictest::{AsyncDB, Injected, Record, RecordOutput, Runner};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
 #[must_use]
@@ -84,6 +85,13 @@ struct Opt {
     /// The database password.
     #[clap(short = 'w', long, default_value = "postgres")]
     pass: String,
+
+    /// Overrides the test files with the actual output of the database.
+    #[clap(long)]
+    r#override: bool,
+    /// Reformats the test files.
+    #[clap(long)]
+    format: bool,
 }
 
 /// Connection configuration.
@@ -123,6 +131,8 @@ pub async fn main_okk() -> Result<()> {
         db,
         user,
         pass,
+        r#override,
+        format,
     } = Opt::parse();
 
     if host.len() != port.len() {
@@ -170,6 +180,10 @@ pub async fn main_okk() -> Result<()> {
         user,
         pass,
     };
+
+    if r#override || format {
+        return update_test_files(files, &engine, config, format).await;
+    }
 
     let mut report = Report::new(junit.clone().unwrap_or_else(|| "sqllogictest".to_string()));
     report.set_timestamp(Local::now());
@@ -348,6 +362,28 @@ async fn run_serial(
     }
 }
 
+/// * `format` - If true, will not run sqls, only formats the file.
+async fn update_test_files(
+    files: Vec<PathBuf>,
+    engine: &EngineConfig,
+    config: DBConfig,
+    format: bool,
+) -> Result<()> {
+    for file in files {
+        let engine = engines::connect(engine, &config).await?;
+        let runner = Runner::new(engine);
+
+        if let Err(e) = update_test_file(&mut std::io::stdout(), runner, &file, format).await {
+            {
+                println!("{}\n\n{:?}", style("[FAILED]").red().bold(), e);
+                println!();
+            }
+        };
+    }
+
+    Ok(())
+}
+
 async fn flush(out: &mut impl std::io::Write) -> std::io::Result<()> {
     tokio::task::block_in_place(|| out.flush())
 }
@@ -384,38 +420,9 @@ async fn run_test_file<T: std::io::Write, D: AsyncDB>(
 
     begin_times.push(Instant::now());
 
-    let finish = |out: &mut T, time_stack: &mut Vec<Instant>, did_pop: &mut bool, file: &str| {
-        let begin_time = time_stack.pop().unwrap();
-
-        if *did_pop {
-            // start a new line if the result is not immediately after the item
-            write!(
-                out,
-                "\n{}{} {: <54} .. {} in {} ms",
-                "| ".repeat(time_stack.len()),
-                style("[END]").blue().bold(),
-                file,
-                style("[OK]").green().bold(),
-                begin_time.elapsed().as_millis()
-            )?;
-        } else {
-            // otherwise, append time to the previous line
-            write!(
-                out,
-                "{} in {} ms",
-                style("[OK]").green().bold(),
-                begin_time.elapsed().as_millis()
-            )?;
-        }
-
-        *did_pop = true;
-
-        Ok::<_, anyhow::Error>(())
-    };
-
     for record in records {
         match &record {
-            Record::Control(Control::BeginInclude(file)) => {
+            Record::Injected(Injected::BeginInclude(file)) => {
                 begin_times.push(Instant::now());
                 if !did_pop {
                     writeln!(out, "{}", style("[BEGIN]").blue().bold())?;
@@ -431,11 +438,12 @@ async fn run_test_file<T: std::io::Write, D: AsyncDB>(
                 )?;
                 flush(out).await?;
             }
-            Record::Control(Control::EndInclude(file)) => {
-                finish(out, &mut begin_times, &mut did_pop, file)?;
+            Record::Injected(Injected::EndInclude(file)) => {
+                finish_test_file(out, &mut begin_times, &mut did_pop, file)?;
             }
             _ => {}
         }
+
         runner
             .run_async(record)
             .await
@@ -448,7 +456,7 @@ async fn run_test_file<T: std::io::Write, D: AsyncDB>(
 
     let duration = begin_times[0].elapsed();
 
-    finish(
+    finish_test_file(
         out,
         &mut begin_times,
         &mut did_pop,
@@ -458,4 +466,298 @@ async fn run_test_file<T: std::io::Write, D: AsyncDB>(
     writeln!(out)?;
 
     Ok(duration)
+}
+
+fn finish_test_file<T: std::io::Write>(
+    out: &mut T,
+    time_stack: &mut Vec<Instant>,
+    did_pop: &mut bool,
+    file: &str,
+) -> Result<()> {
+    let begin_time = time_stack.pop().unwrap();
+
+    if *did_pop {
+        // start a new line if the result is not immediately after the item
+        write!(
+            out,
+            "\n{}{} {: <54} .. {} in {} ms",
+            "| ".repeat(time_stack.len()),
+            style("[END]").blue().bold(),
+            file,
+            style("[OK]").green().bold(),
+            begin_time.elapsed().as_millis()
+        )?;
+    } else {
+        // otherwise, append time to the previous line
+        write!(
+            out,
+            "{} in {} ms",
+            style("[OK]").green().bold(),
+            begin_time.elapsed().as_millis()
+        )?;
+    }
+
+    *did_pop = true;
+
+    Ok::<_, anyhow::Error>(())
+}
+
+async fn update_test_file<T: std::io::Write, D: AsyncDB>(
+    out: &mut T,
+    mut runner: Runner<D>,
+    filename: impl AsRef<Path>,
+    format: bool,
+) -> Result<()> {
+    let filename = filename.as_ref();
+    let records = tokio::task::block_in_place(|| {
+        sqllogictest::parse_file(filename).map_err(|e| anyhow!("{:?}", e))
+    })
+    .context("failed to parse sqllogictest file")?;
+
+    let mut begin_times = vec![];
+    let mut did_pop = false;
+
+    write!(out, "{: <60} .. ", filename.to_string_lossy())?;
+    flush(out).await?;
+
+    begin_times.push(Instant::now());
+
+    fn create_outfile(filename: impl AsRef<Path>) -> std::io::Result<(PathBuf, File)> {
+        let filename = filename.as_ref();
+        let outfilename = filename.file_name().unwrap().to_str().unwrap().to_owned() + ".temp";
+        let outfilename = filename.parent().unwrap().join(&outfilename);
+        let outfile = File::create(&outfilename)?;
+        Ok((outfilename, outfile))
+    }
+
+    struct Item {
+        filename: String,
+        outfilename: PathBuf,
+        outfile: File,
+        first_record: bool,
+    }
+    let (outfilename, outfile) = create_outfile(filename)?;
+    let mut stack = vec![Item {
+        filename: filename.to_string_lossy().to_string(),
+        outfilename,
+        outfile,
+        first_record: true,
+    }];
+
+    for record in records {
+        let Item {
+            filename,
+            outfilename,
+            outfile,
+            first_record,
+        } = stack.last_mut().unwrap();
+
+        match &record {
+            Record::Injected(Injected::BeginInclude(filename)) => {
+                let (outfilename, outfile) = create_outfile(filename)?;
+                stack.push(Item {
+                    filename: filename.clone(),
+                    outfilename,
+                    outfile,
+                    first_record: true,
+                });
+
+                begin_times.push(Instant::now());
+                if !did_pop {
+                    writeln!(out, "{}", style("[BEGIN]").blue().bold())?;
+                } else {
+                    writeln!(out)?;
+                }
+                did_pop = false;
+                write!(
+                    out,
+                    "{}{: <60} .. ",
+                    "| ".repeat(begin_times.len() - 1),
+                    filename
+                )?;
+                flush(out).await?;
+            }
+            Record::Injected(Injected::EndInclude(file)) => {
+                // override the original file with the updated one
+                std::fs::rename(outfilename, filename)?;
+                stack.pop();
+                finish_test_file(out, &mut begin_times, &mut did_pop, file)?;
+            }
+            _ => {
+                if !*first_record {
+                    writeln!(outfile)?;
+                }
+
+                update_record(outfile, &mut runner, record, format)
+                    .await
+                    .context(format!("failed to run `{}`", style(filename).bold()))?;
+                *first_record = false;
+            }
+        }
+    }
+
+    finish_test_file(
+        out,
+        &mut begin_times,
+        &mut did_pop,
+        &filename.to_string_lossy(),
+    )?;
+
+    writeln!(out)?;
+
+    // override the original file with the updated one
+    let Item {
+        filename,
+        outfilename,
+        outfile: _,
+        first_record: _,
+    } = stack.last().unwrap();
+    std::fs::rename(outfilename, filename)?;
+
+    Ok(())
+}
+
+async fn update_record<D: AsyncDB>(
+    outfile: &mut File,
+    runner: &mut Runner<D>,
+    record: Record,
+    format: bool,
+) -> Result<()> {
+    assert!(!matches!(record, Record::Injected(_)));
+
+    if format {
+        record.unparse(outfile)?;
+        writeln!(outfile)?;
+        return Ok(());
+    }
+
+    match (record.clone(), runner.apply_record(record).await) {
+        (record, RecordOutput::Nothing) => {
+            record.unparse(outfile)?;
+            writeln!(outfile)?;
+        }
+        (
+            Record::Statement { sql, .. },
+            RecordOutput::Query {
+                types,
+                rows,
+                error: None,
+            },
+        ) => {
+            writeln!(
+                outfile,
+                "query {}",
+                types.iter().map(|c| format!("{c}")).join("")
+            )?;
+            writeln!(outfile, "{}", sql)?;
+            writeln!(outfile, "----")?;
+            for result in rows {
+                writeln!(outfile, "{}", result.iter().format("\t"))?;
+            }
+        }
+        (Record::Query { sql, .. }, RecordOutput::Statement { error: None, .. }) => {
+            writeln!(outfile, "statement ok")?;
+            writeln!(outfile, "{}", sql)?;
+        }
+        (
+            Record::Statement {
+                loc: _,
+                conditions: _,
+                expected_error,
+                sql,
+                expected_count,
+            },
+            RecordOutput::Statement { count, error },
+        ) => match (error, expected_error) {
+            (None, _) => {
+                if expected_count.is_some() {
+                    writeln!(outfile, "statement count {count}")?;
+                    writeln!(outfile, "{}", sql)?;
+                } else {
+                    writeln!(outfile, "statement ok")?;
+                    writeln!(outfile, "{}", sql)?;
+                }
+            }
+            (Some(e), Some(expected_error)) if expected_error.is_match(&e.to_string()) => {
+                writeln!(outfile, "statement error {}", expected_error)?;
+                writeln!(outfile, "{}", sql)?;
+            }
+            (Some(e), _) => {
+                writeln!(outfile, "statement error {}", e)?;
+                writeln!(outfile, "{}", sql)?;
+            }
+        },
+        (
+            Record::Query {
+                loc: _,
+                conditions: _,
+                type_string,
+                sort_mode,
+                label,
+                expected_error,
+                sql,
+                expected_results,
+            },
+            RecordOutput::Query {
+                types: _,
+                rows,
+                error,
+            },
+        ) => {
+            match (error, expected_error) {
+                (None, _) => {}
+                (Some(e), Some(expected_error)) if expected_error.is_match(&e.to_string()) => {
+                    writeln!(outfile, "query error {}", expected_error)?;
+                    writeln!(outfile, "{}", sql)?;
+                }
+                (Some(e), _) => {
+                    writeln!(outfile, "query error {}", e)?;
+                    writeln!(outfile, "{}", sql)?;
+                }
+            };
+
+            // FIXME: use output's types instead of orignal query's types
+            write!(
+                outfile,
+                "query {}",
+                type_string.iter().map(|c| format!("{c}")).join("")
+            )?;
+            if let Some(sort_mode) = sort_mode {
+                write!(outfile, " {}", sort_mode.as_str())?;
+            }
+            if let Some(label) = label {
+                write!(outfile, " {}", label)?;
+            }
+            writeln!(outfile)?;
+            writeln!(outfile, "{}", sql)?;
+
+            #[allow(clippy::ptr_arg)]
+            fn normalize_string(s: &String) -> String {
+                s.trim().split_ascii_whitespace().join(" ")
+            }
+
+            let normalized_rows = rows
+                .iter()
+                .map(|strs| strs.iter().map(normalize_string).join(" "))
+                .collect_vec();
+
+            let normalized_expected = expected_results.iter().map(normalize_string).collect_vec();
+
+            writeln!(outfile, "----")?;
+
+            if normalized_expected == normalized_rows {
+                // If the results are correct, do not format them.
+                for result in expected_results {
+                    writeln!(outfile, "{}", result)?;
+                }
+            } else {
+                for result in rows {
+                    writeln!(outfile, "{}", result.iter().format("\t"))?;
+                }
+            };
+        }
+        _ => unreachable!(),
+    }
+
+    Ok(())
 }

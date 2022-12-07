@@ -338,8 +338,9 @@ impl sqllogictest::AsyncDB for PostgresExtended {
         }
 
         if output.is_empty() {
+            let stmt = self.client.prepare(sql).await?;
             Ok(DBOutput::Rows {
-                types: vec![],
+                types: vec![ColumnType::Any; stmt.columns().len()],
                 rows: vec![],
             })
         } else {
