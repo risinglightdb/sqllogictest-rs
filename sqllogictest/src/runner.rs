@@ -429,6 +429,10 @@ impl<D: AsyncDB> Runner<D> {
         self.validator = validator;
     }
 
+    pub fn with_hash_threshold(&mut self, hash_threshold: usize) {
+        self.hash_threshold = hash_threshold;
+    }
+
     pub async fn apply_record(&mut self, record: Record) -> RecordOutput {
         match record {
             Record::Statement { conditions, .. } if self.should_skip(&conditions) => {
@@ -496,15 +500,30 @@ impl<D: AsyncDB> Runner<D> {
                     }
                 };
 
+                let mut value_sort = false;
                 match sort_mode.as_ref().or(self.sort_mode.as_ref()) {
                     None | Some(SortMode::NoSort) => {}
                     Some(SortMode::RowSort) => {
                         rows.sort_unstable();
                     }
-                    Some(SortMode::ValueSort) => todo!("value sort"),
+                    Some(SortMode::ValueSort) => {
+                        rows = rows
+                            .iter()
+                            .flat_map(|row| row.iter())
+                            .map(|s| vec![s.to_owned()])
+                            .collect();
+                        rows.sort_unstable();
+                        value_sort = true;
+                    }
                 };
 
-                if self.hash_threshold > 0 && rows.len() > self.hash_threshold {
+                let num_values = if value_sort {
+                    rows.len()
+                } else {
+                    rows.len() * types.len()
+                };
+
+                if self.hash_threshold > 0 && num_values > self.hash_threshold {
                     let mut md5 = md5::Context::new();
                     for line in &rows {
                         for value in line {
@@ -688,17 +707,27 @@ impl<D: AsyncDB> Runner<D> {
                 }
 
                 // We compare normalized results. Whitespace characters are ignored.
-                let normalized_rows = rows
-                    .into_iter()
-                    .map(|strs| strs.iter().map(normalize_string).join(" "))
-                    .collect_vec();
 
                 let expected_results = expected_results.iter().map(normalize_string).collect_vec();
-                if !(self.validator)(&normalized_rows, &expected_results) {
+
+                let actual_results =
+                    if types.len() > 1 && rows.len() * types.len() == expected_results.len() {
+                        // value-wise mode
+                        rows.into_iter()
+                            .flat_map(|strs| strs.iter().map(normalize_string).collect_vec())
+                            .collect_vec()
+                    } else {
+                        // row-wise mode
+                        rows.into_iter()
+                            .map(|strs| strs.iter().map(normalize_string).join(" "))
+                            .collect_vec()
+                    };
+
+                if !(self.validator)(&actual_results, &expected_results) {
                     return Err(TestErrorKind::QueryResultMismatch {
                         sql,
                         expected: expected_results.join("\n"),
-                        actual: normalized_rows.join("\n"),
+                        actual: actual_results.join("\n"),
                     }
                     .at(loc));
                 }
