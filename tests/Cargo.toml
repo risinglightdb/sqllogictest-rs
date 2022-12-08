@@ -6,8 +6,14 @@ publish = false
 
 [dependencies]
 sqllogictest = { path = "../sqllogictest" }
+rusqlite = { version = "0.28", features = ["bundled"] }
 
 [[test]]
 name = "harness"
 path = "./harness.rs"
+harness = false
+
+[[test]]
+name = "sqlite"
+path = "./sqlite.rs"
 harness = false
