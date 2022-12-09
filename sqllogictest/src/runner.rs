@@ -429,6 +429,10 @@ impl<D: AsyncDB> Runner<D> {
         self.validator = validator;
     }
 
+    pub fn with_hash_threshold(&mut self, hash_threshold: usize) {
+        self.hash_threshold = hash_threshold;
+    }
+
     pub async fn apply_record(&mut self, record: Record) -> RecordOutput {
         match record {
             Record::Statement { conditions, .. } if self.should_skip(&conditions) => {
@@ -504,7 +508,7 @@ impl<D: AsyncDB> Runner<D> {
                     Some(SortMode::ValueSort) => todo!("value sort"),
                 };
 
-                if self.hash_threshold > 0 && rows.len() > self.hash_threshold {
+                if self.hash_threshold > 0 && rows.len() * types.len() > self.hash_threshold {
                     let mut md5 = md5::Context::new();
                     for line in &rows {
                         for value in line {
