@@ -52,7 +52,6 @@ for record in records {
 }
 ```
 
-See [examples](./examples) directory for more usages.
 
 ## Using as CLI
 
@@ -75,6 +74,43 @@ This command will run scripts in `test` directory against postgres with default 
 You can find more options in `sqllogictest --help`.
 
 Note that only postgres is supported now.
+
+## `.slt` Test File Format Cookbook
+
+Test files often have the `.slt` extension and use a dialect of Sqlite [Sqllogictest].
+
+Some commonly used features of `sqlparser-rs` are show below, and many more
+are illustrated in the files in the [examples](./examples) directory.
+
+### Run a statement that should succeed
+
+```text
+# Comments begin with '#'
+statement ok
+CREATE TABLE foo AS VALUES(1,2),(2,3);
+```
+
+### Run a query that should succeed
+
+```text
+# 'II' means two integer output columns
+# rowsort means to sort the output before comparing
+query II rowsort
+SELECT * FROM foo;
+----
+3 4
+4 5
+```
+
+### Run a statement that should fail
+
+```text
+# Ensure that the statement errors and that the error
+# message contains 'Multiple object drop not supported'
+statement error Multiple object drop not supported
+DROP VIEW foo, bar;
+```
+
 
 ## License
 
