@@ -546,6 +546,7 @@ impl<D: AsyncDB> Runner<D> {
             }
             Record::Include { .. }
             | Record::Comment(_)
+            | Record::Whitespace(_)
             | Record::Subtest { .. }
             | Record::Halt { .. }
             | Record::Injected(_)

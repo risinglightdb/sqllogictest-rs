@@ -132,6 +132,7 @@ pub enum Record {
     },
     Condition(Condition),
     Comment(Vec<String>),
+    Whitespace(String),
     /// Internally injected record which should not occur in the test file.
     Injected(Injected),
 }
@@ -241,6 +242,9 @@ impl std::fmt::Display for Record {
                     write!(f, "\n#{}", line.trim_end())?;
                 }
                 Ok(())
+            }
+            Record::Whitespace(w) => {
+                write!(f, "{}", w)
             }
             Record::Injected(p) => panic!("unexpected injected record: {:?}", p),
         }
@@ -397,6 +401,7 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
         }
 
         if line.is_empty() {
+            records.push(Record::Whitespace(line.to_string()));
             continue;
         }
 
@@ -609,11 +614,85 @@ fn parse_file_inner(loc: Location) -> Result<Vec<Record>, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::parse_file;
+    use difference::{Changeset, Difference};
+
+    use super::*;
 
     #[test]
     fn test_include_glob() {
         let records = parse_file("../examples/include/include_1.slt").unwrap();
-        assert_eq!(14, records.len());
+        assert_eq!(16, records.len());
+    }
+
+    #[test]
+    fn test_basic() {
+        parse_roundtrip("../examples/basic/basic.slt")
+    }
+
+    /// Parses the specified file into Records, and ensures the
+    /// results of unparsing them are the same
+    ///
+    /// Prints a hopefully useful message on failure
+    fn parse_roundtrip(filename: impl AsRef<Path>) {
+        let filename = filename.as_ref();
+        let input_contents = std::fs::read_to_string(filename).expect("reading file");
+
+        let records = parse_file(filename).expect("parsing to complete");
+
+        let unparsed = records
+            .into_iter()
+            .map(record_to_string)
+            .collect::<Vec<_>>();
+
+        let output_contents = unparsed.join("\n");
+
+        let changeset = Changeset::new(&input_contents, &output_contents, "\n");
+
+        assert!(
+            no_diffs(&changeset),
+            "Mismatch for {:?}\n\
+                 *********\n\
+                 diff:\n\
+                 *********\n\
+                 {}\n\n\
+                 *********\n\
+                 output:\n\
+                 *********\n\
+                 {}\n\n",
+            filename,
+            UsefulDiffDisplay(&changeset),
+            output_contents,
+        );
+    }
+
+    fn record_to_string(record: Record) -> String {
+        if matches!(&record, Record::Statement { .. } | Record::Query { .. }) {
+            // the statement parser includes a newline between the items but the display
+            // output does not, so add it here
+            // Not sure about this one
+            format!("{}\n", record)
+        } else {
+            record.to_string()
+        }
+    }
+
+    /// returns true if there are no differences in the changeset
+    fn no_diffs(changeset: &Changeset) -> bool {
+        changeset
+            .diffs
+            .iter()
+            .all(|diff| matches!(diff, Difference::Same(_)))
+    }
+
+    struct UsefulDiffDisplay<'a>(&'a Changeset);
+
+    impl<'a> std::fmt::Display for UsefulDiffDisplay<'a> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.0.diffs.iter().try_for_each(|diff| match diff {
+                Difference::Same(x) => writeln!(f, "{x}"),
+                Difference::Add(x) => writeln!(f, "+   {x}"),
+                Difference::Rem(x) => writeln!(f, "-   {x}"),
+            })
+        }
     }
 }
