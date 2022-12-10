@@ -541,15 +541,28 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
         outfilename: &PathBuf,
         outfile: &mut File,
     ) -> std::io::Result<()> {
-        // check whether outfile ends with 2 newlines, which happens if the last record is statement/query.
-        let mut buf = [0u8; 2];
-        outfile.seek(SeekFrom::End(-2)).unwrap();
-        outfile.read_exact(&mut buf).unwrap();
-        if &buf == b"\n\n" {
-            // if so, remove the last one
-            outfile
-                .set_len(outfile.metadata().unwrap().len() - 1)
-                .unwrap();
+        // check whether outfile ends with multiple newlines, which happens if
+        // - the last record is statement/query
+        // - the original file ends with multiple newlines
+
+        const N: usize = 8;
+        let mut buf = [0u8; N];
+        loop {
+            outfile.seek(SeekFrom::End(-(N as i64))).unwrap();
+            outfile.read_exact(&mut buf).unwrap();
+            let num_newlines = buf.iter().rev().take_while(|&&b| b == b'\n').count();
+            assert!(num_newlines > 0);
+
+            if num_newlines > 1 {
+                // if so, remove the last ones
+                outfile
+                    .set_len(outfile.metadata().unwrap().len() - num_newlines as u64 + 1)
+                    .unwrap();
+            }
+
+            if num_newlines == 1 || num_newlines < N {
+                break;
+            }
         }
 
         std::fs::rename(outfilename, filename)?;
