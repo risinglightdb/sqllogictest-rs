@@ -132,7 +132,7 @@ pub enum Record {
     },
     Condition(Condition),
     Comment(Vec<String>),
-    Whitespace(String),
+    Newline,
     /// Internally injected record which should not occur in the test file.
     Injected(Injected),
 }
@@ -147,6 +147,9 @@ impl Record {
     }
 }
 
+/// As is the standard for Display, does not print any trailing
+/// newline except for records that always end with a blank line such
+/// as Query and Statement.
 impl std::fmt::Display for Record {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -174,7 +177,8 @@ impl std::fmt::Display for Record {
                     (Some(_), Some(_)) => unreachable!(),
                 }
                 writeln!(f)?;
-                write!(f, "{}", sql)
+                // statement always end with a blank line
+                writeln!(f, "{}", sql)
             }
             Record::Query {
                 loc: _,
@@ -189,7 +193,7 @@ impl std::fmt::Display for Record {
                 write!(f, "query")?;
                 if let Some(err) = expected_error {
                     writeln!(f, " error {}", err)?;
-                    return write!(f, "{}", sql);
+                    return writeln!(f, "{}", sql);
                 }
 
                 write!(
@@ -210,7 +214,8 @@ impl std::fmt::Display for Record {
                 for result in expected_results {
                     write!(f, "\n{}", result)?;
                 }
-                Ok(())
+                // query always ends with a blank line
+                writeln!(f)
             }
             Record::Sleep { loc: _, duration } => {
                 write!(f, "sleep {}", humantime::format_duration(*duration))
@@ -243,9 +248,7 @@ impl std::fmt::Display for Record {
                 }
                 Ok(())
             }
-            Record::Whitespace(w) => {
-                write!(f, "{}", w)
-            }
+            Record::Newline => Ok(()), // Display doesn't end with newline
             Record::Injected(p) => panic!("unexpected injected record: {:?}", p),
         }
     }
@@ -401,7 +404,7 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
         }
 
         if line.is_empty() {
-            records.push(Record::Whitespace(line.to_string()));
+            records.push(Record::Newline);
             continue;
         }
 
@@ -641,7 +644,7 @@ mod tests {
 
         let unparsed = records
             .iter()
-            .map(record_to_string)
+            .map(|record| record.to_string())
             .collect::<Vec<_>>();
 
         // Technically this will not always be the same due to some whitespace normalization
@@ -676,17 +679,6 @@ mod tests {
             UsefulDiffDisplay(&changeset),
             output_contents,
         );
-    }
-
-    fn record_to_string(record: Record) -> String {
-        if matches!(&record, Record::Statement { .. } | Record::Query { .. }) {
-            // the statement parser includes a newline between the items but the display
-            // output does not, so add it here
-            // Not sure about this one
-            format!("{}\n", record)
-        } else {
-            record.to_string()
-        }
     }
 
     /// returns true if there are no differences in the changeset
