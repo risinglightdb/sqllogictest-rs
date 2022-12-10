@@ -1,8 +1,8 @@
 mod engines;
 
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{stdout, Write};
+use std::fs::{File, OpenOptions};
+use std::io::{stdout, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -526,22 +526,47 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
         let filename = filename.as_ref();
         let outfilename = filename.file_name().unwrap().to_str().unwrap().to_owned() + ".temp";
         let outfilename = filename.parent().unwrap().join(&outfilename);
-        let outfile = File::create(&outfilename)?;
+        // create a temp file in read-write mode
+        let outfile = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .read(true)
+            .open(&outfilename)?;
         Ok((outfilename, outfile))
+    }
+
+    fn override_with_outfile(
+        filename: &String,
+        outfilename: &PathBuf,
+        outfile: &mut File,
+    ) -> std::io::Result<()> {
+        // check whether outfile ends with 2 newlines, which happens if the last record is statement/query.
+        let mut buf = [0u8; 2];
+        outfile.seek(SeekFrom::End(-2)).unwrap();
+        outfile.read_exact(&mut buf).unwrap();
+        if &buf == b"\n\n" {
+            // if so, remove the last one
+            outfile
+                .set_len(outfile.metadata().unwrap().len() - 1)
+                .unwrap();
+        }
+
+        std::fs::rename(outfilename, filename)?;
+
+        Ok(())
     }
 
     struct Item {
         filename: String,
         outfilename: PathBuf,
         outfile: File,
-        first_record: bool,
     }
     let (outfilename, outfile) = create_outfile(filename)?;
     let mut stack = vec![Item {
         filename: filename.to_string_lossy().to_string(),
         outfilename,
         outfile,
-        first_record: true,
     }];
 
     for record in records {
@@ -549,7 +574,6 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
             filename,
             outfilename,
             outfile,
-            first_record,
         } = stack.last_mut().unwrap();
 
         match &record {
@@ -559,7 +583,6 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
                     filename: filename.clone(),
                     outfilename,
                     outfile,
-                    first_record: true,
                 });
 
                 begin_times.push(Instant::now());
@@ -578,20 +601,14 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
                 flush(out).await?;
             }
             Record::Injected(Injected::EndInclude(file)) => {
-                // override the original file with the updated one
-                std::fs::rename(outfilename, filename)?;
+                override_with_outfile(filename, outfilename, outfile)?;
                 stack.pop();
                 finish_test_file(out, &mut begin_times, &mut did_pop, file)?;
             }
             _ => {
-                if !*first_record {
-                    writeln!(outfile)?;
-                }
-
                 update_record(outfile, &mut runner, record, format)
                     .await
                     .context(format!("failed to run `{}`", style(filename).bold()))?;
-                *first_record = false;
             }
         }
     }
@@ -603,16 +620,12 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
         &filename.to_string_lossy(),
     )?;
 
-    writeln!(out)?;
-
-    // override the original file with the updated one
     let Item {
         filename,
         outfilename,
-        outfile: _,
-        first_record: _,
-    } = stack.last().unwrap();
-    std::fs::rename(outfilename, filename)?;
+        outfile,
+    } = stack.last_mut().unwrap();
+    override_with_outfile(filename, outfilename, outfile)?;
 
     Ok(())
 }
@@ -626,38 +639,30 @@ async fn update_record<D: AsyncDB>(
     assert!(!matches!(record, Record::Injected(_)));
 
     if format {
-        record.unparse(outfile)?;
-        writeln!(outfile)?;
+        writeln!(outfile, "{record}")?;
         return Ok(());
     }
 
     match (record.clone(), runner.apply_record(record).await) {
         (record, RecordOutput::Nothing) => {
-            record.unparse(outfile)?;
-            writeln!(outfile)?;
+            writeln!(outfile, "{record}")?;
         }
-        (
-            Record::Statement { sql, .. },
-            RecordOutput::Query {
-                types,
-                rows,
-                error: None,
-            },
-        ) => {
-            writeln!(
-                outfile,
-                "query {}",
-                types.iter().map(|c| format!("{c}")).join("")
-            )?;
+        (Record::Statement { sql, .. }, RecordOutput::Query { error: None, .. }) => {
+            // statement ok
+            // SELECT ...
+            //
+            // This case can be used when we want to only ensure the query succeeds,
+            // but don't care about the output.
+            // DuckDB has a few of these.
+
+            writeln!(outfile, "statement ok")?;
             writeln!(outfile, "{}", sql)?;
-            writeln!(outfile, "----")?;
-            for result in rows {
-                writeln!(outfile, "{}", result.iter().format("\t"))?;
-            }
+            writeln!(outfile)?;
         }
         (Record::Query { sql, .. }, RecordOutput::Statement { error: None, .. }) => {
             writeln!(outfile, "statement ok")?;
             writeln!(outfile, "{}", sql)?;
+            writeln!(outfile)?;
         }
         (
             Record::Statement {
@@ -677,14 +682,21 @@ async fn update_record<D: AsyncDB>(
                     writeln!(outfile, "statement ok")?;
                     writeln!(outfile, "{}", sql)?;
                 }
+                writeln!(outfile)?;
             }
             (Some(e), Some(expected_error)) if expected_error.is_match(&e.to_string()) => {
-                writeln!(outfile, "statement error {}", expected_error)?;
+                if expected_error.as_str().is_empty() {
+                    writeln!(outfile, "statement error")?;
+                } else {
+                    writeln!(outfile, "statement error {}", expected_error)?;
+                }
                 writeln!(outfile, "{}", sql)?;
+                writeln!(outfile)?;
             }
             (Some(e), _) => {
                 writeln!(outfile, "statement error {}", e)?;
                 writeln!(outfile, "{}", sql)?;
+                writeln!(outfile)?;
             }
         },
         (
@@ -709,10 +721,14 @@ async fn update_record<D: AsyncDB>(
                 (Some(e), Some(expected_error)) if expected_error.is_match(&e.to_string()) => {
                     writeln!(outfile, "query error {}", expected_error)?;
                     writeln!(outfile, "{}", sql)?;
+                    writeln!(outfile)?;
+                    return Ok(());
                 }
                 (Some(e), _) => {
                     writeln!(outfile, "query error {}", e)?;
                     writeln!(outfile, "{}", sql)?;
+                    writeln!(outfile)?;
+                    return Ok(());
                 }
             };
 
@@ -755,6 +771,7 @@ async fn update_record<D: AsyncDB>(
                     writeln!(outfile, "{}", result.iter().format("\t"))?;
                 }
             };
+            writeln!(outfile)?;
         }
         _ => unreachable!(),
     }
