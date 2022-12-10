@@ -640,10 +640,23 @@ mod tests {
         let records = parse_file(filename).expect("parsing to complete");
 
         let unparsed = records
-            .into_iter()
+            .iter()
             .map(record_to_string)
             .collect::<Vec<_>>();
 
+        // Technically this will not always be the same due to some whitespace normalization
+        //
+        // query   III
+        // select * from foo;
+        // ----
+        // 1 2
+        //
+        // Will print out collaposting the spaces between `query`
+        //
+        // query III
+        // select * from foo;
+        // ----
+        // 1 2
         let output_contents = unparsed.join("\n");
 
         let changeset = Changeset::new(&input_contents, &output_contents, "\n");
