@@ -132,6 +132,7 @@ pub enum Record {
     },
     Condition(Condition),
     Comment(Vec<String>),
+    Newline,
     /// Internally injected record which should not occur in the test file.
     Injected(Injected),
 }
@@ -142,9 +143,18 @@ impl Record {
     /// # Panics
     /// If the record is an internally injected record which should not occur in the test file.
     pub fn unparse(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
+        write!(w, "{}", self)
+    }
+}
+
+/// As is the standard for Display, does not print any trailing
+/// newline except for records that always end with a blank line such
+/// as Query and Statement.
+impl std::fmt::Display for Record {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Record::Include { loc: _, filename } => {
-                write!(w, "include {}", filename)
+                write!(f, "include {}", filename)
             }
             Record::Statement {
                 loc: _,
@@ -153,21 +163,22 @@ impl Record {
                 sql,
                 expected_count,
             } => {
-                write!(w, "statement ")?;
+                write!(f, "statement ")?;
                 match (expected_count, expected_error) {
-                    (None, None) => write!(w, "ok")?,
+                    (None, None) => write!(f, "ok")?,
                     (None, Some(err)) => {
                         if err.as_str().is_empty() {
-                            write!(w, "error")?;
+                            write!(f, "error")?;
                         } else {
-                            write!(w, "error {}", err)?;
+                            write!(f, "error {}", err)?;
                         }
                     }
-                    (Some(cnt), None) => write!(w, "count {}", cnt)?,
+                    (Some(cnt), None) => write!(f, "count {}", cnt)?,
                     (Some(_), Some(_)) => unreachable!(),
                 }
-                writeln!(w)?;
-                write!(w, "{}", sql)
+                writeln!(f)?;
+                // statement always end with a blank line
+                writeln!(f, "{}", sql)
             }
             Record::Query {
                 loc: _,
@@ -179,63 +190,65 @@ impl Record {
                 sql,
                 expected_results,
             } => {
-                write!(w, "query")?;
+                write!(f, "query")?;
                 if let Some(err) = expected_error {
-                    writeln!(w, " error {}", err)?;
-                    return write!(w, "{}", sql);
+                    writeln!(f, " error {}", err)?;
+                    return writeln!(f, "{}", sql);
                 }
 
                 write!(
-                    w,
+                    f,
                     " {}",
                     type_string.iter().map(|c| format!("{c}")).join("")
                 )?;
                 if let Some(sort_mode) = sort_mode {
-                    write!(w, " {}", sort_mode.as_str())?;
+                    write!(f, " {}", sort_mode.as_str())?;
                 }
                 if let Some(label) = label {
-                    write!(w, " {}", label)?;
+                    write!(f, " {}", label)?;
                 }
-                writeln!(w)?;
-                writeln!(w, "{}", sql)?;
+                writeln!(f)?;
+                writeln!(f, "{}", sql)?;
 
-                write!(w, "----")?;
+                write!(f, "----")?;
                 for result in expected_results {
-                    write!(w, "\n{}", result)?;
+                    write!(f, "\n{}", result)?;
                 }
-                Ok(())
+                // query always ends with a blank line
+                writeln!(f)
             }
             Record::Sleep { loc: _, duration } => {
-                write!(w, "sleep {}", humantime::format_duration(*duration))
+                write!(f, "sleep {}", humantime::format_duration(*duration))
             }
             Record::Subtest { loc: _, name } => {
-                write!(w, "subtest {}", name)
+                write!(f, "subtest {}", name)
             }
             Record::Halt { loc: _ } => {
-                write!(w, "halt")
+                write!(f, "halt")
             }
             Record::Control(c) => match c {
-                Control::SortMode(m) => write!(w, "control sortmode {}", m.as_str()),
+                Control::SortMode(m) => write!(f, "control sortmode {}", m.as_str()),
             },
             Record::Condition(cond) => match cond {
                 Condition::OnlyIf { engine_name } => {
-                    write!(w, "onlyif {}", engine_name)
+                    write!(f, "onlyif {}", engine_name)
                 }
                 Condition::SkipIf { engine_name } => {
-                    write!(w, "skipif {}", engine_name)
+                    write!(f, "skipif {}", engine_name)
                 }
             },
             Record::HashThreshold { loc: _, threshold } => {
-                write!(w, "hash-threshold {}", threshold)
+                write!(f, "hash-threshold {}", threshold)
             }
             Record::Comment(comment) => {
                 let mut iter = comment.iter();
-                write!(w, "#{}", iter.next().unwrap().trim_end())?;
+                write!(f, "#{}", iter.next().unwrap().trim_end())?;
                 for line in iter {
-                    write!(w, "\n#{}", line.trim_end())?;
+                    write!(f, "\n#{}", line.trim_end())?;
                 }
                 Ok(())
             }
+            Record::Newline => Ok(()), // Display doesn't end with newline
             Record::Injected(p) => panic!("unexpected injected record: {:?}", p),
         }
     }
@@ -391,6 +404,7 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
         }
 
         if line.is_empty() {
+            records.push(Record::Newline);
             continue;
         }
 
@@ -603,11 +617,87 @@ fn parse_file_inner(loc: Location) -> Result<Vec<Record>, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::parse_file;
+    use difference::{Changeset, Difference};
+
+    use super::*;
 
     #[test]
     fn test_include_glob() {
         let records = parse_file("../examples/include/include_1.slt").unwrap();
-        assert_eq!(14, records.len());
+        assert_eq!(16, records.len());
+    }
+
+    #[test]
+    fn test_basic() {
+        parse_roundtrip("../examples/basic/basic.slt")
+    }
+
+    /// Parses the specified file into Records, and ensures the
+    /// results of unparsing them are the same
+    ///
+    /// Prints a hopefully useful message on failure
+    fn parse_roundtrip(filename: impl AsRef<Path>) {
+        let filename = filename.as_ref();
+        let input_contents = std::fs::read_to_string(filename).expect("reading file");
+
+        let records = parse_file(filename).expect("parsing to complete");
+
+        let unparsed = records
+            .iter()
+            .map(|record| record.to_string())
+            .collect::<Vec<_>>();
+
+        // Technically this will not always be the same due to some whitespace normalization
+        //
+        // query   III
+        // select * from foo;
+        // ----
+        // 1 2
+        //
+        // Will print out collaposting the spaces between `query`
+        //
+        // query III
+        // select * from foo;
+        // ----
+        // 1 2
+        let output_contents = unparsed.join("\n");
+
+        let changeset = Changeset::new(&input_contents, &output_contents, "\n");
+
+        assert!(
+            no_diffs(&changeset),
+            "Mismatch for {:?}\n\
+                 *********\n\
+                 diff:\n\
+                 *********\n\
+                 {}\n\n\
+                 *********\n\
+                 output:\n\
+                 *********\n\
+                 {}\n\n",
+            filename,
+            UsefulDiffDisplay(&changeset),
+            output_contents,
+        );
+    }
+
+    /// returns true if there are no differences in the changeset
+    fn no_diffs(changeset: &Changeset) -> bool {
+        changeset
+            .diffs
+            .iter()
+            .all(|diff| matches!(diff, Difference::Same(_)))
+    }
+
+    struct UsefulDiffDisplay<'a>(&'a Changeset);
+
+    impl<'a> std::fmt::Display for UsefulDiffDisplay<'a> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.0.diffs.iter().try_for_each(|diff| match diff {
+                Difference::Same(x) => writeln!(f, "{x}"),
+                Difference::Add(x) => writeln!(f, "+   {x}"),
+                Difference::Rem(x) => writeln!(f, "-   {x}"),
+            })
+        }
     }
 }
