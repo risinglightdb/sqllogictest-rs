@@ -142,9 +142,15 @@ impl Record {
     /// # Panics
     /// If the record is an internally injected record which should not occur in the test file.
     pub fn unparse(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
+        write!(w, "{}", self)
+    }
+}
+
+impl std::fmt::Display for Record {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Record::Include { loc: _, filename } => {
-                write!(w, "include {}", filename)
+                write!(f, "include {}", filename)
             }
             Record::Statement {
                 loc: _,
@@ -153,21 +159,21 @@ impl Record {
                 sql,
                 expected_count,
             } => {
-                write!(w, "statement ")?;
+                write!(f, "statement ")?;
                 match (expected_count, expected_error) {
-                    (None, None) => write!(w, "ok")?,
+                    (None, None) => write!(f, "ok")?,
                     (None, Some(err)) => {
                         if err.as_str().is_empty() {
-                            write!(w, "error")?;
+                            write!(f, "error")?;
                         } else {
-                            write!(w, "error {}", err)?;
+                            write!(f, "error {}", err)?;
                         }
                     }
-                    (Some(cnt), None) => write!(w, "count {}", cnt)?,
+                    (Some(cnt), None) => write!(f, "count {}", cnt)?,
                     (Some(_), Some(_)) => unreachable!(),
                 }
-                writeln!(w)?;
-                write!(w, "{}", sql)
+                writeln!(f)?;
+                write!(f, "{}", sql)
             }
             Record::Query {
                 loc: _,
@@ -179,60 +185,60 @@ impl Record {
                 sql,
                 expected_results,
             } => {
-                write!(w, "query")?;
+                write!(f, "query")?;
                 if let Some(err) = expected_error {
-                    writeln!(w, " error {}", err)?;
-                    return write!(w, "{}", sql);
+                    writeln!(f, " error {}", err)?;
+                    return write!(f, "{}", sql);
                 }
 
                 write!(
-                    w,
+                    f,
                     " {}",
                     type_string.iter().map(|c| format!("{c}")).join("")
                 )?;
                 if let Some(sort_mode) = sort_mode {
-                    write!(w, " {}", sort_mode.as_str())?;
+                    write!(f, " {}", sort_mode.as_str())?;
                 }
                 if let Some(label) = label {
-                    write!(w, " {}", label)?;
+                    write!(f, " {}", label)?;
                 }
-                writeln!(w)?;
-                writeln!(w, "{}", sql)?;
+                writeln!(f)?;
+                writeln!(f, "{}", sql)?;
 
-                write!(w, "----")?;
+                write!(f, "----")?;
                 for result in expected_results {
-                    write!(w, "\n{}", result)?;
+                    write!(f, "\n{}", result)?;
                 }
                 Ok(())
             }
             Record::Sleep { loc: _, duration } => {
-                write!(w, "sleep {}", humantime::format_duration(*duration))
+                write!(f, "sleep {}", humantime::format_duration(*duration))
             }
             Record::Subtest { loc: _, name } => {
-                write!(w, "subtest {}", name)
+                write!(f, "subtest {}", name)
             }
             Record::Halt { loc: _ } => {
-                write!(w, "halt")
+                write!(f, "halt")
             }
             Record::Control(c) => match c {
-                Control::SortMode(m) => write!(w, "control sortmode {}", m.as_str()),
+                Control::SortMode(m) => write!(f, "control sortmode {}", m.as_str()),
             },
             Record::Condition(cond) => match cond {
                 Condition::OnlyIf { engine_name } => {
-                    write!(w, "onlyif {}", engine_name)
+                    write!(f, "onlyif {}", engine_name)
                 }
                 Condition::SkipIf { engine_name } => {
-                    write!(w, "skipif {}", engine_name)
+                    write!(f, "skipif {}", engine_name)
                 }
             },
             Record::HashThreshold { loc: _, threshold } => {
-                write!(w, "hash-threshold {}", threshold)
+                write!(f, "hash-threshold {}", threshold)
             }
             Record::Comment(comment) => {
                 let mut iter = comment.iter();
-                write!(w, "#{}", iter.next().unwrap().trim_end())?;
+                write!(f, "#{}", iter.next().unwrap().trim_end())?;
                 for line in iter {
-                    write!(w, "\n#{}", line.trim_end())?;
+                    write!(f, "\n#{}", line.trim_end())?;
                 }
                 Ok(())
             }
