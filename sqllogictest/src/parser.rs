@@ -1,6 +1,6 @@
 //! Sqllogictest parser.
 
-use std::fmt;
+use std::fmt::{self, Display};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -66,7 +66,7 @@ impl Location {
 }
 
 /// A single directive in a sqllogictest file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Record {
     /// An include copies all records from another files.
@@ -81,7 +81,7 @@ pub enum Record {
         conditions: Vec<Condition>,
         /// The SQL command is expected to fail with an error messages that matches the given
         /// regex. If the regex is an empty string, any error message is accepted.
-        expected_error: Option<Regex>,
+        expected_error: Option<ComparableRegex>,
         /// The SQL command.
         sql: String,
         /// Expected rows affected.
@@ -97,7 +97,7 @@ pub enum Record {
         label: Option<String>,
         /// The SQL command is expected to fail with an error messages that matches the given
         /// regex. If the regex is an empty string, any error message is accepted.
-        expected_error: Option<Regex>,
+        expected_error: Option<ComparableRegex>,
         /// The SQL command.
         sql: String,
         /// The expected results.
@@ -135,6 +135,35 @@ pub enum Record {
     Newline,
     /// Internally injected record which should not occur in the test file.
     Injected(Injected),
+}
+
+/// Newtype that allows comparing a RegEx
+#[derive(Debug, Clone)]
+pub struct ComparableRegex(Regex);
+
+impl PartialEq for ComparableRegex {
+    fn eq(&self, other: &Self) -> bool {
+        // Use string representation to dtermine if two regular
+        // expressions came from the same text (rather than something
+        // more deeply meaningful)
+        self.0.as_str().eq(other.0.as_str())
+    }
+}
+
+impl ComparableRegex {
+    pub fn is_match(&self, p: &str) -> bool {
+        self.0.is_match(p)
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl Display for ComparableRegex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
 impl Record {
@@ -478,6 +507,7 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                     sql += "\n";
                     sql += line;
                 }
+                let expected_error = expected_error.map(ComparableRegex);
                 records.push(Record::Statement {
                     loc,
                     conditions: std::mem::take(&mut conditions),
@@ -542,6 +572,7 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                         expected_results.push(line.to_string());
                     }
                 }
+                let expected_error = expected_error.map(ComparableRegex);
                 records.push(Record::Query {
                     loc,
                     conditions: std::mem::take(&mut conditions),
@@ -617,6 +648,8 @@ fn parse_file_inner(loc: Location) -> Result<Vec<Record>, ParseError> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use difference::{Changeset, Difference};
 
     use super::*;
@@ -679,6 +712,34 @@ mod tests {
             UsefulDiffDisplay(&changeset),
             output_contents,
         );
+
+        // The orignal and parsed records should be logically requivalent
+        let mut output_file = tempfile::NamedTempFile::new().expect("Error creating tempfile");
+        output_file
+            .write_all(output_contents.as_bytes())
+            .expect("Unable to write file");
+        output_file.flush().unwrap();
+
+        let output_path = output_file.into_temp_path();
+        let reparsed_records =
+            parse_file(&output_path).expect("reparsing to complete successfully");
+
+        let records = normalize_filename(records);
+        let reparsed_records = normalize_filename(reparsed_records);
+
+        assert_eq!(
+            records, reparsed_records,
+            "Mismatch in reparsed records\n\
+                    *********\n\
+                    original:\n\
+                    *********\n\
+                    {:#?}\n\n\
+                    *********\n\
+                    reparsed:\n\
+                    *********\n\
+                    {:#?}\n\n",
+            records, reparsed_records,
+        );
     }
 
     /// returns true if there are no differences in the changeset
@@ -699,5 +760,82 @@ mod tests {
                 Difference::Rem(x) => writeln!(f, "-   {x}"),
             })
         }
+    }
+
+    /// Replaces the actual filename in all Records with
+    /// "__FILENAME__" so different files with the same contents can
+    /// compare equal
+    fn normalize_filename(records: Vec<Record>) -> Vec<Record> {
+        records
+            .into_iter()
+            .map(|record| {
+                match record {
+                    Record::Include { loc, filename } => Record::Include {
+                        loc: normalize_loc(loc),
+                        filename,
+                    },
+                    Record::Statement {
+                        loc,
+                        conditions,
+                        expected_error,
+                        sql,
+                        expected_count,
+                    } => Record::Statement {
+                        loc: normalize_loc(loc),
+                        conditions,
+                        expected_error,
+                        sql,
+                        expected_count,
+                    },
+                    Record::Query {
+                        loc,
+                        conditions,
+                        type_string,
+                        sort_mode,
+                        label,
+                        expected_error,
+                        sql,
+                        expected_results,
+                    } => Record::Query {
+                        loc: normalize_loc(loc),
+                        conditions,
+                        type_string,
+                        sort_mode,
+                        label,
+                        expected_error,
+                        sql,
+                        expected_results,
+                    },
+                    Record::Sleep { loc, duration } => Record::Sleep {
+                        loc: normalize_loc(loc),
+                        duration,
+                    },
+                    Record::Subtest { loc, name } => Record::Subtest {
+                        loc: normalize_loc(loc),
+                        name,
+                    },
+                    Record::Halt { loc } => Record::Halt { loc },
+                    Record::Control(v) => Record::Control(v),
+                    Record::HashThreshold { loc, threshold } => Record::HashThreshold {
+                        loc: normalize_loc(loc),
+                        threshold,
+                    },
+                    // even though these variants don't include a
+                    // location include them in this match statement
+                    // so if new variants are added, this match
+                    // statement must be too.
+                    Record::Condition(v) => Record::Condition(v),
+                    Record::Comment(v) => Record::Comment(v),
+                    Record::Newline => Record::Newline,
+                    Record::Injected(v) => Record::Injected(v),
+                }
+            })
+            .collect()
+    }
+
+    // Normalize a location
+    fn normalize_loc(mut loc: Location) -> Location {
+        loc.file = Arc::from("__FILENAME__");
+        loc
     }
 }
