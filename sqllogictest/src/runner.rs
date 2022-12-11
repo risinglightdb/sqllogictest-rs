@@ -411,12 +411,13 @@ impl<D: AsyncDB> Runner<D> {
         Runner {
             db,
             validator: |x, y| {
+                let expected_results = y.iter().map(normalize_string).collect_vec();
                 // Default, we compare normalized results. Whitespace characters are ignored.
                 let normalized_rows = x
                     .iter()
                     .map(|strs| strs.iter().map(normalize_string).join(" "))
                     .collect_vec();
-                &normalized_rows == y
+                normalized_rows == expected_results
             },
             testdir: None,
             sort_mode: None,
@@ -699,16 +700,15 @@ impl<D: AsyncDB> Runner<D> {
                     }
                 }
 
-                let expected_results = expected_results.iter().map(normalize_string).collect_vec();
                 if !(self.validator)(&rows, &expected_results) {
-                    let normalized_rows = rows
+                    let output_rows = rows
                         .into_iter()
-                        .map(|strs| strs.iter().map(normalize_string).join(" "))
+                        .map(|strs| strs.iter().join(" "))
                         .collect_vec();
                     return Err(TestErrorKind::QueryResultMismatch {
                         sql,
                         expected: expected_results.join("\n"),
-                        actual: normalized_rows.join("\n"),
+                        actual: output_rows.join("\n"),
                     }
                     .at(loc));
                 }
