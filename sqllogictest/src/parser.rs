@@ -1,15 +1,14 @@
 //! Sqllogictest parser.
-
+use derivative::Derivative;
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use itertools::Itertools;
-use regex::Regex;
-
 use crate::ColumnType;
 use crate::ParseErrorKind::InvalidIncludeFile;
+use itertools::Itertools;
+use regex::Regex;
 
 /// The location in source file.
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -66,7 +65,8 @@ impl Location {
 }
 
 /// A single directive in a sqllogictest file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Derivative)]
+#[derivative(PartialEq)]
 #[non_exhaustive]
 pub enum Record {
     /// An include copies all records from another files.
@@ -81,6 +81,7 @@ pub enum Record {
         conditions: Vec<Condition>,
         /// The SQL command is expected to fail with an error messages that matches the given
         /// regex. If the regex is an empty string, any error message is accepted.
+        #[derivative(PartialEq(compare_with = "cmp_regex"))]
         expected_error: Option<Regex>,
         /// The SQL command.
         sql: String,
@@ -97,6 +98,7 @@ pub enum Record {
         label: Option<String>,
         /// The SQL command is expected to fail with an error messages that matches the given
         /// regex. If the regex is an empty string, any error message is accepted.
+        #[derivative(PartialEq(compare_with = "cmp_regex"))]
         expected_error: Option<Regex>,
         /// The SQL command.
         sql: String,
@@ -135,6 +137,17 @@ pub enum Record {
     Newline,
     /// Internally injected record which should not occur in the test file.
     Injected(Injected),
+}
+
+/// Use string representation to determine if two regular
+/// expressions came from the same text (rather than something
+/// more deeply meaningful)
+fn cmp_regex(l: &Option<Regex>, r: &Option<Regex>) -> bool {
+    match (l, r) {
+        (Some(l), Some(r)) => l.as_str().eq(r.as_str()),
+        (None, None) => true,
+        _ => false,
+    }
 }
 
 impl Record {
@@ -617,7 +630,7 @@ fn parse_file_inner(loc: Location) -> Result<Vec<Record>, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use difference::{Changeset, Difference};
+    use std::io::Write;
 
     use super::*;
 
@@ -632,14 +645,35 @@ mod tests {
         parse_roundtrip("../examples/basic/basic.slt")
     }
 
-    /// Parses the specified file into Records, and ensures the
-    /// results of unparsing them are the same
-    ///
-    /// Prints a hopefully useful message on failure
+    #[test]
+    fn test_condition() {
+        parse_roundtrip("../examples/condition/condition.slt")
+    }
+
+    #[test]
+    fn test_file_level_sort_mode() {
+        parse_roundtrip("../examples/file_level_sort_mode/file_level_sort_mode.slt")
+    }
+
+    #[test]
+    fn test_rowsort() {
+        parse_roundtrip("../examples/rowsort/rowsort.slt")
+    }
+
+    #[test]
+    fn test_test_dir_escape() {
+        parse_roundtrip("../examples/test_dir_escape/test_dir_escape.slt")
+    }
+
+    #[test]
+    fn test_validator() {
+        parse_roundtrip("../examples/validator/validator.slt")
+    }
+
+    /// Verifies Display impl is consistent with parsing by ensuring
+    /// roundtrip parse(unparse(parse())) is consistent
     fn parse_roundtrip(filename: impl AsRef<Path>) {
         let filename = filename.as_ref();
-        let input_contents = std::fs::read_to_string(filename).expect("reading file");
-
         let records = parse_file(filename).expect("parsing to complete");
 
         let unparsed = records
@@ -647,57 +681,69 @@ mod tests {
             .map(|record| record.to_string())
             .collect::<Vec<_>>();
 
-        // Technically this will not always be the same due to some whitespace normalization
-        //
-        // query   III
-        // select * from foo;
-        // ----
-        // 1 2
-        //
-        // Will print out collaposting the spaces between `query`
-        //
-        // query III
-        // select * from foo;
-        // ----
-        // 1 2
         let output_contents = unparsed.join("\n");
 
-        let changeset = Changeset::new(&input_contents, &output_contents, "\n");
+        // The orignal and parsed records should be logically requivalent
+        let mut output_file = tempfile::NamedTempFile::new().expect("Error creating tempfile");
+        output_file
+            .write_all(output_contents.as_bytes())
+            .expect("Unable to write file");
+        output_file.flush().unwrap();
 
-        assert!(
-            no_diffs(&changeset),
-            "Mismatch for {:?}\n\
-                 *********\n\
-                 diff:\n\
-                 *********\n\
-                 {}\n\n\
-                 *********\n\
-                 output:\n\
-                 *********\n\
-                 {}\n\n",
-            filename,
-            UsefulDiffDisplay(&changeset),
-            output_contents,
+        let output_path = output_file.into_temp_path();
+        let reparsed_records =
+            parse_file(&output_path).expect("reparsing to complete successfully");
+
+        let records = normalize_filename(records);
+        let reparsed_records = normalize_filename(reparsed_records);
+
+        assert_eq!(
+            records, reparsed_records,
+            "Mismatch in reparsed records\n\
+                    *********\n\
+                    original:\n\
+                    *********\n\
+                    {:#?}\n\n\
+                    *********\n\
+                    reparsed:\n\
+                    *********\n\
+                    {:#?}\n\n",
+            records, reparsed_records,
         );
     }
 
-    /// returns true if there are no differences in the changeset
-    fn no_diffs(changeset: &Changeset) -> bool {
-        changeset
-            .diffs
-            .iter()
-            .all(|diff| matches!(diff, Difference::Same(_)))
+    /// Replaces the actual filename in all Records with
+    /// "__FILENAME__" so different files with the same contents can
+    /// compare equal
+    fn normalize_filename(records: Vec<Record>) -> Vec<Record> {
+        records
+            .into_iter()
+            .map(|mut record| {
+                match &mut record {
+                    Record::Include { loc, .. } => normalize_loc(loc),
+                    Record::Statement { loc, .. } => normalize_loc(loc),
+                    Record::Query { loc, .. } => normalize_loc(loc),
+                    Record::Sleep { loc, .. } => normalize_loc(loc),
+                    Record::Subtest { loc, .. } => normalize_loc(loc),
+                    Record::Halt { loc, .. } => normalize_loc(loc),
+                    Record::HashThreshold { loc, .. } => normalize_loc(loc),
+                    // even though these variants don't include a
+                    // location include them in this match statement
+                    // so if new variants are added, this match
+                    // statement must be too.
+                    Record::Condition(_)
+                    | Record::Comment(_)
+                    | Record::Control(_)
+                    | Record::Newline
+                    | Record::Injected(_) => {}
+                };
+                record
+            })
+            .collect()
     }
 
-    struct UsefulDiffDisplay<'a>(&'a Changeset);
-
-    impl<'a> std::fmt::Display for UsefulDiffDisplay<'a> {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            self.0.diffs.iter().try_for_each(|diff| match diff {
-                Difference::Same(x) => writeln!(f, "{x}"),
-                Difference::Add(x) => writeln!(f, "+   {x}"),
-                Difference::Rem(x) => writeln!(f, "-   {x}"),
-            })
-        }
+    // Normalize a location
+    fn normalize_loc(loc: &mut Location) {
+        loc.file = Arc::from("__FILENAME__");
     }
 }
