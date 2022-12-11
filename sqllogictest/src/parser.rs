@@ -1,15 +1,14 @@
 //! Sqllogictest parser.
-
-use std::fmt::{self, Display};
+use derivative::Derivative;
+use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use itertools::Itertools;
-use regex::Regex;
-
 use crate::ColumnType;
 use crate::ParseErrorKind::InvalidIncludeFile;
+use itertools::Itertools;
+use regex::Regex;
 
 /// The location in source file.
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -66,7 +65,8 @@ impl Location {
 }
 
 /// A single directive in a sqllogictest file.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Derivative)]
+#[derivative(PartialEq)]
 #[non_exhaustive]
 pub enum Record {
     /// An include copies all records from another files.
@@ -81,7 +81,8 @@ pub enum Record {
         conditions: Vec<Condition>,
         /// The SQL command is expected to fail with an error messages that matches the given
         /// regex. If the regex is an empty string, any error message is accepted.
-        expected_error: Option<ComparableRegex>,
+        #[derivative(PartialEq(compare_with = "cmp_regex"))]
+        expected_error: Option<Regex>,
         /// The SQL command.
         sql: String,
         /// Expected rows affected.
@@ -97,7 +98,8 @@ pub enum Record {
         label: Option<String>,
         /// The SQL command is expected to fail with an error messages that matches the given
         /// regex. If the regex is an empty string, any error message is accepted.
-        expected_error: Option<ComparableRegex>,
+        #[derivative(PartialEq(compare_with = "cmp_regex"))]
+        expected_error: Option<Regex>,
         /// The SQL command.
         sql: String,
         /// The expected results.
@@ -137,32 +139,14 @@ pub enum Record {
     Injected(Injected),
 }
 
-/// Newtype that allows comparing a RegEx
-#[derive(Debug, Clone)]
-pub struct ComparableRegex(Regex);
-
-impl PartialEq for ComparableRegex {
-    fn eq(&self, other: &Self) -> bool {
-        // Use string representation to dtermine if two regular
-        // expressions came from the same text (rather than something
-        // more deeply meaningful)
-        self.0.as_str().eq(other.0.as_str())
-    }
-}
-
-impl ComparableRegex {
-    pub fn is_match(&self, p: &str) -> bool {
-        self.0.is_match(p)
-    }
-
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
-impl Display for ComparableRegex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+/// Use string representation to determine if two regular
+/// expressions came from the same text (rather than something
+/// more deeply meaningful)
+fn cmp_regex(l: &Option<Regex>, r: &Option<Regex>) -> bool {
+    match (l, r) {
+        (Some(l), Some(r)) => l.as_str().eq(r.as_str()),
+        (None, None) => true,
+        _ => false,
     }
 }
 
@@ -507,7 +491,6 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                     sql += "\n";
                     sql += line;
                 }
-                let expected_error = expected_error.map(ComparableRegex);
                 records.push(Record::Statement {
                     loc,
                     conditions: std::mem::take(&mut conditions),
@@ -572,7 +555,6 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                         expected_results.push(line.to_string());
                     }
                 }
-                let expected_error = expected_error.map(ComparableRegex);
                 records.push(Record::Query {
                     loc,
                     conditions: std::mem::take(&mut conditions),
@@ -771,19 +753,19 @@ mod tests {
             .map(|mut record| {
                 match &mut record {
                     Record::Include { loc, .. } => normalize_loc(loc),
-                    Record::Statement { loc, ..} => normalize_loc(loc),
-                    Record::Query {loc, ..} => normalize_loc(loc),
-                    Record::Sleep { loc, ..} => normalize_loc(loc),
-                    Record::Subtest { loc, ..} => normalize_loc(loc),
-                    Record::Halt { loc, ..} => normalize_loc(loc),
-                    Record::HashThreshold { loc, ..} => normalize_loc(loc),
+                    Record::Statement { loc, .. } => normalize_loc(loc),
+                    Record::Query { loc, .. } => normalize_loc(loc),
+                    Record::Sleep { loc, .. } => normalize_loc(loc),
+                    Record::Subtest { loc, .. } => normalize_loc(loc),
+                    Record::Halt { loc, .. } => normalize_loc(loc),
+                    Record::HashThreshold { loc, .. } => normalize_loc(loc),
                     // even though these variants don't include a
                     // location include them in this match statement
                     // so if new variants are added, this match
                     // statement must be too.
                     Record::Condition(_)
-                        | Record::Comment(_)
-                        | Record::Control(_)
+                    | Record::Comment(_)
+                    | Record::Control(_)
                     | Record::Newline
                     | Record::Injected(_) => {}
                 };
@@ -793,7 +775,7 @@ mod tests {
     }
 
     // Normalize a location
-    fn normalize_loc(loc: &mut Location)  {
+    fn normalize_loc(loc: &mut Location) {
         loc.file = Arc::from("__FILENAME__");
     }
 }
