@@ -15,7 +15,9 @@ use futures::StreamExt;
 use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
 use rand::seq::SliceRandom;
-use sqllogictest::{AsyncDB, Injected, Record, RecordOutput, Runner};
+use sqllogictest::{
+    default_validator, update_record_with_output, AsyncDB, Injected, Record, Runner,
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
 #[must_use]
@@ -656,137 +658,14 @@ async fn update_record<D: AsyncDB>(
         return Ok(());
     }
 
-    match (record.clone(), runner.apply_record(record).await) {
-        (record, RecordOutput::Nothing) => {
+    let record_output = runner.apply_record(record.clone()).await;
+    match update_record_with_output(&record, &record_output, "\t", default_validator) {
+        Some(new_record) => {
+            writeln!(outfile, "{new_record}")?;
+        }
+        None => {
             writeln!(outfile, "{record}")?;
         }
-        (Record::Statement { sql, .. }, RecordOutput::Query { error: None, .. }) => {
-            // statement ok
-            // SELECT ...
-            //
-            // This case can be used when we want to only ensure the query succeeds,
-            // but don't care about the output.
-            // DuckDB has a few of these.
-
-            writeln!(outfile, "statement ok")?;
-            writeln!(outfile, "{}", sql)?;
-            writeln!(outfile)?;
-        }
-        (Record::Query { sql, .. }, RecordOutput::Statement { error: None, .. }) => {
-            writeln!(outfile, "statement ok")?;
-            writeln!(outfile, "{}", sql)?;
-            writeln!(outfile)?;
-        }
-        (
-            Record::Statement {
-                loc: _,
-                conditions: _,
-                expected_error,
-                sql,
-                expected_count,
-            },
-            RecordOutput::Statement { count, error },
-        ) => match (error, expected_error) {
-            (None, _) => {
-                if expected_count.is_some() {
-                    writeln!(outfile, "statement count {count}")?;
-                    writeln!(outfile, "{}", sql)?;
-                } else {
-                    writeln!(outfile, "statement ok")?;
-                    writeln!(outfile, "{}", sql)?;
-                }
-                writeln!(outfile)?;
-            }
-            (Some(e), Some(expected_error)) if expected_error.is_match(&e.to_string()) => {
-                if expected_error.as_str().is_empty() {
-                    writeln!(outfile, "statement error")?;
-                } else {
-                    writeln!(outfile, "statement error {}", expected_error)?;
-                }
-                writeln!(outfile, "{}", sql)?;
-                writeln!(outfile)?;
-            }
-            (Some(e), _) => {
-                writeln!(outfile, "statement error {}", e)?;
-                writeln!(outfile, "{}", sql)?;
-                writeln!(outfile)?;
-            }
-        },
-        (
-            Record::Query {
-                loc: _,
-                conditions: _,
-                type_string,
-                sort_mode,
-                label,
-                expected_error,
-                sql,
-                expected_results,
-            },
-            RecordOutput::Query {
-                types: _,
-                rows,
-                error,
-            },
-        ) => {
-            match (error, expected_error) {
-                (None, _) => {}
-                (Some(e), Some(expected_error)) if expected_error.is_match(&e.to_string()) => {
-                    writeln!(outfile, "query error {}", expected_error)?;
-                    writeln!(outfile, "{}", sql)?;
-                    writeln!(outfile)?;
-                    return Ok(());
-                }
-                (Some(e), _) => {
-                    writeln!(outfile, "query error {}", e)?;
-                    writeln!(outfile, "{}", sql)?;
-                    writeln!(outfile)?;
-                    return Ok(());
-                }
-            };
-
-            // FIXME: use output's types instead of orignal query's types
-            write!(
-                outfile,
-                "query {}",
-                type_string.iter().map(|c| format!("{c}")).join("")
-            )?;
-            if let Some(sort_mode) = sort_mode {
-                write!(outfile, " {}", sort_mode.as_str())?;
-            }
-            if let Some(label) = label {
-                write!(outfile, " {}", label)?;
-            }
-            writeln!(outfile)?;
-            writeln!(outfile, "{}", sql)?;
-
-            #[allow(clippy::ptr_arg)]
-            fn normalize_string(s: &String) -> String {
-                s.trim().split_ascii_whitespace().join(" ")
-            }
-
-            let normalized_rows = rows
-                .iter()
-                .map(|strs| strs.iter().map(normalize_string).join(" "))
-                .collect_vec();
-
-            let normalized_expected = expected_results.iter().map(normalize_string).collect_vec();
-
-            writeln!(outfile, "----")?;
-
-            if normalized_expected == normalized_rows {
-                // If the results are correct, do not format them.
-                for result in expected_results {
-                    writeln!(outfile, "{}", result)?;
-                }
-            } else {
-                for result in rows {
-                    writeln!(outfile, "{}", result.iter().format("\t"))?;
-                }
-            };
-            writeln!(outfile)?;
-        }
-        _ => unreachable!(),
     }
 
     Ok(())
