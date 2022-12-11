@@ -632,8 +632,6 @@ fn parse_file_inner(loc: Location) -> Result<Vec<Record>, ParseError> {
 mod tests {
     use std::io::Write;
 
-    use difference::{Changeset, Difference};
-
     use super::*;
 
     #[test]
@@ -647,14 +645,35 @@ mod tests {
         parse_roundtrip("../examples/basic/basic.slt")
     }
 
-    /// Parses the specified file into Records, and ensures the
-    /// results of unparsing them are the same
-    ///
-    /// Prints a hopefully useful message on failure
+    #[test]
+    fn test_condition() {
+        parse_roundtrip("../examples/condition/condition.slt")
+    }
+
+    #[test]
+    fn test_file_level_sort_mode() {
+        parse_roundtrip("../examples/file_level_sort_mode/file_level_sort_mode.slt")
+    }
+
+    #[test]
+    fn test_rowsort() {
+        parse_roundtrip("../examples/rowsort/rowsort.slt")
+    }
+
+    #[test]
+    fn test_test_dir_escape() {
+        parse_roundtrip("../examples/test_dir_escape/test_dir_escape.slt")
+    }
+
+    #[test]
+    fn test_validator() {
+        parse_roundtrip("../examples/validator/validator.slt")
+    }
+
+    /// Verifies Display impl is consistent with parsing by ensuring
+    /// roundtrip parse(unparse(parse())) is consistent
     fn parse_roundtrip(filename: impl AsRef<Path>) {
         let filename = filename.as_ref();
-        let input_contents = std::fs::read_to_string(filename).expect("reading file");
-
         let records = parse_file(filename).expect("parsing to complete");
 
         let unparsed = records
@@ -662,38 +681,7 @@ mod tests {
             .map(|record| record.to_string())
             .collect::<Vec<_>>();
 
-        // Technically this will not always be the same due to some whitespace normalization
-        //
-        // query   III
-        // select * from foo;
-        // ----
-        // 1 2
-        //
-        // Will print out collaposting the spaces between `query`
-        //
-        // query III
-        // select * from foo;
-        // ----
-        // 1 2
         let output_contents = unparsed.join("\n");
-
-        let changeset = Changeset::new(&input_contents, &output_contents, "\n");
-
-        assert!(
-            no_diffs(&changeset),
-            "Mismatch for {:?}\n\
-                 *********\n\
-                 diff:\n\
-                 *********\n\
-                 {}\n\n\
-                 *********\n\
-                 output:\n\
-                 *********\n\
-                 {}\n\n",
-            filename,
-            UsefulDiffDisplay(&changeset),
-            output_contents,
-        );
 
         // The orignal and parsed records should be logically requivalent
         let mut output_file = tempfile::NamedTempFile::new().expect("Error creating tempfile");
@@ -722,26 +710,6 @@ mod tests {
                     {:#?}\n\n",
             records, reparsed_records,
         );
-    }
-
-    /// returns true if there are no differences in the changeset
-    fn no_diffs(changeset: &Changeset) -> bool {
-        changeset
-            .diffs
-            .iter()
-            .all(|diff| matches!(diff, Difference::Same(_)))
-    }
-
-    struct UsefulDiffDisplay<'a>(&'a Changeset);
-
-    impl<'a> std::fmt::Display for UsefulDiffDisplay<'a> {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            self.0.diffs.iter().try_for_each(|diff| match diff {
-                Difference::Same(x) => writeln!(f, "{x}"),
-                Difference::Add(x) => writeln!(f, "+   {x}"),
-                Difference::Rem(x) => writeln!(f, "-   {x}"),
-            })
-        }
     }
 
     /// Replaces the actual filename in all Records with
