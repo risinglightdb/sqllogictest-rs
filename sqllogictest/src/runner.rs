@@ -392,8 +392,8 @@ fn format_diff(
 ///
 /// # Default
 ///
-/// By default, we will use `|x, y| x == y`.
-pub type Validator = fn(&Vec<String>, &Vec<String>) -> bool;
+/// By default, we will use compare normalized results.
+pub type Validator = fn(&Vec<Vec<String>>, &Vec<String>) -> bool;
 
 /// Sqllogictest runner.
 pub struct Runner<D: AsyncDB> {
@@ -411,7 +411,15 @@ impl<D: AsyncDB> Runner<D> {
     pub fn new(db: D) -> Self {
         Runner {
             db,
-            validator: |x, y| x == y,
+            validator: |x, y| {
+                let expected_results = y.iter().map(normalize_string).collect_vec();
+                // Default, we compare normalized results. Whitespace characters are ignored.
+                let normalized_rows = x
+                    .iter()
+                    .map(|strs| strs.iter().map(normalize_string).join(" "))
+                    .collect_vec();
+                normalized_rows == expected_results
+            },
             testdir: None,
             sort_mode: None,
             hash_threshold: 0,
@@ -693,18 +701,15 @@ impl<D: AsyncDB> Runner<D> {
                     }
                 }
 
-                // We compare normalized results. Whitespace characters are ignored.
-                let normalized_rows = rows
-                    .into_iter()
-                    .map(|strs| strs.iter().map(normalize_string).join(" "))
-                    .collect_vec();
-
-                let expected_results = expected_results.iter().map(normalize_string).collect_vec();
-                if !(self.validator)(&normalized_rows, &expected_results) {
+                if !(self.validator)(&rows, &expected_results) {
+                    let output_rows = rows
+                        .into_iter()
+                        .map(|strs| strs.iter().join(" "))
+                        .collect_vec();
                     return Err(TestErrorKind::QueryResultMismatch {
                         sql,
                         expected: expected_results.join("\n"),
-                        actual: normalized_rows.join("\n"),
+                        actual: output_rows.join("\n"),
                     }
                     .at(loc));
                 }
