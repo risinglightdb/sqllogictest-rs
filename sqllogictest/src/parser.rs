@@ -768,74 +768,32 @@ mod tests {
     fn normalize_filename(records: Vec<Record>) -> Vec<Record> {
         records
             .into_iter()
-            .map(|record| {
-                match record {
-                    Record::Include { loc, filename } => Record::Include {
-                        loc: normalize_loc(loc),
-                        filename,
-                    },
-                    Record::Statement {
-                        loc,
-                        conditions,
-                        expected_error,
-                        sql,
-                        expected_count,
-                    } => Record::Statement {
-                        loc: normalize_loc(loc),
-                        conditions,
-                        expected_error,
-                        sql,
-                        expected_count,
-                    },
-                    Record::Query {
-                        loc,
-                        conditions,
-                        type_string,
-                        sort_mode,
-                        label,
-                        expected_error,
-                        sql,
-                        expected_results,
-                    } => Record::Query {
-                        loc: normalize_loc(loc),
-                        conditions,
-                        type_string,
-                        sort_mode,
-                        label,
-                        expected_error,
-                        sql,
-                        expected_results,
-                    },
-                    Record::Sleep { loc, duration } => Record::Sleep {
-                        loc: normalize_loc(loc),
-                        duration,
-                    },
-                    Record::Subtest { loc, name } => Record::Subtest {
-                        loc: normalize_loc(loc),
-                        name,
-                    },
-                    Record::Halt { loc } => Record::Halt { loc },
-                    Record::Control(v) => Record::Control(v),
-                    Record::HashThreshold { loc, threshold } => Record::HashThreshold {
-                        loc: normalize_loc(loc),
-                        threshold,
-                    },
+            .map(|mut record| {
+                match &mut record {
+                    Record::Include { loc, .. } => normalize_loc(loc),
+                    Record::Statement { loc, ..} => normalize_loc(loc),
+                    Record::Query {loc, ..} => normalize_loc(loc),
+                    Record::Sleep { loc, ..} => normalize_loc(loc),
+                    Record::Subtest { loc, ..} => normalize_loc(loc),
+                    Record::Halt { loc, ..} => normalize_loc(loc),
+                    Record::HashThreshold { loc, ..} => normalize_loc(loc),
                     // even though these variants don't include a
                     // location include them in this match statement
                     // so if new variants are added, this match
                     // statement must be too.
-                    Record::Condition(v) => Record::Condition(v),
-                    Record::Comment(v) => Record::Comment(v),
-                    Record::Newline => Record::Newline,
-                    Record::Injected(v) => Record::Injected(v),
-                }
+                    Record::Condition(_)
+                        | Record::Comment(_)
+                        | Record::Control(_)
+                    | Record::Newline
+                    | Record::Injected(_) => {}
+                };
+                record
             })
             .collect()
     }
 
     // Normalize a location
-    fn normalize_loc(mut loc: Location) -> Location {
+    fn normalize_loc(loc: &mut Location)  {
         loc.file = Arc::from("__FILENAME__");
-        loc
     }
 }
