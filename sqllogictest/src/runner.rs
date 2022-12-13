@@ -12,6 +12,7 @@ use futures::executor::block_on;
 use futures::{stream, Future, StreamExt};
 use itertools::Itertools;
 use owo_colors::OwoColorize;
+use regex::Regex;
 use tempfile::{tempdir, TempDir};
 
 use crate::parser::*;
@@ -55,6 +56,7 @@ impl TryFrom<char> for ColumnType {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum RecordOutput {
     Nothing,
     Query {
@@ -391,8 +393,18 @@ fn format_diff(
 ///
 /// # Default
 ///
-/// By default, we will use compare normalized results.
-pub type Validator = fn(&Vec<Vec<String>>, &Vec<String>) -> bool;
+/// By default ([`default_validator`]), we will use compare normalized results.
+pub type Validator = fn(actual: &[Vec<String>], expected: &[String]) -> bool;
+
+pub fn default_validator(actual: &[Vec<String>], expected: &[String]) -> bool {
+    let expected_results = expected.iter().map(normalize_string).collect_vec();
+    // Default, we compare normalized results. Whitespace characters are ignored.
+    let normalized_rows = actual
+        .iter()
+        .map(|strs| strs.iter().map(normalize_string).join(" "))
+        .collect_vec();
+    normalized_rows == expected_results
+}
 
 /// Sqllogictest runner.
 pub struct Runner<D: AsyncDB> {
@@ -410,15 +422,7 @@ impl<D: AsyncDB> Runner<D> {
     pub fn new(db: D) -> Self {
         Runner {
             db,
-            validator: |x, y| {
-                let expected_results = y.iter().map(normalize_string).collect_vec();
-                // Default, we compare normalized results. Whitespace characters are ignored.
-                let normalized_rows = x
-                    .iter()
-                    .map(|strs| strs.iter().map(normalize_string).join(" "))
-                    .collect_vec();
-                normalized_rows == expected_results
-            },
+            validator: default_validator,
             testdir: None,
             sort_mode: None,
             hash_threshold: 0,
@@ -858,4 +862,302 @@ impl<D: AsyncDB> Runner<D> {
 #[allow(clippy::ptr_arg)]
 fn normalize_string(s: &String) -> String {
     s.trim().split_ascii_whitespace().join(" ")
+}
+
+/// Updates the specified [`Record`] with the [`QueryOutput`] produced
+/// by a Database, returning `Some(new_record)`.
+///
+/// If an update is not supported, returns `None`
+pub fn update_record_with_output(
+    record: &Record,
+    record_output: &RecordOutput,
+    col_separator: &str,
+    validator: Validator,
+) -> Option<Record> {
+    match (record.clone(), record_output) {
+        (_, RecordOutput::Nothing) => None,
+        // statement, query
+        (
+            Record::Statement {
+                sql,
+                loc,
+                conditions,
+                expected_error: None,
+                expected_count,
+            },
+            RecordOutput::Query { error: None, .. },
+        ) => {
+            // statement ok
+            // SELECT ...
+            //
+            // This case can be used when we want to only ensure the query succeeds,
+            // but don't care about the output.
+            // DuckDB has a few of these.
+
+            Some(Record::Statement {
+                sql,
+                expected_error: None,
+                loc,
+                conditions,
+                expected_count,
+            })
+        }
+        // query, statement
+        (
+            Record::Query {
+                sql,
+                loc,
+                conditions,
+                ..
+            },
+            RecordOutput::Statement { error: None, .. },
+        ) => Some(Record::Statement {
+            sql,
+            expected_error: None,
+            loc,
+            conditions,
+            expected_count: None,
+        }),
+        // statement, statement
+        (
+            Record::Statement {
+                loc,
+                conditions,
+                expected_error,
+                sql,
+                expected_count,
+            },
+            RecordOutput::Statement { count, error },
+        ) => match (error, expected_error) {
+            // Ok
+            (None, _) => Some(Record::Statement {
+                sql,
+                expected_error: None,
+                loc,
+                conditions,
+                expected_count: expected_count.map(|_| *count),
+            }),
+            // Error match
+            (Some(e), Some(expected_error)) if expected_error.is_match(&e.to_string()) => {
+                Some(Record::Statement {
+                    sql,
+                    expected_error: Some(expected_error),
+                    loc,
+                    conditions,
+                    expected_count: None,
+                })
+            }
+            // Error mismatch
+            (Some(e), _) => Some(Record::Statement {
+                sql,
+                expected_error: Some(Regex::new(&e.to_string()).unwrap()),
+                loc,
+                conditions,
+                expected_count: None,
+            }),
+        },
+        // query, query
+        (
+            Record::Query {
+                loc,
+                conditions,
+                type_string,
+                sort_mode,
+                label,
+                expected_error,
+                sql,
+                expected_results,
+            },
+            RecordOutput::Query {
+                // FIXME: maybe we should use output's types instead of orignal query's types
+                // Fix it after https://github.com/risinglightdb/sqllogictest-rs/issues/36 is resolved.
+                types: _,
+                rows,
+                error,
+            },
+        ) => {
+            match (error, expected_error) {
+                (None, _) => {}
+                // Error match
+                (Some(e), Some(expected_error)) if expected_error.is_match(&e.to_string()) => {
+                    return Some(Record::Query {
+                        sql,
+                        expected_error: Some(expected_error),
+                        loc,
+                        conditions,
+                        type_string: vec![],
+                        sort_mode,
+                        label,
+                        expected_results: vec![],
+                    })
+                }
+                // Error mismatch
+                (Some(e), _) => {
+                    return Some(Record::Query {
+                        sql,
+                        expected_error: Some(Regex::new(&e.to_string()).unwrap()),
+                        loc,
+                        conditions,
+                        type_string: vec![],
+                        sort_mode,
+                        label,
+                        expected_results: vec![],
+                    })
+                }
+            };
+
+            let results = if validator(rows, &expected_results) {
+                // If validation is successful, we respect the original file's expected results.
+                expected_results
+            } else {
+                rows.iter().map(|cols| cols.join(col_separator)).collect()
+            };
+
+            Some(Record::Query {
+                sql,
+                expected_error: None,
+                loc,
+                conditions,
+                type_string,
+                sort_mode,
+                label,
+                expected_results: results,
+            })
+        }
+
+        // No update possible, return the original record
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_query_replacement() {
+        TestCase {
+            // input should be ignored
+            input: "query III\n\
+                    select * from foo;\n\
+                    ----\n\
+                    1 2",
+
+            // Model a run that produced a 3,4 as output
+            record_output: query_output(&[&["3", "4"]]),
+
+            expected: Some(
+                "query III\n\
+                 select * from foo;\n\
+                 ----\n\
+                 3 4",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
+    fn test_query_replacement_no_input() {
+        TestCase {
+            // input has no query results
+            input: "query III\n\
+                    select * from foo;\n\
+                    ----",
+
+            // Model a run that produced a 3,4 as output
+            record_output: query_output(&[&["3", "4"]]),
+
+            expected: Some(
+                "query III\n\
+                 select * from foo;\n\
+                 ----\n\
+                 3 4",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
+    fn test_query_replacement_error() {
+        TestCase {
+            // input has no query results
+            input: "query III\n\
+                    select * from foo;\n\
+                    ----",
+
+            // Model a run that produced a "MyAwesomeDB Error"
+            record_output: query_error("MyAwesomeDB Error"),
+
+            expected: Some(
+                "query error TestError: MyAwesomeDB Error\n\
+                 select * from foo;\n",
+            ),
+        }
+        .run()
+    }
+
+    #[derive(Debug)]
+    struct TestCase {
+        input: &'static str,
+        record_output: RecordOutput,
+        expected: Option<&'static str>,
+    }
+
+    impl TestCase {
+        fn run(self) {
+            let Self {
+                input,
+                record_output,
+                expected,
+            } = self;
+            println!("TestCase");
+            println!("**input:\n{input}\n");
+            println!("**record_output:\n{record_output:#?}\n");
+            println!("**expected:\n{}\n", expected.unwrap_or(""));
+            let input = parse_to_record(input);
+            let expected = expected.map(parse_to_record);
+            let output = update_record_with_output(&input, &record_output, " ", default_validator);
+            assert_eq!(output, expected);
+        }
+    }
+
+    fn parse_to_record(s: &str) -> Record {
+        let mut records = parse(s).unwrap();
+        assert_eq!(records.len(), 1);
+        records.pop().unwrap()
+    }
+
+    /// Returns a RecordOutput that models the successful execution of a query
+    fn query_output(rows: &[&[&str]]) -> RecordOutput {
+        let rows = rows
+            .iter()
+            .map(|cols| cols.iter().map(|c| c.to_string()).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+
+        let types = rows.iter().map(|_| ColumnType::Any).collect();
+
+        RecordOutput::Query {
+            types,
+            rows,
+            error: None,
+        }
+    }
+
+    /// Returns a RecordOutput that models the error of a query
+    fn query_error(error_message: &str) -> RecordOutput {
+        RecordOutput::Query {
+            types: vec![],
+            rows: vec![],
+            error: Some(Arc::new(TestError(error_message.to_string()))),
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestError(String);
+    impl std::error::Error for TestError {}
+    impl std::fmt::Display for TestError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "TestError: {}", self.0)
+        }
+    }
 }
