@@ -947,7 +947,7 @@ pub fn update_record_with_output(
                     expected_count: None,
                 })
             }
-            // Error mismatch
+            // Error mismatch, update expected error
             (Some(e), _) => Some(Record::Statement {
                 sql,
                 expected_error: Some(Regex::new(&e.to_string()).unwrap()),
@@ -1078,6 +1078,23 @@ mod tests {
     }
 
     #[test]
+    fn test_query_replacement_no_output() {
+        TestCase {
+            // input has no query results
+            input: "query III\n\
+                    select * from foo;\n\
+                    ----",
+
+            // Model nothing was output
+            record_output: RecordOutput::Nothing,
+
+            // No update
+            expected: None,
+        }
+        .run()
+    }
+
+    #[test]
     fn test_query_replacement_error() {
         TestCase {
             // input has no query results
@@ -1086,11 +1103,143 @@ mod tests {
                     ----",
 
             // Model a run that produced a "MyAwesomeDB Error"
-            record_output: query_error("MyAwesomeDB Error"),
+            record_output: query_output_error("MyAwesomeDB Error"),
 
             expected: Some(
                 "query error TestError: MyAwesomeDB Error\n\
                  select * from foo;\n",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
+    fn test_statement_query_output() {
+        TestCase {
+            // input has no query results
+            input: "statement ok\n\
+                    create table foo;",
+
+            // Model a run that produced a 3,4 as output
+            record_output: query_output(&[&["3", "4"]]),
+
+            expected: Some(
+                "statement ok\n\
+                 create table foo;",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
+    fn test_query_statement_output() {
+        TestCase {
+            // input has no query results
+            input: "query III\n\
+                    select * from foo;\n\
+                    ----",
+
+            // Model a run that produced a statement output
+            record_output: statement_output(3),
+
+            expected: Some(
+                "statement ok\n\
+                 select * from foo;",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
+    fn test_statement_output() {
+        TestCase {
+            // statement that has no output
+            input: "statement ok\n\
+                    insert into foo values(2);",
+
+            // Model a run that produced a statement output
+            record_output: statement_output(3),
+
+            // TODO: expect the output includes 3?
+            expected: Some(
+                "statement ok\n\
+                 insert into foo values(2);",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
+    fn test_statement_error_to_ok() {
+        TestCase {
+            // statement expected error
+            input: "statement error\n\
+                    insert into foo values(2);",
+
+            // Model a run that produced a statement output
+            record_output: statement_output(3),
+
+            // TODO: expect the output includes 3?
+            expected: Some(
+                "statement ok\n\
+                 insert into foo values(2);",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
+    fn test_statement_error_no_error() {
+        TestCase {
+            // statement expected error
+            input: "statement error\n\
+                    insert into foo values(2);",
+
+            // Model a run that produced an error message
+            record_output: statement_output_error("foo"),
+
+            // TODO: expect the output includes foo?
+            expected: Some(
+                "statement error\n\
+                 insert into foo values(2);",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
+    fn test_statement_error_new_error() {
+        TestCase {
+            // statement expected error
+            input: "statement error bar\n\
+                    insert into foo values(2);",
+
+            // Model a run that produced an error message
+            record_output: statement_output_error("foo"),
+
+            // expect the output includes foo
+            expected: Some(
+                "statement error TestError: foo\n\
+                 insert into foo values(2);",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
+    fn test_statement_error_ok_to_error() {
+        TestCase {
+            // statement was ok
+            input: "statement ok\n\
+                    insert into foo values(2);",
+
+            // Model a run that produced an error message
+            record_output: statement_output_error("foo"),
+
+            // expect the output includes foo
+            expected: Some(
+                "statement error TestError: foo\n\
+                 insert into foo values(2);",
             ),
         }
         .run()
@@ -1117,7 +1266,20 @@ mod tests {
             let input = parse_to_record(input);
             let expected = expected.map(parse_to_record);
             let output = update_record_with_output(&input, &record_output, " ", default_validator);
-            assert_eq!(output, expected);
+
+            assert_eq!(
+                &output,
+                &expected,
+                "\n\noutput:\n\n{}\n\nexpected:\n\n{}",
+                output
+                    .as_ref()
+                    .map(|r| r.to_string())
+                    .unwrap_or_else(|| "None".into()),
+                expected
+                    .as_ref()
+                    .map(|r| r.to_string())
+                    .unwrap_or_else(|| "None".into()),
+            );
         }
     }
 
@@ -1144,10 +1306,22 @@ mod tests {
     }
 
     /// Returns a RecordOutput that models the error of a query
-    fn query_error(error_message: &str) -> RecordOutput {
+    fn query_output_error(error_message: &str) -> RecordOutput {
         RecordOutput::Query {
             types: vec![],
             rows: vec![],
+            error: Some(Arc::new(TestError(error_message.to_string()))),
+        }
+    }
+
+    fn statement_output(count: u64) -> RecordOutput {
+        RecordOutput::Statement { count, error: None }
+    }
+
+    /// RecordOutput that models a statement with error
+    fn statement_output_error(error_message: &str) -> RecordOutput {
+        RecordOutput::Statement {
+            count: 0,
             error: Some(Arc::new(TestError(error_message.to_string()))),
         }
     }
