@@ -1160,7 +1160,11 @@ mod tests {
             // Model a run that produced a statement output
             record_output: statement_output(3),
 
-            // TODO: expect the output includes 3?
+            // Note the the output does not include 3 (statement
+            // count) Rationale is if the record is statement count
+            // <n>, n will be updated to real count. If the record is
+            // statement ok (which means we don't care the number of
+            // affected rows), it won't be updated.
             expected: Some(
                 "statement ok\n\
                  insert into foo values(2);",
@@ -1179,7 +1183,6 @@ mod tests {
             // Model a run that produced a statement output
             record_output: statement_output(3),
 
-            // TODO: expect the output includes 3?
             expected: Some(
                 "statement ok\n\
                  insert into foo values(2);",
@@ -1198,7 +1201,7 @@ mod tests {
             // Model a run that produced an error message
             record_output: statement_output_error("foo"),
 
-            // TODO: expect the output includes foo?
+            // Input didn't have an expected error, so output is not to expect the message
             expected: Some(
                 "statement error\n\
                  insert into foo values(2);",
