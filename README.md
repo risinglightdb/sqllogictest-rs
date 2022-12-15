@@ -2,21 +2,22 @@
 
 [![Crate](https://img.shields.io/crates/v/sqllogictest.svg)](https://crates.io/crates/sqllogictest)
 [![Docs](https://docs.rs/sqllogictest/badge.svg)](https://docs.rs/sqllogictest)
-[![CI](https://github.com/singularity-data/sqllogictest-rs/workflows/CI/badge.svg?branch=main)](https://github.com/singularity-data/sqllogictest-rs/actions)
+[![CI](https://github.com/risinglightdb/sqllogictest-rs/workflows/CI/badge.svg?branch=main)](https://github.com/risinglightdb/sqllogictest-rs/actions)
 
 [Sqllogictest][Sqllogictest] is a testing framework to verify the correctness of an SQL database.
 
-This crate implements a sqllogictest parser and runner in Rust.
+This repository provides two crates:
+- `sqllogictest` is a library containing sqllogictest parser and runner.
+- `sqllogictest-bin` is a CLI tool to run sqllogictests.
 
 [Sqllogictest]: https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki
 
-## Using as Library
+## Use the library
 
-Add the following lines to your `Cargo.toml` file:
+To add the dependency to your project:
 
-```toml
-[dependencies]
-sqllogictest = "0.9"
+```sh
+cargo add sqllogictest
 ```
 
 Implement `DB` trait for your database structure:
@@ -26,38 +27,32 @@ struct Database {...}
 
 impl sqllogictest::DB for Database {
     type Error = ...;
-    fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
+    fn run(&mut self, sql: &str) -> Result<sqllogictest::DBOutput, Self::Error> {
         ...
     }
 }
 ```
 
-It should take an SQL query string as input, and output the query result as a string.
-The runner verifies the results by comparing the string after normalization.
-
-Finally, create a `Runner` on your database instance, and then run the script:
+Then create a `Runner` on your database instance, and run the tests:
 
 ```rust
-let mut tester = sqllogictest::Runner::new(Database::new());
-let script = std::fs::read_to_string("script.slt").unwrap();
-tester.run_script(&script);
+let db = Database {...};
+let mut tester = sqllogictest::Runner::new(db);
+tester.run_file("script.slt").unwrap();
 ```
 
 You can also parse the script and execute the records separately:
 
 ```rust
-let records = sqllogictest::parse(&script).unwrap();
+let records = sqllogictest::parse_file("script.slt").unwrap();
 for record in records {
-    tester.run(record);
+    tester.run(record).unwrap();
 }
 ```
 
+## Use the CLI tool
 
-## Using as CLI
-
-This crate can also be used as a command-line tool.
-
-To install the binary, the `bin` feature is required:
+To install the binary:
 
 ```sh
 cargo install sqllogictest-bin
@@ -71,9 +66,11 @@ sqllogictest './test/**/*.slt'
 
 This command will run scripts in `test` directory against postgres with default connection settings.
 
-You can find more options in `sqllogictest --help`.
+You can find more options in `sqllogictest --help` .
 
-Note that only postgres is supported now.
+> **Note**
+>
+> Currently only postgres is supported in the CLI tool.
 
 ## `.slt` Test File Format Cookbook
 
@@ -111,19 +108,13 @@ statement error Multiple object drop not supported
 DROP VIEW foo, bar;
 ```
 
+## Used by
 
-## License
+- [RisingLight](https://github.com/risinglightdb/risinglight): An OLAP database system for educational purpose
+- [RisingWave](https://github.com/risingwavelabs/risingwave): The next-generation streaming database in the cloud
+- [DataFusion](https://github.com/apache/arrow-datafusion): Apache Arrow DataFusion SQL Query Engine
 
-Licensed under either of
-
- * Apache License, Version 2.0
-   ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
- * MIT license
-   ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
-
-at your option.
-
-## Contribution
+## Contributing
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
@@ -132,9 +123,6 @@ dual licensed as above, without any additional terms or conditions.
 Contributors should add a Signed-off-by line for [Developer Certificate of Origin](https://github.com/probot/dco#how-it-works)
 in their commits. Use `git commit -s` to sign off commits.
 
-## Publish the crate
+## License
 
-```
-cargo publish -p sqllogictest
-cargo publish -p sqllogictest-bin
-```
+This project is available under the terms of either the [Apache 2.0 license](LICENSE-APACHE) or the [MIT license](LICENSE-MIT).
