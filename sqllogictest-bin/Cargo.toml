@@ -30,7 +30,7 @@ rand = "0.8"
 rust_decimal = { version = "1.7.0", features = ["tokio-pg"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqllogictest = { path = "../sqllogictest", version = "0.9" }
+sqllogictest = { path = "../sqllogictest", version = "0.10" }
 tempfile = "3"
 thiserror = "1"
 tokio = { version = "1", features = [
@@ -43,3 +43,4 @@ tokio = { version = "1", features = [
 ] }
 tokio-postgres = { version = "0.7" }
 tokio-util = { version = "0.7", features = ["codec"] }
+fs-err = "2.9.0"

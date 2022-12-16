@@ -1,7 +1,7 @@
 mod engines;
 
+use fs_err::{File, OpenOptions};
 use std::collections::BTreeMap;
-use std::fs::{File, OpenOptions};
 use std::io::{stdout, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -403,6 +403,7 @@ async fn connect_and_run_test_file(
     Ok(result)
 }
 
+/// Different from [`Runner::run_file_async`], we re-implement it here to print some progress information.
 async fn run_test_file<T: std::io::Write, D: AsyncDB>(
     out: &mut T,
     mut runner: Runner<D>,
@@ -504,6 +505,7 @@ fn finish_test_file<T: std::io::Write>(
     Ok::<_, anyhow::Error>(())
 }
 
+/// Different from [`sqllogictest::update_test_file`], we re-implement it here to print some progress information.
 async fn update_test_file<T: std::io::Write, D: AsyncDB>(
     out: &mut T,
     mut runner: Runner<D>,
@@ -567,7 +569,7 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
             }
         }
 
-        std::fs::rename(outfilename, filename)?;
+        fs_err::rename(outfilename, filename)?;
 
         Ok(())
     }
@@ -576,12 +578,14 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
         filename: String,
         outfilename: PathBuf,
         outfile: File,
+        halt: bool,
     }
     let (outfilename, outfile) = create_outfile(filename)?;
     let mut stack = vec![Item {
         filename: filename.to_string_lossy().to_string(),
         outfilename,
         outfile,
+        halt: false,
     }];
 
     for record in records {
@@ -589,6 +593,7 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
             filename,
             outfilename,
             outfile,
+            halt,
         } = stack.last_mut().unwrap();
 
         match &record {
@@ -598,6 +603,7 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
                     filename: filename.clone(),
                     outfilename,
                     outfile,
+                    halt: false,
                 });
 
                 begin_times.push(Instant::now());
@@ -621,6 +627,15 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
                 finish_test_file(out, &mut begin_times, &mut did_pop, file)?;
             }
             _ => {
+                if *halt {
+                    writeln!(outfile, "{}", record)?;
+                    continue;
+                }
+                if matches!(record, Record::Halt { .. }) {
+                    *halt = true;
+                    writeln!(outfile, "{}", record)?;
+                    continue;
+                }
                 update_record(outfile, &mut runner, record, format)
                     .await
                     .context(format!("failed to run `{}`", style(filename).bold()))?;
@@ -639,6 +654,7 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
         filename,
         outfilename,
         outfile,
+        halt: _,
     } = stack.last_mut().unwrap();
     override_with_outfile(filename, outfilename, outfile)?;
 

@@ -1030,6 +1030,144 @@ pub fn update_record_with_output(
     }
 }
 
+/// Updates a test file with the output produced by a Database. It is an utility function wrapping
+/// [`update_test_file_with_runner`].
+///
+/// Specifically, it will create `"{filename}.temp"` to buffer the updated records and then override the
+/// original file with it.
+///
+/// Some other notes:
+/// - empty lines at the end of the file are cleaned.
+/// - `halt` and `include` are correctly handled.
+pub async fn update_test_file<D: AsyncDB>(
+    filename: impl AsRef<Path>,
+    mut runner: Runner<D>,
+    col_separator: &str,
+    validator: Validator,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use fs_err::{File, OpenOptions};
+    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::path::PathBuf;
+
+    fn create_outfile(filename: impl AsRef<Path>) -> std::io::Result<(PathBuf, File)> {
+        let filename = filename.as_ref();
+        let outfilename = filename.file_name().unwrap().to_str().unwrap().to_owned() + ".temp";
+        let outfilename = filename.parent().unwrap().join(&outfilename);
+        // create a temp file in read-write mode
+        let outfile = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .read(true)
+            .open(&outfilename)?;
+        Ok((outfilename, outfile))
+    }
+
+    fn override_with_outfile(
+        filename: &String,
+        outfilename: &PathBuf,
+        outfile: &mut File,
+    ) -> std::io::Result<()> {
+        // check whether outfile ends with multiple newlines, which happens if
+        // - the last record is statement/query
+        // - the original file ends with multiple newlines
+
+        const N: usize = 8;
+        let mut buf = [0u8; N];
+        loop {
+            outfile.seek(SeekFrom::End(-(N as i64))).unwrap();
+            outfile.read_exact(&mut buf).unwrap();
+            let num_newlines = buf.iter().rev().take_while(|&&b| b == b'\n').count();
+            assert!(num_newlines > 0);
+
+            if num_newlines > 1 {
+                // if so, remove the last ones
+                outfile
+                    .set_len(outfile.metadata().unwrap().len() - num_newlines as u64 + 1)
+                    .unwrap();
+            }
+
+            if num_newlines == 1 || num_newlines < N {
+                break;
+            }
+        }
+
+        outfile.flush()?;
+        fs_err::rename(outfilename, filename)?;
+
+        Ok(())
+    }
+
+    struct Item {
+        filename: String,
+        outfilename: PathBuf,
+        outfile: File,
+        halt: bool,
+    }
+
+    let filename = filename.as_ref();
+    let records = parse_file(filename)?;
+
+    let (outfilename, outfile) = create_outfile(filename)?;
+    let mut stack = vec![Item {
+        filename: filename.to_string_lossy().to_string(),
+        outfilename,
+        outfile,
+        halt: false,
+    }];
+
+    for record in records {
+        let Item {
+            filename,
+            outfilename,
+            outfile,
+            halt,
+        } = stack.last_mut().unwrap();
+
+        match &record {
+            Record::Injected(Injected::BeginInclude(filename)) => {
+                let (outfilename, outfile) = create_outfile(filename)?;
+                stack.push(Item {
+                    filename: filename.clone(),
+                    outfilename,
+                    outfile,
+                    halt: false,
+                });
+            }
+            Record::Injected(Injected::EndInclude(_)) => {
+                override_with_outfile(filename, outfilename, outfile)?;
+                stack.pop();
+            }
+            _ => {
+                if *halt {
+                    writeln!(outfile, "{}", record)?;
+                    continue;
+                }
+                if matches!(record, Record::Halt { .. }) {
+                    *halt = true;
+                    writeln!(outfile, "{}", record)?;
+                    continue;
+                }
+                let record_output = runner.apply_record(record.clone()).await;
+                let record =
+                    update_record_with_output(&record, &record_output, col_separator, validator)
+                        .unwrap_or(record);
+                writeln!(outfile, "{}", record)?;
+            }
+        }
+    }
+
+    let Item {
+        filename,
+        outfilename,
+        outfile,
+        halt: _,
+    } = stack.last_mut().unwrap();
+    override_with_outfile(filename, outfilename, outfile)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

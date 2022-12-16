@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2022-12-15
+
+- Improve the ability to unparse and update the test files. Mainly add `update_record_with_output` and `update_test_file` to the library. 
+
+  More details:
+  * Add `impl Display` for `Record` (refactor `unparse`).
+  * Add `Record::Whitespace` so the whitespace in the original files can be reconstructed during `unparse`.
+  * Add tests for unparsing and updating records.
+  * Refactor and fix the behavior about newlines and `halt` for CLI options `--override` and `--format`.
+- Fix: `hash-threshold` should be compared with the number of values instead of the number of rows.
+- **Breaking change**: The type of `Validator` is changed from `fn(&Vec<String>, &Vec<String>) -> bool` to `fn(&[Vec<String>], &[String]) -> bool`. Also added a `default_validator`.
+
+Thanks to the contributions of @alamb and @xudong963 .
+
 ## [0.9.0] - 2022-12-07
 
 - Improve the format and color handling for errors.
