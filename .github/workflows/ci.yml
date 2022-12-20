@@ -31,11 +31,6 @@ jobs:
         with:
           command: clippy
           args: --all-targets -- -D warnings
-      - name: Clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --all-targets -- -D warnings
 
   test:
     runs-on: ubuntu-20.04
