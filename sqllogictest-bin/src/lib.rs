@@ -529,7 +529,7 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
     fn create_outfile(filename: impl AsRef<Path>) -> std::io::Result<(PathBuf, File)> {
         let filename = filename.as_ref();
         let outfilename = filename.file_name().unwrap().to_str().unwrap().to_owned() + ".temp";
-        let outfilename = filename.parent().unwrap().join(&outfilename);
+        let outfilename = filename.parent().unwrap().join(outfilename);
         // create a temp file in read-write mode
         let outfile = OpenOptions::new()
             .write(true)
