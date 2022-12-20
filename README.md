@@ -113,6 +113,7 @@ DROP VIEW foo, bar;
 - [RisingLight](https://github.com/risinglightdb/risinglight): An OLAP database system for educational purpose
 - [RisingWave](https://github.com/risingwavelabs/risingwave): The next-generation streaming database in the cloud
 - [DataFusion](https://github.com/apache/arrow-datafusion): Apache Arrow DataFusion SQL Query Engine
+- [Databend](https://github.com/datafuselabs/databend): A powerful cloud data warehouse
 
 ## Contributing
 
