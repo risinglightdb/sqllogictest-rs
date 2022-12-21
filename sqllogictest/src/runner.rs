@@ -283,7 +283,7 @@ pub enum TestErrorKind {
     },
     // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
     #[error(
-        "query result mismatch:\n[SQL] {sql}\n[Diff] (-excepted|+actual)\n{}",
+        "query result mismatch:\n[SQL] {sql}\n[Diff] (-expected|+actual)\n{}",
         difference::Changeset::new(.expected, .actual, "\n").diffs.iter().format_with("\n", |diff, f| format_diff(diff, f, false))
     )]
     QueryResultMismatch {
