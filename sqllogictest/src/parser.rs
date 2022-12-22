@@ -1,14 +1,15 @@
 //! Sqllogictest parser.
-use derivative::Derivative;
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::ColumnType;
-use crate::ParseErrorKind::InvalidIncludeFile;
+use derivative::Derivative;
 use itertools::Itertools;
 use regex::Regex;
+
+use crate::ColumnType;
+use crate::ParseErrorKind::InvalidIncludeFile;
 
 /// The location in source file.
 #[derive(Debug, PartialEq, Eq, Clone)]
