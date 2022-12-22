@@ -1033,21 +1033,22 @@ pub fn update_record_with_output(
 /// Updates a test file with the output produced by a Database. It is an utility function wrapping
 /// [`update_test_file_with_runner`].
 ///
-/// Specifically, it will create `"{filename}.temp"` to buffer the updated records and then override the
-/// original file with it.
+/// Specifically, it will create `"{filename}.temp"` to buffer the updated records and then override
+/// the original file with it.
 ///
 /// Some other notes:
 /// - empty lines at the end of the file are cleaned.
 /// - `halt` and `include` are correctly handled.
 pub async fn update_test_file<D: AsyncDB>(
     filename: impl AsRef<Path>,
-    mut runner: Runner<D>,
+    runner: &mut Runner<D>,
     col_separator: &str,
     validator: Validator,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use fs_err::{File, OpenOptions};
     use std::io::{Read, Seek, SeekFrom, Write};
     use std::path::PathBuf;
+
+    use fs_err::{File, OpenOptions};
 
     fn create_outfile(filename: impl AsRef<Path>) -> std::io::Result<(PathBuf, File)> {
         let filename = filename.as_ref();

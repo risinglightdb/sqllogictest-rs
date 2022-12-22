@@ -1,6 +1,5 @@
 mod engines;
 
-use fs_err::{File, OpenOptions};
 use std::collections::BTreeMap;
 use std::io::{stdout, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -11,6 +10,7 @@ use chrono::Local;
 use clap::{ArgEnum, Parser};
 use console::style;
 use engines::{EngineConfig, EngineType};
+use fs_err::{File, OpenOptions};
 use futures::StreamExt;
 use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
@@ -403,7 +403,8 @@ async fn connect_and_run_test_file(
     Ok(result)
 }
 
-/// Different from [`Runner::run_file_async`], we re-implement it here to print some progress information.
+/// Different from [`Runner::run_file_async`], we re-implement it here to print some progress
+/// information.
 async fn run_test_file<T: std::io::Write, D: AsyncDB>(
     out: &mut T,
     mut runner: Runner<D>,
@@ -505,7 +506,8 @@ fn finish_test_file<T: std::io::Write>(
     Ok::<_, anyhow::Error>(())
 }
 
-/// Different from [`sqllogictest::update_test_file`], we re-implement it here to print some progress information.
+/// Different from [`sqllogictest::update_test_file`], we re-implement it here to print some
+/// progress information.
 async fn update_test_file<T: std::io::Write, D: AsyncDB>(
     out: &mut T,
     mut runner: Runner<D>,
