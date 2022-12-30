@@ -7,12 +7,32 @@ use async_trait::async_trait;
 use bytes::{Buf, BytesMut};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use sqllogictest::{AsyncDB, ColumnType, DBOutput};
+use sqllogictest::{AsyncDB, DBOutput};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio_util::codec::{Decoder, FramedRead};
 
+/// Communicates with a subprocess via its stdin/stdout.
+///
+/// # Protocol
+///
+/// Sends JSON stream:
+/// ```
+/// {"sql":"SELECT 1,2"}
+/// ```
+///
+/// Receives JSON stream:
+///
+/// If the query succeeds:
+/// ```
+/// {"result":[["1","2"]]}
+/// ```
+///
+/// If the query fails:
+/// ```
+/// {"err":"..."}
+/// ```
 pub struct ExternalDriver {
     child: Child,
     stdin: ChildStdin,
@@ -27,7 +47,7 @@ struct Input {
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Output {
-    Success { result: String },
+    Success { result: Vec<Vec<String>> },
     Failed { err: String },
 }
 
@@ -83,10 +103,9 @@ impl AsyncDB for ExternalDriver {
             None => return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into()),
         };
         match output {
-            // FIXME: split result into columns and rows?
             Output::Success { result } => Ok(DBOutput::Rows {
-                types: vec![ColumnType::Any],
-                rows: vec![vec![result]],
+                types: vec![], // FIXME: Fix it after https://github.com/risinglightdb/sqllogictest-rs/issues/36 is resolved.
+                rows: result,
             }),
             Output::Failed { err } => Err(ExternalDriverError::Sql(err)),
         }
