@@ -512,15 +512,6 @@ impl<D: AsyncDB> Runner<D> {
                     }
                 };
 
-                // trim strings
-                for row in &mut rows {
-                    for value in row {
-                        if value.trim() != value {
-                            *value = value.trim().to_string();
-                        }
-                    }
-                }
-
                 match sort_mode.as_ref().or(self.sort_mode.as_ref()) {
                     None | Some(SortMode::NoSort) => {}
                     Some(SortMode::RowSort) => {
