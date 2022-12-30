@@ -18,19 +18,19 @@ use tokio_util::codec::{Decoder, FramedRead};
 /// # Protocol
 ///
 /// Sends JSON stream:
-/// ```
+/// ```json
 /// {"sql":"SELECT 1,2"}
 /// ```
 ///
 /// Receives JSON stream:
 ///
 /// If the query succeeds:
-/// ```
+/// ```json
 /// {"result":[["1","2"]]}
 /// ```
 ///
 /// If the query fails:
-/// ```
+/// ```json
 /// {"err":"..."}
 /// ```
 pub struct ExternalDriver {
