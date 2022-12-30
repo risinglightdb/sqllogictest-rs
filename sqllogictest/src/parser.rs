@@ -397,7 +397,7 @@ pub fn parse(script: &str) -> Result<Vec<Record>, ParseError> {
 
 #[allow(clippy::collapsible_match)]
 fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> {
-    let mut lines = script.split('\n').enumerate();
+    let mut lines = script.lines().enumerate();
     let mut records = vec![];
     let mut conditions = vec![];
 
@@ -638,7 +638,7 @@ mod tests {
     #[test]
     fn test_include_glob() {
         let records = parse_file("../examples/include/include_1.slt").unwrap();
-        assert_eq!(16, records.len());
+        assert_eq!(15, records.len());
     }
 
     #[test]
