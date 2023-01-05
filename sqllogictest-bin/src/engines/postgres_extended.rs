@@ -232,6 +232,7 @@ impl sqllogictest::AsyncDB for PostgresExtended {
                 || lower_sql.starts_with("show")
                 || lower_sql.starts_with("with")
                 || lower_sql.starts_with("describe")
+                || lower_sql.contains("returning")
         };
         if !is_query_sql {
             self.client.execute(sql, &[]).await?;

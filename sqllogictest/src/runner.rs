@@ -351,7 +351,7 @@ impl<'a> Display for TestErrorKindDisplay<'a> {
             } => write!(
                 f,
                 "query result mismatch:\n[SQL] {sql}\n[Diff] ({}|{})\n{}",
-                "-excepted".bright_red(),
+                "-expected".bright_red(),
                 "+actual".bright_green(),
                 difference::Changeset::new(expected, actual, "\n")
                     .diffs

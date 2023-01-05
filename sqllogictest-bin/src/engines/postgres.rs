@@ -59,6 +59,7 @@ impl sqllogictest::AsyncDB for Postgres {
                 || lower_sql.starts_with("show")
                 || lower_sql.starts_with("with")
                 || lower_sql.starts_with("describe")
+                || lower_sql.contains("returning")
         };
 
         // NOTE:
