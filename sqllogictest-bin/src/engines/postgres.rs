@@ -52,19 +52,6 @@ impl sqllogictest::AsyncDB for Postgres {
     async fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error> {
         let mut output = vec![];
 
-        let is_query_sql = {
-            let lower_sql = sql.trim_start().to_ascii_lowercase();
-            lower_sql.starts_with("select")
-                || lower_sql.starts_with("values")
-                || lower_sql.starts_with("show")
-                || lower_sql.starts_with("with")
-                || lower_sql.starts_with("describe")
-                || ((lower_sql.starts_with("insert")
-                    || lower_sql.starts_with("update")
-                    || lower_sql.starts_with("delete"))
-                    && lower_sql.contains("returning"))
-        };
-
         // NOTE:
         // We use `simple_query` API which returns the query results as strings.
         // This means that we can not reformat values based on their type,
@@ -72,6 +59,7 @@ impl sqllogictest::AsyncDB for Postgres {
         // For example, postgres will output `t` as true and `f` as false,
         // thus we have to write `t`/`f` in the expected results.
         let rows = self.client.simple_query(sql).await?;
+        let mut cnt = 0;
         for row in rows {
             let mut row_vec = vec![];
             match row {
@@ -89,12 +77,9 @@ impl sqllogictest::AsyncDB for Postgres {
                         }
                     }
                 }
-                tokio_postgres::SimpleQueryMessage::CommandComplete(cnt) => {
-                    if is_query_sql {
-                        break;
-                    } else {
-                        return Ok(DBOutput::StatementComplete(cnt));
-                    }
+                tokio_postgres::SimpleQueryMessage::CommandComplete(cnt_) => {
+                    cnt = cnt_;
+                    break;
                 }
                 _ => unreachable!(),
             }
@@ -102,11 +87,7 @@ impl sqllogictest::AsyncDB for Postgres {
         }
 
         if output.is_empty() {
-            let stmt = self.client.prepare(sql).await?;
-            Ok(DBOutput::Rows {
-                types: vec![ColumnType::Any; stmt.columns().len()],
-                rows: vec![],
-            })
+            Ok(DBOutput::StatementComplete(cnt))
         } else {
             Ok(DBOutput::Rows {
                 types: vec![ColumnType::Any; output[0].len()],
