@@ -417,6 +417,12 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
             records.push(Record::Comment(comments));
         }
 
+        // Consider a case: the last line is a comment
+        // Then line will start with '#', but it has been process at above
+        if line.starts_with('#') {
+            continue;
+        }
+
         if line.is_empty() {
             records.push(Record::Newline);
             continue;
