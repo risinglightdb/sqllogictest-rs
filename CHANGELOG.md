@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2023-01-14
+
+This release contains some minor fixes.
+
+* fix: use `Vec<Vec<String>>` for external engine (JDBC)
+* fix: Use `lines()` instead of `split('\n')` in `parse_inner`. So the behavior can be correct on Windows.
+* fix: parse DML with `returning` as a query
+* A minor **breaking change**: `update_test_file` takes `&mut Runner` instead of its ownnership.
+
 ## [0.10.0] - 2022-12-15
 
 - Improve the ability to unparse and update the test files. Mainly add `update_record_with_output` and `update_test_file` to the library. 
