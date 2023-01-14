@@ -52,6 +52,8 @@ for record in records {
 
 ## Use the CLI tool
 
+![demo](./docs/demo.gif)
+
 To install the binary:
 
 ```sh
