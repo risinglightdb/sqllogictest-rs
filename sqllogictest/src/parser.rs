@@ -636,6 +636,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_trailing_comment() {
+        let script = "\
+# comment 1
+#  comment 2
+";
+        let records = parse(script).unwrap();
+        assert_eq!(
+            records,
+            vec![Record::Comment(vec![
+                " comment 1".to_string(),
+                "  comment 2".to_string(),
+            ]),]
+        );
+    }
+
+    #[test]
     fn test_include_glob() {
         let records = parse_file("../examples/include/include_1.slt").unwrap();
         assert_eq!(15, records.len());
