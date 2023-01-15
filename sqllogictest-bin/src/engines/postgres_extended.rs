@@ -4,11 +4,13 @@ use std::sync::Arc;
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
+use futures::{pin_mut, StreamExt};
 use pg_interval::Interval;
-use postgres_types::Type;
+use postgres_types::{ToSql, Type};
 use rust_decimal::Decimal;
 use sqllogictest::{ColumnType, DBOutput};
 use tokio::task::JoinHandle;
+use tokio_postgres::RawStreamItem;
 
 use crate::{DBConfig, Result};
 
@@ -224,26 +226,32 @@ impl sqllogictest::AsyncDB for PostgresExtended {
 
     async fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error> {
         let mut output = vec![];
+        let mut any_row = false;
 
-        let is_query_sql = {
-            let lower_sql = sql.trim_start().to_ascii_lowercase();
-            lower_sql.starts_with("select")
-                || lower_sql.starts_with("values")
-                || lower_sql.starts_with("show")
-                || lower_sql.starts_with("with")
-                || lower_sql.starts_with("describe")
-                || ((lower_sql.starts_with("insert")
-                    || lower_sql.starts_with("update")
-                    || lower_sql.starts_with("delete"))
-                    && lower_sql.contains("returning"))
-        };
-        if !is_query_sql {
-            self.client.execute(sql, &[]).await?;
-            return Ok(DBOutput::StatementComplete(0));
-        }
+        let stmt = self.client.prepare(sql).await?;
+        let rows = self
+            .client
+            .query_raw(&stmt, std::iter::empty::<&(dyn ToSql + Sync)>())
+            .await?
+            .into_raw();
 
-        let rows = self.client.query(sql, &[]).await?;
-        for row in rows {
+        pin_mut!(rows);
+
+        while let Some(row) = rows.next().await {
+            let row = {
+                match row? {
+                    RawStreamItem::Row(row) => row,
+                    RawStreamItem::RowsAffected(num) => {
+                        if !any_row {
+                            return Ok(DBOutput::StatementComplete(num));
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            };
+            any_row = true;
+
             let mut row_vec = vec![];
 
             for (idx, column) in row.columns().iter().enumerate() {
@@ -342,7 +350,6 @@ impl sqllogictest::AsyncDB for PostgresExtended {
         }
 
         if output.is_empty() {
-            let stmt = self.client.prepare(sql).await?;
             Ok(DBOutput::Rows {
                 types: vec![ColumnType::Any; stmt.columns().len()],
                 rows: vec![],

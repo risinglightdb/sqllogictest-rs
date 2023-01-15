@@ -8,3 +8,7 @@ homepage = "https://github.com/risinglightdb/sqllogictest-rs"
 keywords = ["sql", "database", "parser", "cli"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/risinglightdb/sqllogictest-rs"
+
+[patch.crates-io]
+tokio-postgres = { git = "https://github.com/risinglightdb/rust-postgres", rev = "0d1fa4148df7188b5becac061229c2b09fea834b" }
+postgres-types = { git = "https://github.com/risinglightdb/rust-postgres", rev = "0d1fa4148df7188b5becac061229c2b09fea834b" }
