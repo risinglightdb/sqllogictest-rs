@@ -397,24 +397,24 @@ pub fn parse(script: &str) -> Result<Vec<Record>, ParseError> {
 
 #[allow(clippy::collapsible_match)]
 fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> {
-    let mut lines = script.lines().enumerate();
+    let mut lines = script.lines().enumerate().peekable();
     let mut records = vec![];
     let mut conditions = vec![];
+    let mut comments = vec![];
 
-    while let Some((mut num, mut line)) = lines.next() {
+    while let Some((num, line)) = lines.next() {
         if let Some(text) = line.strip_prefix('#') {
-            let mut comments = vec![text.to_string()];
-            for (num_, line_) in lines.by_ref() {
-                num = num_;
-                line = line_;
-                if let Some(text) = line.strip_prefix('#') {
-                    comments.push(text.to_string());
-                } else {
-                    break;
-                }
+            comments.push(text.to_string());
+            if lines.peek().is_none() {
+                records.push(Record::Comment(comments));
+                comments = vec![];
             }
+            continue;
+        }
 
+        if !comments.is_empty() {
             records.push(Record::Comment(comments));
+            comments = vec![];
         }
 
         if line.is_empty() {
@@ -634,6 +634,22 @@ mod tests {
     use std::io::Write;
 
     use super::*;
+
+    #[test]
+    fn test_trailing_comment() {
+        let script = "\
+# comment 1
+#  comment 2
+";
+        let records = parse(script).unwrap();
+        assert_eq!(
+            records,
+            vec![Record::Comment(vec![
+                " comment 1".to_string(),
+                "  comment 2".to_string(),
+            ]),]
+        );
+    }
 
     #[test]
     fn test_include_glob() {

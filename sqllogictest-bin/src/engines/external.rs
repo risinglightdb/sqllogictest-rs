@@ -104,7 +104,7 @@ impl AsyncDB for ExternalDriver {
         };
         match output {
             Output::Success { result } => Ok(DBOutput::Rows {
-                types: vec![], // FIXME: Fix it after https://github.com/risinglightdb/sqllogictest-rs/issues/36 is resolved.
+                types: vec![], /* FIXME: Fix it after https://github.com/risinglightdb/sqllogictest-rs/issues/36 is resolved. */
                 rows: result,
             }),
             Output::Failed { err } => Err(ExternalDriverError::Sql(err)),
