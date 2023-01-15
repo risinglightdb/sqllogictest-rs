@@ -397,30 +397,24 @@ pub fn parse(script: &str) -> Result<Vec<Record>, ParseError> {
 
 #[allow(clippy::collapsible_match)]
 fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> {
-    let mut lines = script.lines().enumerate();
+    let mut lines = script.lines().enumerate().peekable();
     let mut records = vec![];
     let mut conditions = vec![];
+    let mut comments = vec![];
 
-    while let Some((mut num, mut line)) = lines.next() {
+    while let Some((num, line)) = lines.next() {
         if let Some(text) = line.strip_prefix('#') {
-            let mut comments = vec![text.to_string()];
-            for (num_, line_) in lines.by_ref() {
-                num = num_;
-                line = line_;
-                if let Some(text) = line.strip_prefix('#') {
-                    comments.push(text.to_string());
-                } else {
-                    break;
-                }
+            comments.push(text.to_string());
+            if lines.peek().is_none() {
+                records.push(Record::Comment(comments));
+                comments = vec![];
             }
-
-            records.push(Record::Comment(comments));
+            continue;
         }
 
-        // Consider a case: the last line is a comment
-        // Then line will start with '#', but it has been process at above
-        if line.starts_with('#') {
-            continue;
+        if !comments.is_empty() {
+            records.push(Record::Comment(comments));
+            comments = vec![];
         }
 
         if line.is_empty() {
