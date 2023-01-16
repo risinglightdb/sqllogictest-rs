@@ -10,7 +10,6 @@ use postgres_types::{ToSql, Type};
 use rust_decimal::Decimal;
 use sqllogictest::{ColumnType, DBOutput};
 use tokio::task::JoinHandle;
-use tokio_postgres::RawStreamItem;
 
 use crate::{DBConfig, Result};
 
@@ -226,31 +225,17 @@ impl sqllogictest::AsyncDB for PostgresExtended {
 
     async fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error> {
         let mut output = vec![];
-        let mut any_row = false;
 
         let stmt = self.client.prepare(sql).await?;
         let rows = self
             .client
             .query_raw(&stmt, std::iter::empty::<&(dyn ToSql + Sync)>())
-            .await?
-            .into_raw();
+            .await?;
 
         pin_mut!(rows);
 
         while let Some(row) = rows.next().await {
-            let row = {
-                match row? {
-                    RawStreamItem::Row(row) => row,
-                    RawStreamItem::RowsAffected(num) => {
-                        if !any_row {
-                            return Ok(DBOutput::StatementComplete(num));
-                        } else {
-                            break;
-                        }
-                    }
-                }
-            };
-            any_row = true;
+            let row = row?;
 
             let mut row_vec = vec![];
 
@@ -350,10 +335,13 @@ impl sqllogictest::AsyncDB for PostgresExtended {
         }
 
         if output.is_empty() {
-            Ok(DBOutput::Rows {
-                types: vec![ColumnType::Any; stmt.columns().len()],
-                rows: vec![],
-            })
+            match rows.rows_affected() {
+                Some(rows) => Ok(DBOutput::StatementComplete(rows)),
+                None => Ok(DBOutput::Rows {
+                    types: vec![ColumnType::Any; stmt.columns().len()],
+                    rows: vec![],
+                }),
+            }
         } else {
             Ok(DBOutput::Rows {
                 types: vec![ColumnType::Any; output[0].len()],

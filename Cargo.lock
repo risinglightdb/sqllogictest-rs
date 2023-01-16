@@ -1001,7 +1001,7 @@ dependencies = [
 [[package]]
 name = "postgres-derive"
 version = "0.4.3"
-source = "git+https://github.com/risinglightdb/rust-postgres?rev=0d1fa4148df7188b5becac061229c2b09fea834b#0d1fa4148df7188b5becac061229c2b09fea834b"
+source = "git+https://github.com/risinglightdb/rust-postgres?rev=205af89aafb8fec5e8a75599e0401d5797932f13#205af89aafb8fec5e8a75599e0401d5797932f13"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1011,7 +1011,7 @@ dependencies = [
 [[package]]
 name = "postgres-protocol"
 version = "0.6.4"
-source = "git+https://github.com/risinglightdb/rust-postgres?rev=0d1fa4148df7188b5becac061229c2b09fea834b#0d1fa4148df7188b5becac061229c2b09fea834b"
+source = "git+https://github.com/risinglightdb/rust-postgres?rev=205af89aafb8fec5e8a75599e0401d5797932f13#205af89aafb8fec5e8a75599e0401d5797932f13"
 dependencies = [
  "base64",
  "byteorder",
@@ -1028,7 +1028,7 @@ dependencies = [
 [[package]]
 name = "postgres-types"
 version = "0.2.4"
-source = "git+https://github.com/risinglightdb/rust-postgres?rev=0d1fa4148df7188b5becac061229c2b09fea834b#0d1fa4148df7188b5becac061229c2b09fea834b"
+source = "git+https://github.com/risinglightdb/rust-postgres?rev=205af89aafb8fec5e8a75599e0401d5797932f13#205af89aafb8fec5e8a75599e0401d5797932f13"
 dependencies = [
  "bytes",
  "chrono",
@@ -1600,7 +1600,7 @@ dependencies = [
 [[package]]
 name = "tokio-postgres"
 version = "0.7.7"
-source = "git+https://github.com/risinglightdb/rust-postgres?rev=0d1fa4148df7188b5becac061229c2b09fea834b#0d1fa4148df7188b5becac061229c2b09fea834b"
+source = "git+https://github.com/risinglightdb/rust-postgres?rev=205af89aafb8fec5e8a75599e0401d5797932f13#205af89aafb8fec5e8a75599e0401d5797932f13"
 dependencies = [
  "async-trait",
  "byteorder",
