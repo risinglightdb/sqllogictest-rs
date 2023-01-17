@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
-use anyhow::Context;
 use async_trait::async_trait;
 use sqllogictest::{ColumnType, DBOutput};
 use tokio::task::JoinHandle;
 
-use crate::{DBConfig, Result};
+use crate::DBConfig;
+
+pub type Result<T> = std::result::Result<T, tokio_postgres::Error>;
 
 pub struct Postgres {
     client: Arc<tokio_postgres::Client>,
@@ -13,7 +14,7 @@ pub struct Postgres {
 }
 
 impl Postgres {
-    pub(super) async fn connect(config: &DBConfig) -> Result<Self> {
+    pub async fn connect(config: &DBConfig) -> Result<Self> {
         let (host, port) = config.random_addr();
 
         let (client, connection) = tokio_postgres::Config::new()
@@ -23,8 +24,7 @@ impl Postgres {
             .user(&config.user)
             .password(&config.pass)
             .connect(tokio_postgres::NoTls)
-            .await
-            .context(format!("failed to connect to postgres at {host}:{port}"))?;
+            .await?;
 
         let join_handle = tokio::spawn(async move {
             if let Err(e) = connection.await {
@@ -36,6 +36,11 @@ impl Postgres {
             client: Arc::new(client),
             join_handle,
         })
+    }
+
+    /// Returns a reference of the inner Postgres client.
+    pub fn pg_client(&self) -> &tokio_postgres::Client {
+        &self.client
     }
 }
 
@@ -49,7 +54,7 @@ impl Drop for Postgres {
 impl sqllogictest::AsyncDB for Postgres {
     type Error = tokio_postgres::error::Error;
 
-    async fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error> {
+    async fn run(&mut self, sql: &str) -> Result<DBOutput> {
         let mut output = vec![];
 
         // NOTE:

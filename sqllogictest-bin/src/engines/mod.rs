@@ -1,6 +1,5 @@
-mod postgres;
 use clap::ArgEnum;
-use postgres::Postgres;
+use sqllogictest_engine::postgres::Postgres;
 use tokio::process::Command;
 mod postgres_extended;
 use std::fmt::Display;
