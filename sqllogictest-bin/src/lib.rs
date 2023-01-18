@@ -14,10 +14,10 @@ use fs_err::{File, OpenOptions};
 use futures::StreamExt;
 use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
+use rand::seq::SliceRandom;
 use sqllogictest::{
     default_validator, update_record_with_output, AsyncDB, Injected, Record, Runner,
 };
-use sqllogictest_engine::DBConfig;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
 #[must_use]
@@ -94,6 +94,28 @@ struct Opt {
     /// Reformats the test files.
     #[clap(long)]
     format: bool,
+}
+
+/// Connection configuration.
+#[derive(Clone)]
+pub struct DBConfig {
+    /// The database server host and port. Will randomly choose one if multiple are given.
+    pub addrs: Vec<(String, u16)>,
+    /// The database name to connect.
+    pub db: String,
+    /// The database username.
+    pub user: String,
+    /// The database password.
+    pub pass: String,
+}
+
+impl DBConfig {
+    pub fn random_addr(&self) -> (&str, u16) {
+        self.addrs
+            .choose(&mut rand::thread_rng())
+            .map(|(host, port)| (host.as_ref(), *port))
+            .unwrap()
+    }
 }
 
 pub async fn main_okk() -> Result<()> {

@@ -1,12 +1,10 @@
 use clap::ArgEnum;
-use sqllogictest_engine::postgres::Postgres;
-use tokio::process::Command;
-mod postgres_extended;
+use sqllogictest_engine::postgres::{PostgresExtended, PostgresSimple};
 use std::fmt::Display;
+use tokio::process::Command;
 mod external;
 
 use async_trait::async_trait;
-use postgres_extended::PostgresExtended;
 use sqllogictest::{AsyncDB, DBOutput};
 
 use self::external::ExternalDriver;
@@ -27,16 +25,32 @@ pub enum EngineConfig {
 }
 
 enum Engines {
-    Postgres(Postgres),
+    Postgres(PostgresSimple),
     PostgresExtended(PostgresExtended),
     External(ExternalDriver),
 }
 
+impl From<&DBConfig> for tokio_postgres::Config {
+    fn from(config: &DBConfig) -> Self {
+        let (host, port) = config.random_addr();
+
+        let mut pg_config = tokio_postgres::Config::new();
+        pg_config
+            .host(host)
+            .port(port)
+            .dbname(&config.db)
+            .user(&config.user)
+            .password(&config.pass);
+
+        pg_config
+    }
+}
+
 pub(super) async fn connect(engine: &EngineConfig, config: &DBConfig) -> Result<impl AsyncDB> {
     Ok(match engine {
-        EngineConfig::Postgres => Engines::Postgres(Postgres::connect(config).await?),
+        EngineConfig::Postgres => Engines::Postgres(PostgresSimple::connect(config.into()).await?),
         EngineConfig::PostgresExtended => {
-            Engines::PostgresExtended(PostgresExtended::connect(config).await?)
+            Engines::PostgresExtended(PostgresExtended::connect(config.into()).await?)
         }
         EngineConfig::External(cmd_tmpl) => {
             let (host, port) = config.random_addr();
