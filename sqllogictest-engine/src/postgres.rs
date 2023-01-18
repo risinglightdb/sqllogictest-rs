@@ -1,25 +1,33 @@
 mod extended;
 mod simple;
 
-use std::{marker::PhantomData, sync::Arc};
+use std::marker::PhantomData;
+use std::sync::Arc;
 
 use tokio::task::JoinHandle;
 
-pub type Result<T> = std::result::Result<T, tokio_postgres::Error>;
+type Result<T> = std::result::Result<T, tokio_postgres::Error>;
 
+/// Marker type for the Postgres simple query protocol.
 pub struct Simple;
+/// Marker type for the Postgres extended query protocol.
 pub struct Extended;
 
+/// Generic Postgres engine based on the client from [`tokio_postgres`]. The protocol `P` can be
+/// either [`Simple`] or [`Extended`].
 pub struct Postgres<P> {
     client: Arc<tokio_postgres::Client>,
     join_handle: JoinHandle<()>,
-    protocol: PhantomData<P>,
+    _protocol: PhantomData<P>,
 }
 
+/// Postgres engine using the simple query protocol.
 pub type PostgresSimple = Postgres<Simple>;
+/// Postgres engine using the extended query protocol.
 pub type PostgresExtended = Postgres<Extended>;
 
 impl<P> Postgres<P> {
+    /// Connects to the Postgres server with the given `config`.
     pub async fn connect(config: tokio_postgres::Config) -> Result<Self> {
         let (client, connection) = config.connect(tokio_postgres::NoTls).await?;
 
@@ -32,7 +40,7 @@ impl<P> Postgres<P> {
         Ok(Self {
             client: Arc::new(client),
             join_handle,
-            protocol: PhantomData,
+            _protocol: PhantomData,
         })
     }
 

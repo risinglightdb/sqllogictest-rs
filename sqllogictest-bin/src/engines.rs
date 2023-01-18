@@ -1,13 +1,12 @@
-use clap::ArgEnum;
-use sqllogictest_engine::postgres::{PostgresExtended, PostgresSimple};
 use std::fmt::Display;
-use tokio::process::Command;
-mod external;
 
 use async_trait::async_trait;
+use clap::ArgEnum;
 use sqllogictest::{AsyncDB, DBOutput};
+use sqllogictest_engine::external::ExternalDriver;
+use sqllogictest_engine::postgres::{PostgresExtended, PostgresSimple};
+use tokio::process::Command;
 
-use self::external::ExternalDriver;
 use super::{DBConfig, Result};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
@@ -61,7 +60,7 @@ pub(super) async fn connect(engine: &EngineConfig, config: &DBConfig) -> Result<
                 .replace("{user}", &config.user)
                 .replace("{pass}", &config.pass);
             let mut cmd = Command::new("bash");
-            let cmd = cmd.args(["-c", &cmd_str]);
+            cmd.args(["-c", &cmd_str]);
             Engines::External(ExternalDriver::connect(cmd).await?)
         }
     })

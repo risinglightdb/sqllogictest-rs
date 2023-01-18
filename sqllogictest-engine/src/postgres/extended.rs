@@ -1,4 +1,5 @@
 use std::fmt::Write;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
@@ -316,5 +317,9 @@ impl sqllogictest::AsyncDB for Postgres<Extended> {
 
     fn engine_name(&self) -> &str {
         "postgres-extended"
+    }
+
+    async fn sleep(dur: Duration) {
+        tokio::time::sleep(dur).await
     }
 }

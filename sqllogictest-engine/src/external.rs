@@ -64,7 +64,8 @@ pub enum ExternalDriverError {
 type Result<T> = std::result::Result<T, ExternalDriverError>;
 
 impl ExternalDriver {
-    pub async fn connect(cmd: &mut Command) -> Result<Self> {
+    /// Spawn and pipe into the subprocess with the given `cmd`.
+    pub async fn connect(mut cmd: Command) -> Result<Self> {
         let cmd = cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
 
         let mut child = cmd.spawn()?;
