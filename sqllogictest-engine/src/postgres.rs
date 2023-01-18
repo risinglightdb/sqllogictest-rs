@@ -26,9 +26,12 @@ pub type PostgresSimple = Postgres<Simple>;
 /// Postgres engine using the extended query protocol.
 pub type PostgresExtended = Postgres<Extended>;
 
+/// Connection configuration. This is a re-export of [`tokio_postgres::Config`].
+pub type PostgresConfig = tokio_postgres::Config;
+
 impl<P> Postgres<P> {
     /// Connects to the Postgres server with the given `config`.
-    pub async fn connect(config: tokio_postgres::Config) -> Result<Self> {
+    pub async fn connect(config: PostgresConfig) -> Result<Self> {
         let (client, connection) = config.connect(tokio_postgres::NoTls).await?;
 
         let join_handle = tokio::spawn(async move {

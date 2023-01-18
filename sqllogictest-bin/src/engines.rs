@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use clap::ArgEnum;
 use sqllogictest::{AsyncDB, DBOutput};
 use sqllogictest_engine::external::ExternalDriver;
-use sqllogictest_engine::postgres::{PostgresExtended, PostgresSimple};
+use sqllogictest_engine::postgres::{PostgresConfig, PostgresExtended, PostgresSimple};
 use tokio::process::Command;
 
 use super::{DBConfig, Result};
@@ -29,11 +29,11 @@ enum Engines {
     External(ExternalDriver),
 }
 
-impl From<&DBConfig> for tokio_postgres::Config {
+impl From<&DBConfig> for PostgresConfig {
     fn from(config: &DBConfig) -> Self {
         let (host, port) = config.random_addr();
 
-        let mut pg_config = tokio_postgres::Config::new();
+        let mut pg_config = PostgresConfig::new();
         pg_config
             .host(host)
             .port(port)

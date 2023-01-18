@@ -305,16 +305,15 @@ dependencies = [
 
 [[package]]
 name = "console"
-version = "0.15.2"
+version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c050367d967ced717c04b65d8c619d863ef9292ce0c5760028655a2fb298718c"
+checksum = "c3d79fbe8970a77e3e34151cc13d3b3e248aa0faaecb9f6091fa07ebefe5ad60"
 dependencies = [
  "encode_unicode",
  "lazy_static",
  "libc",
- "terminal_size",
  "unicode-width",
- "winapi",
+ "windows-sys",
 ]
 
 [[package]]
@@ -535,21 +534,6 @@ name = "futures-io"
 version = "0.3.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00f5fb52a06bdcadeb54e8d3671f8888a39697dcb0b81b23b55174030427f4eb"
-
-[[package]]
-name = "futures-lite"
-version = "1.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7694489acd39452c77daa48516b894c153f192c3578d5a839b62c58099fcbf48"
-dependencies = [
- "fastrand",
- "futures-core",
- "futures-io",
- "memchr",
- "parking",
- "pin-project-lite",
- "waker-fn",
-]
 
 [[package]]
 name = "futures-macro"
@@ -908,12 +892,6 @@ name = "owo-colors"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
-
-[[package]]
-name = "parking"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "427c3892f9e783d91cc128285287e70a59e206ca452770ece88a76f7a3eddd72"
 
 [[package]]
 name = "parking_lot"
@@ -1412,63 +1390,36 @@ version = "0.11.1"
 dependencies = [
  "anyhow",
  "async-trait",
- "bytes",
  "chrono",
  "clap 3.2.23",
  "console",
- "difference",
  "env_logger",
  "fs-err",
  "futures",
- "futures-lite",
  "glob",
- "humantime",
  "itertools",
- "log",
- "pg_interval",
- "postgres-types",
  "quick-junit",
  "rand",
- "rust_decimal",
- "serde",
- "serde_json",
  "sqllogictest",
  "sqllogictest-engine",
- "tempfile",
- "thiserror",
  "tokio",
- "tokio-postgres",
- "tokio-util",
 ]
 
 [[package]]
 name = "sqllogictest-engine"
 version = "0.11.1"
 dependencies = [
- "anyhow",
  "async-trait",
  "bytes",
  "chrono",
- "clap 3.2.23",
- "console",
- "difference",
- "env_logger",
- "fs-err",
  "futures",
- "futures-lite",
- "glob",
- "humantime",
- "itertools",
  "log",
  "pg_interval",
  "postgres-types",
- "quick-junit",
- "rand",
  "rust_decimal",
  "serde",
  "serde_json",
  "sqllogictest",
- "tempfile",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -1529,16 +1480,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bab24d30b911b2376f3a13cc2cd443142f0c81dda04c118693e35b3835757755"
 dependencies = [
  "winapi-util",
-]
-
-[[package]]
-name = "terminal_size"
-version = "0.1.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "633c1a546cee861a1a6d0dc69ebeca693bf4296661ba7852b9d21d159e0506df"
-dependencies = [
- "libc",
- "winapi",
 ]
 
 [[package]]
@@ -1770,12 +1711,6 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
-
-[[package]]
-name = "waker-fn"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d5b2c62b4012a3e1eca5a7e077d13b3bf498c4073e33ccd58626607748ceeca"
 
 [[package]]
 name = "wasi"
