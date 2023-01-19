@@ -531,9 +531,9 @@ impl<D: AsyncDB> Runner<D> {
                             md5.update(b"\n");
                         }
                     }
-                    let hash = md5.finalize();
+                    let hash = format!("{:2x}", md5.finalize());
                     rows = vec![vec![format!(
-                        "{} values hashing to {:?}",
+                        "{} values hashing to {}",
                         rows.len() * rows[0].len(),
                         hash
                     )]];
