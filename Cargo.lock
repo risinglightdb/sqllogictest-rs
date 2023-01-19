@@ -398,12 +398,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "difference"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "524cbf6897b527295dff137cec09ecf3a05f4fddffd7dfcd1585403449e74198"
-
-[[package]]
 name = "digest"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1349,6 +1343,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "similar"
+version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "420acb44afdae038210c99e69aae24109f32f15500aa708e81d46c9f29d55fcf"
+
+[[package]]
 name = "siphasher"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1385,7 +1385,6 @@ version = "0.11.1"
 dependencies = [
  "async-trait",
  "derivative",
- "difference",
  "fs-err",
  "futures",
  "glob",
@@ -1395,6 +1394,7 @@ dependencies = [
  "md-5",
  "owo-colors",
  "regex",
+ "similar",
  "tempfile",
  "thiserror",
  "tracing",
@@ -1410,7 +1410,6 @@ dependencies = [
  "chrono",
  "clap 3.2.23",
  "console",
- "difference",
  "env_logger",
  "fs-err",
  "futures",

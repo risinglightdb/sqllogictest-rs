@@ -11,7 +11,7 @@ description = "Sqllogictest parser and runner."
 [dependencies]
 async-trait = "0.1"
 derivative = "2.2.0"
-difference = "2.0"
+similar = "2.2.0"
 glob = "0.3"
 humantime = "2"
 itertools = "0.10"
