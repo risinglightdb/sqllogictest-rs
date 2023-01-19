@@ -11,6 +11,7 @@ use difference::Difference;
 use futures::executor::block_on;
 use futures::{stream, Future, StreamExt};
 use itertools::Itertools;
+use md5::Digest;
 use owo_colors::OwoColorize;
 use regex::Regex;
 use tempfile::{tempdir, TempDir};
@@ -521,14 +522,14 @@ impl<D: AsyncDB> Runner<D> {
                 };
 
                 if self.hash_threshold > 0 && rows.len() * types.len() > self.hash_threshold {
-                    let mut md5 = md5::Context::new();
+                    let mut md5 = md5::Md5::new();
                     for line in &rows {
                         for value in line {
-                            md5.consume(value.as_bytes());
-                            md5.consume(b"\n");
+                            md5.update(value.as_bytes());
+                            md5.update(b"\n");
                         }
                     }
-                    let hash = md5.compute();
+                    let hash = md5.finalize();
                     rows = vec![vec![format!(
                         "{} values hashing to {:?}",
                         rows.len() * rows[0].len(),
