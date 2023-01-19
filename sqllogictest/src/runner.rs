@@ -7,12 +7,15 @@ use std::time::Duration;
 use std::vec;
 
 use async_trait::async_trait;
-use difference::Difference;
 use futures::executor::block_on;
 use futures::{stream, Future, StreamExt};
 use itertools::Itertools;
+use md5::Digest;
 use owo_colors::OwoColorize;
 use regex::Regex;
+use similar::Change;
+use similar::ChangeTag;
+use similar::TextDiff;
 use tempfile::{tempdir, TempDir};
 
 use crate::parser::*;
@@ -284,7 +287,7 @@ pub enum TestErrorKind {
     // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
     #[error(
         "query result mismatch:\n[SQL] {sql}\n[Diff] (-expected|+actual)\n{}",
-        difference::Changeset::new(.expected, .actual, "\n").diffs.iter().format_with("\n", |diff, f| format_diff(diff, f, false))
+        TextDiff::from_lines(.expected, .actual).iter_all_changes().format_with("\n", |diff, f| format_diff(&diff, f, false))
     )]
     QueryResultMismatch {
         sql: String,
@@ -353,10 +356,9 @@ impl<'a> Display for TestErrorKindDisplay<'a> {
                 "query result mismatch:\n[SQL] {sql}\n[Diff] ({}|{})\n{}",
                 "-expected".bright_red(),
                 "+actual".bright_green(),
-                difference::Changeset::new(expected, actual, "\n")
-                    .diffs
-                    .iter()
-                    .format_with("\n", |diff, f| format_diff(diff, f, true))
+                TextDiff::from_lines(expected, actual)
+                    .iter_all_changes()
+                    .format_with("\n", |diff, f| format_diff(&diff, f, true))
             ),
             _ => write!(f, "{}", self.error),
         }
@@ -364,22 +366,23 @@ impl<'a> Display for TestErrorKindDisplay<'a> {
 }
 
 fn format_diff(
-    diff: &Difference,
+    diff: &Change<&str>,
     f: &mut dyn FnMut(&dyn std::fmt::Display) -> std::fmt::Result,
     colorize: bool,
 ) -> std::fmt::Result {
-    match *diff {
-        Difference::Same(ref x) => f(&x
+    match diff.tag() {
+        ChangeTag::Equal => f(&diff
+            .value()
             .lines()
             .format_with("\n", |line, f| f(&format_args!("    {line}")))),
-        Difference::Add(ref x) => f(&x.lines().format_with("\n", |line, f| {
+        ChangeTag::Insert => f(&diff.value().lines().format_with("\n", |line, f| {
             if colorize {
                 f(&format_args!("+   {line}").bright_green())
             } else {
                 f(&format_args!("+   {line}"))
             }
         })),
-        Difference::Rem(ref x) => f(&x.lines().format_with("\n", |line, f| {
+        ChangeTag::Delete => f(&diff.value().lines().format_with("\n", |line, f| {
             if colorize {
                 f(&format_args!("-   {line}").bright_red())
             } else {
@@ -521,16 +524,16 @@ impl<D: AsyncDB> Runner<D> {
                 };
 
                 if self.hash_threshold > 0 && rows.len() * types.len() > self.hash_threshold {
-                    let mut md5 = md5::Context::new();
+                    let mut md5 = md5::Md5::new();
                     for line in &rows {
                         for value in line {
-                            md5.consume(value.as_bytes());
-                            md5.consume(b"\n");
+                            md5.update(value.as_bytes());
+                            md5.update(b"\n");
                         }
                     }
-                    let hash = md5.compute();
+                    let hash = format!("{:2x}", md5.finalize());
                     rows = vec![vec![format!(
-                        "{} values hashing to {:?}",
+                        "{} values hashing to {}",
                         rows.len() * rows[0].len(),
                         hash
                     )]];

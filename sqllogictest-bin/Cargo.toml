@@ -15,7 +15,6 @@ bytes = "1"
 chrono = { version = "0.4" }
 clap = { version = "3", features = ["derive", "env"] }
 console = { version = "0.15" }
-difference = "2.0"
 env_logger = { version = "0.9" }
 futures = { version = "0.3", default-features = false }
 futures-lite = "1"
