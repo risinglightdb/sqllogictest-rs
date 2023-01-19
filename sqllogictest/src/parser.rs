@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use derivative::Derivative;
+use educe::Educe;
 use itertools::Itertools;
 use regex::Regex;
 
@@ -66,8 +66,8 @@ impl Location {
 }
 
 /// A single directive in a sqllogictest file.
-#[derive(Debug, Clone, Derivative)]
-#[derivative(PartialEq)]
+#[derive(Debug, Clone, Educe)]
+#[educe(PartialEq)]
 #[non_exhaustive]
 pub enum Record {
     /// An include copies all records from another files.
@@ -82,7 +82,7 @@ pub enum Record {
         conditions: Vec<Condition>,
         /// The SQL command is expected to fail with an error messages that matches the given
         /// regex. If the regex is an empty string, any error message is accepted.
-        #[derivative(PartialEq(compare_with = "cmp_regex"))]
+        #[educe(PartialEq(method = "cmp_regex"))]
         expected_error: Option<Regex>,
         /// The SQL command.
         sql: String,
@@ -99,7 +99,7 @@ pub enum Record {
         label: Option<String>,
         /// The SQL command is expected to fail with an error messages that matches the given
         /// regex. If the regex is an empty string, any error message is accepted.
-        #[derivative(PartialEq(compare_with = "cmp_regex"))]
+        #[educe(PartialEq(method = "cmp_regex"))]
         expected_error: Option<Regex>,
         /// The SQL command.
         sql: String,
