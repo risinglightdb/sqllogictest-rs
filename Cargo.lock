@@ -1401,12 +1401,12 @@ dependencies = [
  "quick-junit",
  "rand",
  "sqllogictest",
- "sqllogictest-engine",
+ "sqllogictest-engines",
  "tokio",
 ]
 
 [[package]]
-name = "sqllogictest-engine"
+name = "sqllogictest-engines"
 version = "0.11.1"
 dependencies = [
  "async-trait",

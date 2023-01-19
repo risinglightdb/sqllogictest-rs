@@ -3,8 +3,8 @@ use std::fmt::Display;
 use async_trait::async_trait;
 use clap::ArgEnum;
 use sqllogictest::{AsyncDB, DBOutput};
-use sqllogictest_engine::external::ExternalDriver;
-use sqllogictest_engine::postgres::{PostgresConfig, PostgresExtended, PostgresSimple};
+use sqllogictest_engines::external::ExternalDriver;
+use sqllogictest_engines::postgres::{PostgresConfig, PostgresExtended, PostgresSimple};
 use tokio::process::Command;
 
 use super::{DBConfig, Result};
