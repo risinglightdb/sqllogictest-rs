@@ -1001,7 +1001,7 @@ dependencies = [
 [[package]]
 name = "postgres-derive"
 version = "0.4.3"
-source = "git+https://github.com/risinglightdb/rust-postgres?rev=205af89aafb8fec5e8a75599e0401d5797932f13#205af89aafb8fec5e8a75599e0401d5797932f13"
+source = "git+https://github.com/sfackler/rust-postgres?rev=4bae134f501db5c08b8dd43a44474e515bbb39d3#4bae134f501db5c08b8dd43a44474e515bbb39d3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1011,7 +1011,7 @@ dependencies = [
 [[package]]
 name = "postgres-protocol"
 version = "0.6.4"
-source = "git+https://github.com/risinglightdb/rust-postgres?rev=205af89aafb8fec5e8a75599e0401d5797932f13#205af89aafb8fec5e8a75599e0401d5797932f13"
+source = "git+https://github.com/sfackler/rust-postgres?rev=4bae134f501db5c08b8dd43a44474e515bbb39d3#4bae134f501db5c08b8dd43a44474e515bbb39d3"
 dependencies = [
  "base64",
  "byteorder",
@@ -1028,7 +1028,7 @@ dependencies = [
 [[package]]
 name = "postgres-types"
 version = "0.2.4"
-source = "git+https://github.com/risinglightdb/rust-postgres?rev=205af89aafb8fec5e8a75599e0401d5797932f13#205af89aafb8fec5e8a75599e0401d5797932f13"
+source = "git+https://github.com/sfackler/rust-postgres?rev=4bae134f501db5c08b8dd43a44474e515bbb39d3#4bae134f501db5c08b8dd43a44474e515bbb39d3"
 dependencies = [
  "bytes",
  "chrono",
@@ -1600,7 +1600,7 @@ dependencies = [
 [[package]]
 name = "tokio-postgres"
 version = "0.7.7"
-source = "git+https://github.com/risinglightdb/rust-postgres?rev=205af89aafb8fec5e8a75599e0401d5797932f13#205af89aafb8fec5e8a75599e0401d5797932f13"
+source = "git+https://github.com/sfackler/rust-postgres?rev=4bae134f501db5c08b8dd43a44474e515bbb39d3#4bae134f501db5c08b8dd43a44474e515bbb39d3"
 dependencies = [
  "async-trait",
  "byteorder",
