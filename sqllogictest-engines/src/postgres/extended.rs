@@ -1,54 +1,14 @@
 use std::fmt::Write;
-use std::sync::Arc;
+use std::time::Duration;
 
-use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
 use pg_interval::Interval;
 use postgres_types::Type;
 use rust_decimal::Decimal;
 use sqllogictest::{ColumnType, DBOutput};
-use tokio::task::JoinHandle;
 
-use crate::{DBConfig, Result};
-
-pub struct PostgresExtended {
-    client: Arc<tokio_postgres::Client>,
-    join_handle: JoinHandle<()>,
-}
-
-impl PostgresExtended {
-    pub(super) async fn connect(config: &DBConfig) -> Result<Self> {
-        let (host, port) = config.random_addr();
-
-        let (client, connection) = tokio_postgres::Config::new()
-            .host(host)
-            .port(port)
-            .dbname(&config.db)
-            .user(&config.user)
-            .password(&config.pass)
-            .connect(tokio_postgres::NoTls)
-            .await
-            .context(format!("failed to connect to postgres at {host}:{port}"))?;
-
-        let join_handle = tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                log::error!("PostgresExtended connection error: {:?}", e);
-            }
-        });
-
-        Ok(Self {
-            client: Arc::new(client),
-            join_handle,
-        })
-    }
-}
-
-impl Drop for PostgresExtended {
-    fn drop(&mut self) {
-        self.join_handle.abort()
-    }
-}
+use super::{Extended, Postgres, Result};
 
 macro_rules! array_process {
     ($row:ident, $row_vec:ident, $idx:ident, $t:ty) => {
@@ -219,10 +179,10 @@ fn float8_to_str(value: &f64) -> String {
 }
 
 #[async_trait]
-impl sqllogictest::AsyncDB for PostgresExtended {
+impl sqllogictest::AsyncDB for Postgres<Extended> {
     type Error = tokio_postgres::error::Error;
 
-    async fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error> {
+    async fn run(&mut self, sql: &str) -> Result<DBOutput> {
         let mut output = vec![];
 
         let is_query_sql = {
@@ -357,5 +317,9 @@ impl sqllogictest::AsyncDB for PostgresExtended {
 
     fn engine_name(&self) -> &str {
         "postgres-extended"
+    }
+
+    async fn sleep(dur: Duration) {
+        tokio::time::sleep(dur).await
     }
 }

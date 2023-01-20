@@ -1,5 +1,5 @@
 [workspace]
-members = ["sqllogictest", "sqllogictest-bin", "examples/*", "tests"]
+members = ["examples/*", "sqllogictest", "sqllogictest-bin", "sqllogictest-engines", "tests"]
 
 [workspace.package]
 version = "0.11.1"

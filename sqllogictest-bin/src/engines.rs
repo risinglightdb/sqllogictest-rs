@@ -1,16 +1,12 @@
-mod postgres;
-use clap::ArgEnum;
-use postgres::Postgres;
-use tokio::process::Command;
-mod postgres_extended;
 use std::fmt::Display;
-mod external;
 
 use async_trait::async_trait;
-use postgres_extended::PostgresExtended;
+use clap::ArgEnum;
 use sqllogictest::{AsyncDB, DBOutput};
+use sqllogictest_engines::external::ExternalDriver;
+use sqllogictest_engines::postgres::{PostgresConfig, PostgresExtended, PostgresSimple};
+use tokio::process::Command;
 
-use self::external::ExternalDriver;
 use super::{DBConfig, Result};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
@@ -28,16 +24,32 @@ pub enum EngineConfig {
 }
 
 enum Engines {
-    Postgres(Postgres),
+    Postgres(PostgresSimple),
     PostgresExtended(PostgresExtended),
     External(ExternalDriver),
 }
 
+impl From<&DBConfig> for PostgresConfig {
+    fn from(config: &DBConfig) -> Self {
+        let (host, port) = config.random_addr();
+
+        let mut pg_config = PostgresConfig::new();
+        pg_config
+            .host(host)
+            .port(port)
+            .dbname(&config.db)
+            .user(&config.user)
+            .password(&config.pass);
+
+        pg_config
+    }
+}
+
 pub(super) async fn connect(engine: &EngineConfig, config: &DBConfig) -> Result<impl AsyncDB> {
     Ok(match engine {
-        EngineConfig::Postgres => Engines::Postgres(Postgres::connect(config).await?),
+        EngineConfig::Postgres => Engines::Postgres(PostgresSimple::connect(config.into()).await?),
         EngineConfig::PostgresExtended => {
-            Engines::PostgresExtended(PostgresExtended::connect(config).await?)
+            Engines::PostgresExtended(PostgresExtended::connect(config.into()).await?)
         }
         EngineConfig::External(cmd_tmpl) => {
             let (host, port) = config.random_addr();
@@ -48,7 +60,7 @@ pub(super) async fn connect(engine: &EngineConfig, config: &DBConfig) -> Result<
                 .replace("{user}", &config.user)
                 .replace("{pass}", &config.pass);
             let mut cmd = Command::new("bash");
-            let cmd = cmd.args(["-c", &cmd_str]);
+            cmd.args(["-c", &cmd_str]);
             Engines::External(ExternalDriver::connect(cmd).await?)
         }
     })
