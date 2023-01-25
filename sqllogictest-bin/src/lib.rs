@@ -36,10 +36,10 @@ impl Default for Color {
 #[derive(Parser, Debug, Clone)]
 #[clap(about, version, author)]
 struct Opt {
-    /// Glob of a set of test files.
+    /// Glob(s) of a set of test files.
     /// For example: `./test/**/*.slt`
-    #[clap()]
-    files: String,
+    #[clap(required = true, min_values = 1)]
+    files: Vec<String>,
 
     /// The database engine name, used by the record conditions.
     #[clap(short, long, arg_enum, default_value = "postgres")]
@@ -170,8 +170,16 @@ pub async fn main_okk() -> Result<()> {
         Color::Auto => {}
     }
 
-    let files = glob::glob(&files).context("failed to read glob pattern")?;
-    let files = files.into_iter().try_collect::<_, Vec<_>, _>()?;
+    let files: Vec<PathBuf> = files
+        .iter()
+        .map(|filename| {
+            glob::glob(&filename)
+                .context("failed to read glob pattern")
+                .unwrap()
+        })
+        .flat_map(|glob| glob.into_iter().try_collect::<_, Vec<_>, _>().unwrap())
+        .collect();
+
     if files.is_empty() {
         bail!("no test case found");
     }
