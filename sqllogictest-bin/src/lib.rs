@@ -173,7 +173,7 @@ pub async fn main_okk() -> Result<()> {
     let files: Vec<PathBuf> = files
         .iter()
         .map(|filename| {
-            glob::glob(&filename)
+            glob::glob(filename)
                 .context("failed to read glob pattern")
                 .unwrap()
         })
