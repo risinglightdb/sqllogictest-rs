@@ -170,16 +170,14 @@ pub async fn main_okk() -> Result<()> {
         Color::Auto => {}
     }
 
-    let files: Vec<PathBuf> = files
-        .into_iter()
-        .map(|filename| glob::glob(&filename).context("failed to read glob pattern"))
-        .try_collect::<_, Vec<_>, _>()?
-        .into_iter()
-        .map(|glob| glob.try_collect::<_, Vec<_>, _>())
-        .try_collect::<_, Vec<_>, _>()?
-        .into_iter()
-        .flatten()
-        .collect();
+    let glob_patterns = files;
+    let mut files: Vec<PathBuf> = Vec::new();
+    for glob_pattern in glob_patterns.into_iter() {
+        let pathbufs = glob::glob(&glob_pattern).context("failed to read glob pattern")?;
+        for pathbuf in pathbufs.into_iter().try_collect::<_, Vec<_>, _>()? {
+            files.push(pathbuf)
+        }
+    }
 
     if files.is_empty() {
         bail!("no test case found");
