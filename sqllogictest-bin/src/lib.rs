@@ -171,13 +171,14 @@ pub async fn main_okk() -> Result<()> {
     }
 
     let files: Vec<PathBuf> = files
-        .iter()
-        .map(|filename| {
-            glob::glob(filename)
-                .context("failed to read glob pattern")
-                .unwrap()
-        })
-        .flat_map(|glob| glob.into_iter().try_collect::<_, Vec<_>, _>().unwrap())
+        .into_iter()
+        .map(|filename| glob::glob(&filename).context("failed to read glob pattern"))
+        .try_collect::<_, Vec<_>, _>()?
+        .into_iter()
+        .map(|glob| glob.try_collect::<_, Vec<_>, _>())
+        .try_collect::<_, Vec<_>, _>()?
+        .into_iter()
+        .flatten()
         .collect();
 
     if files.is_empty() {
