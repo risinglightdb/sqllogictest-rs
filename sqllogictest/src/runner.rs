@@ -38,7 +38,7 @@ impl Display for ColumnType {
             ColumnType::Integer => write!(f, "I"),
             ColumnType::FloatingPoint => write!(f, "R"),
             ColumnType::Any => write!(f, "?"),
-            ColumnType::Unknown(c) => write!(f, "{}", c),
+            ColumnType::Unknown(c) => write!(f, "{c}"),
         }
     }
 }
@@ -189,7 +189,7 @@ impl Display for ParallelTestError {
         writeln!(f, "parallel test failed")?;
         write!(f, "Caused by:")?;
         for i in &self.errors {
-            writeln!(f, "{}", i)?;
+            writeln!(f, "{i}")?;
         }
         Ok(())
     }
@@ -224,7 +224,7 @@ impl ParallelTestError {
 
 impl std::fmt::Debug for TestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "{self}")
     }
 }
 
@@ -806,7 +806,7 @@ impl<D: AsyncDB> Runner<D> {
             let db_name = db_name.replace([' ', '.', '-'], "_");
 
             self.db
-                .run(&format!("CREATE DATABASE {};", db_name))
+                .run(&format!("CREATE DATABASE {db_name};"))
                 .await
                 .expect("create db failed");
             let target = hosts[idx % hosts.len()].clone();
@@ -1144,19 +1144,19 @@ pub async fn update_test_file<D: AsyncDB>(
             }
             _ => {
                 if *halt {
-                    writeln!(outfile, "{}", record)?;
+                    writeln!(outfile, "{record}")?;
                     continue;
                 }
                 if matches!(record, Record::Halt { .. }) {
                     *halt = true;
-                    writeln!(outfile, "{}", record)?;
+                    writeln!(outfile, "{record}")?;
                     continue;
                 }
                 let record_output = runner.apply_record(record.clone()).await;
                 let record =
                     update_record_with_output(&record, &record_output, col_separator, validator)
                         .unwrap_or(record);
-                writeln!(outfile, "{}", record)?;
+                writeln!(outfile, "{record}")?;
             }
         }
     }

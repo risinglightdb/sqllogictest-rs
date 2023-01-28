@@ -209,7 +209,7 @@ pub async fn main_okk() -> Result<()> {
     report.add_test_suite(test_suite);
 
     if let Some(junit_file) = junit {
-        tokio::fs::write(format!("{}-junit.xml", junit_file), report.to_string()?).await?;
+        tokio::fs::write(format!("{junit_file}-junit.xml"), report.to_string()?).await?;
     }
 
     result
@@ -231,7 +231,7 @@ async fn run_parallel(
             .to_str()
             .ok_or_else(|| anyhow!("not a UTF-8 filename"))?;
         let db_name = db_name.replace([' ', '.', '-'], "_");
-        eprintln!("+ Discovered Test: {}", db_name);
+        eprintln!("+ Discovered Test: {db_name}");
         if create_databases.insert(db_name.to_string(), file).is_some() {
             return Err(anyhow!("duplicated file name found: {}", db_name));
         }
@@ -241,10 +241,10 @@ async fn run_parallel(
 
     let db_names: Vec<String> = create_databases.keys().cloned().collect();
     for db_name in &db_names {
-        let query = format!("CREATE DATABASE {};", db_name);
-        eprintln!("+ {}", query);
+        let query = format!("CREATE DATABASE {db_name};");
+        eprintln!("+ {query}");
         if let Err(err) = db.run(&query).await {
-            eprintln!("  ignore error: {}", err);
+            eprintln!("  ignore error: {err}");
         }
     }
 
@@ -308,10 +308,10 @@ async fn run_parallel(
     );
 
     for db_name in db_names {
-        let query = format!("DROP DATABASE {};", db_name);
-        eprintln!("+ {}", query);
+        let query = format!("DROP DATABASE {db_name};");
+        eprintln!("+ {query}");
         if let Err(err) = db.run(&query).await {
-            eprintln!("  ignore error: {}", err);
+            eprintln!("  ignore error: {err}");
         }
     }
 
@@ -637,12 +637,12 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
             }
             _ => {
                 if *halt {
-                    writeln!(outfile, "{}", record)?;
+                    writeln!(outfile, "{record}")?;
                     continue;
                 }
                 if matches!(record, Record::Halt { .. }) {
                     *halt = true;
-                    writeln!(outfile, "{}", record)?;
+                    writeln!(outfile, "{record}")?;
                     continue;
                 }
                 update_record(outfile, &mut runner, record, format)
