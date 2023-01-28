@@ -9,7 +9,7 @@ pub struct FakeDBError;
 
 impl std::fmt::Display for FakeDBError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -20,7 +20,7 @@ impl sqllogictest::DB for FakeDB {
 
     fn run(&mut self, sql: &str) -> Result<DBOutput, FakeDBError> {
         // Output will be: sqllogictests yields copy test to '/tmp/.tmp6xSyMa/test.csv';
-        println!("sqllogictests yields {}", sql);
+        println!("sqllogictests yields {sql}");
         assert!(!sql.contains("__TEST_DIR__"));
         Ok(DBOutput::StatementComplete(0))
     }

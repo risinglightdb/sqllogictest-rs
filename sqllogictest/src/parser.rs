@@ -23,7 +23,7 @@ impl fmt::Display for Location {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.file, self.line)?;
         if let Some(upper) = &self.upper {
-            write!(f, "\nat {}", upper)?;
+            write!(f, "\nat {upper}")?;
         }
         Ok(())
     }
@@ -157,7 +157,7 @@ impl Record {
     /// # Panics
     /// If the record is an internally injected record which should not occur in the test file.
     pub fn unparse(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
-        write!(w, "{}", self)
+        write!(w, "{self}")
     }
 }
 
@@ -168,7 +168,7 @@ impl std::fmt::Display for Record {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Record::Include { loc: _, filename } => {
-                write!(f, "include {}", filename)
+                write!(f, "include {filename}")
             }
             Record::Statement {
                 loc: _,
@@ -184,15 +184,15 @@ impl std::fmt::Display for Record {
                         if err.as_str().is_empty() {
                             write!(f, "error")?;
                         } else {
-                            write!(f, "error {}", err)?;
+                            write!(f, "error {err}")?;
                         }
                     }
-                    (Some(cnt), None) => write!(f, "count {}", cnt)?,
+                    (Some(cnt), None) => write!(f, "count {cnt}")?,
                     (Some(_), Some(_)) => unreachable!(),
                 }
                 writeln!(f)?;
                 // statement always end with a blank line
-                writeln!(f, "{}", sql)
+                writeln!(f, "{sql}")
             }
             Record::Query {
                 loc: _,
@@ -206,8 +206,8 @@ impl std::fmt::Display for Record {
             } => {
                 write!(f, "query")?;
                 if let Some(err) = expected_error {
-                    writeln!(f, " error {}", err)?;
-                    return writeln!(f, "{}", sql);
+                    writeln!(f, " error {err}")?;
+                    return writeln!(f, "{sql}");
                 }
 
                 write!(
@@ -219,14 +219,14 @@ impl std::fmt::Display for Record {
                     write!(f, " {}", sort_mode.as_str())?;
                 }
                 if let Some(label) = label {
-                    write!(f, " {}", label)?;
+                    write!(f, " {label}")?;
                 }
                 writeln!(f)?;
-                writeln!(f, "{}", sql)?;
+                writeln!(f, "{sql}")?;
 
                 write!(f, "----")?;
                 for result in expected_results {
-                    write!(f, "\n{}", result)?;
+                    write!(f, "\n{result}")?;
                 }
                 // query always ends with a blank line
                 writeln!(f)
@@ -235,7 +235,7 @@ impl std::fmt::Display for Record {
                 write!(f, "sleep {}", humantime::format_duration(*duration))
             }
             Record::Subtest { loc: _, name } => {
-                write!(f, "subtest {}", name)
+                write!(f, "subtest {name}")
             }
             Record::Halt { loc: _ } => {
                 write!(f, "halt")
@@ -245,14 +245,14 @@ impl std::fmt::Display for Record {
             },
             Record::Condition(cond) => match cond {
                 Condition::OnlyIf { engine_name } => {
-                    write!(f, "onlyif {}", engine_name)
+                    write!(f, "onlyif {engine_name}")
                 }
                 Condition::SkipIf { engine_name } => {
-                    write!(f, "skipif {}", engine_name)
+                    write!(f, "skipif {engine_name}")
                 }
             },
             Record::HashThreshold { loc: _, threshold } => {
-                write!(f, "hash-threshold {}", threshold)
+                write!(f, "hash-threshold {threshold}")
             }
             Record::Comment(comment) => {
                 let mut iter = comment.iter();
@@ -263,7 +263,7 @@ impl std::fmt::Display for Record {
                 Ok(())
             }
             Record::Newline => Ok(()), // Display doesn't end with newline
-            Record::Injected(p) => panic!("unexpected injected record: {:?}", p),
+            Record::Injected(p) => panic!("unexpected injected record: {p:?}"),
         }
     }
 }
@@ -613,7 +613,7 @@ fn parse_file_inner(loc: Location) -> Result<Vec<Record>, ParseError> {
             };
 
             for included_file in glob::glob(&complete_filename)
-                .map_err(|e| InvalidIncludeFile(format!("{:?}", e)).at(loc.clone()))?
+                .map_err(|e| InvalidIncludeFile(format!("{e:?}")).at(loc.clone()))?
                 .filter_map(Result::ok)
             {
                 let included_file = included_file.as_os_str().to_string_lossy().to_string();
@@ -720,12 +720,11 @@ mod tests {
                     *********\n\
                     original:\n\
                     *********\n\
-                    {:#?}\n\n\
+                    {records:#?}\n\n\
                     *********\n\
                     reparsed:\n\
                     *********\n\
-                    {:#?}\n\n",
-            records, reparsed_records,
+                    {reparsed_records:#?}\n\n",
         );
     }
 
