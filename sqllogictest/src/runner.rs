@@ -571,7 +571,7 @@ impl<D: AsyncDB> Runner<D> {
 
     /// Run a single record.
     pub async fn run_async(&mut self, record: Record) -> Result<(), TestError> {
-        tracing::info!(?record, "testing");
+        tracing::debug!(?record, "testing");
 
         match (record.clone(), self.apply_record(record).await) {
             (_, RecordOutput::Nothing) => {}
