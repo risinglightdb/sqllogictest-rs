@@ -19,10 +19,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        toolchain = fenix.packages.${system}.fromToolchainFile {
-          file = ./rust-toolchain;
-          sha256 = "sha256-Zk2rxv6vwKFkTTidgjPm6gDsseVmmljVt201H7zuDkk=";
-        };
+        toolchain = fenix.packages.${system}.stable.toolchain;
         craneLib = crane.lib.${system}.overrideToolchain toolchain;
         packageDef = {
           src = ./.;
