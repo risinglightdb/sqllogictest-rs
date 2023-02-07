@@ -659,7 +659,7 @@ impl<D: AsyncDB> Runner<D> {
                         sql,
                         kind: RecordKind::Statement,
                     }
-                    .at(loc));
+                    .at(loc))
                 }
                 (None, None) => {
                     if let Some(expected_count) = expected_count {
