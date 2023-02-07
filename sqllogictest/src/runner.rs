@@ -399,7 +399,7 @@ fn format_column_diff(expected: &str, actual: &str, colorize: bool) -> String {
                 ),
             },
         );
-    format!("[Expected] {}\n[Actual  ] {}", expected, actual)
+    format!("[Expected] {expected}\n[Actual  ] {actual}")
 }
 
 /// Trim and replace multiple whitespaces with one.
