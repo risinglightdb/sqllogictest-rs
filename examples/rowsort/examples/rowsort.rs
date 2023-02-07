@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use sqllogictest::{ColumnType, DBOutput};
+use sqllogictest::{DBOutput, DefaultColumnType};
 
 pub struct FakeDB;
 
@@ -17,16 +17,17 @@ impl std::error::Error for FakeDBError {}
 
 impl sqllogictest::DB for FakeDB {
     type Error = FakeDBError;
+    type ColumnType = DefaultColumnType;
 
-    fn run(&mut self, sql: &str) -> Result<DBOutput, FakeDBError> {
+    fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, FakeDBError> {
         if sql == "select * from example_rowsort" {
             // Even if the order is not the same as `slt` file, sqllogictest will sort them before
             // comparing.
             return Ok(DBOutput::Rows {
                 types: vec![
-                    ColumnType::Integer,
-                    ColumnType::Integer,
-                    ColumnType::Integer,
+                    DefaultColumnType::Integer,
+                    DefaultColumnType::Integer,
+                    DefaultColumnType::Integer,
                 ],
                 rows: vec![
                     vec!["1".to_string(), "10".to_string(), "2333".to_string()],

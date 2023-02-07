@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use sqllogictest::DBOutput;
+use sqllogictest::{DBOutput, DefaultColumnType};
 
 pub struct FakeDB;
 
@@ -17,8 +17,9 @@ impl std::error::Error for FakeDBError {}
 
 impl sqllogictest::DB for FakeDB {
     type Error = FakeDBError;
+    type ColumnType = DefaultColumnType;
 
-    fn run(&mut self, sql: &str) -> Result<DBOutput, FakeDBError> {
+    fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, FakeDBError> {
         // Output will be: sqllogictests yields copy test to '/tmp/.tmp6xSyMa/test.csv';
         println!("sqllogictests yields {sql}");
         assert!(!sql.contains("__TEST_DIR__"));

@@ -69,7 +69,7 @@ impl Location {
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq)]
 #[non_exhaustive]
-pub enum Record {
+pub enum Record<T: ColumnType> {
     /// An include copies all records from another files.
     Include {
         loc: Location,
@@ -94,7 +94,7 @@ pub enum Record {
     Query {
         loc: Location,
         conditions: Vec<Condition>,
-        type_string: Vec<ColumnType>,
+        expected_types: Vec<T>,
         sort_mode: Option<SortMode>,
         label: Option<String>,
         /// The SQL command is expected to fail with an error messages that matches the given
@@ -151,7 +151,7 @@ fn cmp_regex(l: &Option<Regex>, r: &Option<Regex>) -> bool {
     }
 }
 
-impl Record {
+impl<T: ColumnType> Record<T> {
     /// Unparses the record to its string representation in the test file.
     ///
     /// # Panics
@@ -164,7 +164,7 @@ impl Record {
 /// As is the standard for Display, does not print any trailing
 /// newline except for records that always end with a blank line such
 /// as Query and Statement.
-impl std::fmt::Display for Record {
+impl<T: ColumnType> std::fmt::Display for Record<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Record::Include { loc: _, filename } => {
@@ -197,7 +197,7 @@ impl std::fmt::Display for Record {
             Record::Query {
                 loc: _,
                 conditions: _,
-                type_string,
+                expected_types,
                 sort_mode,
                 label,
                 expected_error,
@@ -213,7 +213,7 @@ impl std::fmt::Display for Record {
                 write!(
                     f,
                     " {}",
-                    type_string.iter().map(|c| format!("{c}")).join("")
+                    expected_types.iter().map(|c| c.to_char()).join("")
                 )?;
                 if let Some(sort_mode) = sort_mode {
                     write!(f, " {}", sort_mode.as_str())?;
@@ -391,12 +391,12 @@ impl ParseErrorKind {
 }
 
 /// Parse a sqllogictest script into a list of records.
-pub fn parse(script: &str) -> Result<Vec<Record>, ParseError> {
+pub fn parse<T: ColumnType>(script: &str) -> Result<Vec<Record<T>>, ParseError> {
     parse_inner(&Location::new("<unknown>", 0), script)
 }
 
 #[allow(clippy::collapsible_match)]
-fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> {
+fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record<T>>, ParseError> {
     let mut lines = script.lines().enumerate().peekable();
     let mut records = vec![];
     let mut conditions = vec![];
@@ -501,7 +501,7 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                 });
             }
             ["query", res @ ..] => {
-                let mut type_string = vec![];
+                let mut expected_types = vec![];
                 let mut sort_mode = None;
                 let mut label = None;
                 let mut expected_error = None;
@@ -513,11 +513,13 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                         })?);
                     }
                     [type_str, res @ ..] => {
-                        type_string = type_str
+                        expected_types = type_str
                             .chars()
-                            .map(ColumnType::try_from)
-                            .try_collect()
-                            .map_err(|e| e.at(loc.clone()))?;
+                            .map(|ch| {
+                                T::from_char(ch)
+                                    .ok_or_else(|| ParseErrorKind::InvalidType(ch).at(loc.clone()))
+                            })
+                            .try_collect()?;
                         sort_mode = res
                             .first()
                             .map(|&s| SortMode::try_from_str(s))
@@ -559,7 +561,7 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
                 records.push(Record::Query {
                     loc,
                     conditions: std::mem::take(&mut conditions),
-                    type_string,
+                    expected_types,
                     sort_mode,
                     label,
                     sql,
@@ -589,12 +591,12 @@ fn parse_inner(loc: &Location, script: &str) -> Result<Vec<Record>, ParseError> 
 }
 
 /// Parse a sqllogictest file. The included scripts are inserted after the `include` record.
-pub fn parse_file(filename: impl AsRef<Path>) -> Result<Vec<Record>, ParseError> {
+pub fn parse_file<T: ColumnType>(filename: impl AsRef<Path>) -> Result<Vec<Record<T>>, ParseError> {
     let filename = filename.as_ref().to_str().unwrap();
     parse_file_inner(Location::new(filename, 0))
 }
 
-fn parse_file_inner(loc: Location) -> Result<Vec<Record>, ParseError> {
+fn parse_file_inner<T: ColumnType>(loc: Location) -> Result<Vec<Record<T>>, ParseError> {
     let path = Path::new(loc.file());
     if !path.exists() {
         return Err(ParseErrorKind::FileNotFound.at(loc.clone()));
@@ -634,6 +636,7 @@ mod tests {
     use std::io::Write;
 
     use super::*;
+    use crate::DefaultColumnType;
 
     #[test]
     fn test_trailing_comment() {
@@ -641,7 +644,7 @@ mod tests {
 # comment 1
 #  comment 2
 ";
-        let records = parse(script).unwrap();
+        let records = parse::<DefaultColumnType>(script).unwrap();
         assert_eq!(
             records,
             vec![Record::Comment(vec![
@@ -653,45 +656,65 @@ mod tests {
 
     #[test]
     fn test_include_glob() {
-        let records = parse_file("../examples/include/include_1.slt").unwrap();
+        let records = parse_file::<DefaultColumnType>("../examples/include/include_1.slt").unwrap();
         assert_eq!(15, records.len());
     }
 
     #[test]
     fn test_basic() {
-        parse_roundtrip("../examples/basic/basic.slt")
+        parse_roundtrip::<DefaultColumnType>("../examples/basic/basic.slt")
     }
 
     #[test]
     fn test_condition() {
-        parse_roundtrip("../examples/condition/condition.slt")
+        parse_roundtrip::<DefaultColumnType>("../examples/condition/condition.slt")
     }
 
     #[test]
     fn test_file_level_sort_mode() {
-        parse_roundtrip("../examples/file_level_sort_mode/file_level_sort_mode.slt")
+        parse_roundtrip::<DefaultColumnType>(
+            "../examples/file_level_sort_mode/file_level_sort_mode.slt",
+        )
     }
 
     #[test]
     fn test_rowsort() {
-        parse_roundtrip("../examples/rowsort/rowsort.slt")
+        parse_roundtrip::<DefaultColumnType>("../examples/rowsort/rowsort.slt")
     }
 
     #[test]
     fn test_test_dir_escape() {
-        parse_roundtrip("../examples/test_dir_escape/test_dir_escape.slt")
+        parse_roundtrip::<DefaultColumnType>("../examples/test_dir_escape/test_dir_escape.slt")
     }
 
     #[test]
     fn test_validator() {
-        parse_roundtrip("../examples/validator/validator.slt")
+        parse_roundtrip::<DefaultColumnType>("../examples/validator/validator.slt")
+    }
+
+    #[test]
+    fn test_custom_type() {
+        parse_roundtrip::<CustomColumnType>("../examples/custom_type/custom_type.slt")
+    }
+
+    #[test]
+    fn test_fail_unknown_type() {
+        let script = "\
+query IA
+select * from unknown_type
+----
+";
+
+        let error_kind = parse::<CustomColumnType>(script).unwrap_err().kind;
+
+        assert_eq!(error_kind, ParseErrorKind::InvalidType('A'));
     }
 
     /// Verifies Display impl is consistent with parsing by ensuring
     /// roundtrip parse(unparse(parse())) is consistent
-    fn parse_roundtrip(filename: impl AsRef<Path>) {
+    fn parse_roundtrip<T: ColumnType>(filename: impl AsRef<Path>) {
         let filename = filename.as_ref();
-        let records = parse_file(filename).expect("parsing to complete");
+        let records = parse_file::<T>(filename).expect("parsing to complete");
 
         let unparsed = records
             .iter()
@@ -731,7 +754,7 @@ mod tests {
     /// Replaces the actual filename in all Records with
     /// "__FILENAME__" so different files with the same contents can
     /// compare equal
-    fn normalize_filename(records: Vec<Record>) -> Vec<Record> {
+    fn normalize_filename<T: ColumnType>(records: Vec<Record<T>>) -> Vec<Record<T>> {
         records
             .into_iter()
             .map(|mut record| {
@@ -761,5 +784,28 @@ mod tests {
     // Normalize a location
     fn normalize_loc(loc: &mut Location) {
         loc.file = Arc::from("__FILENAME__");
+    }
+
+    #[derive(Debug, PartialEq, Eq, Clone)]
+    pub enum CustomColumnType {
+        Integer,
+        Boolean,
+    }
+
+    impl ColumnType for CustomColumnType {
+        fn from_char(value: char) -> Option<Self> {
+            match value {
+                'I' => Some(Self::Integer),
+                'B' => Some(Self::Boolean),
+                _ => None,
+            }
+        }
+
+        fn to_char(&self) -> char {
+            match self {
+                Self::Integer => 'I',
+                Self::Boolean => 'B',
+            }
+        }
     }
 }

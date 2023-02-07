@@ -6,7 +6,7 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
 use pg_interval::Interval;
 use postgres_types::Type;
 use rust_decimal::Decimal;
-use sqllogictest::{ColumnType, DBOutput};
+use sqllogictest::{DBOutput, DefaultColumnType};
 
 use super::{Extended, Postgres, Result};
 
@@ -181,8 +181,9 @@ fn float8_to_str(value: &f64) -> String {
 #[async_trait]
 impl sqllogictest::AsyncDB for Postgres<Extended> {
     type Error = tokio_postgres::error::Error;
+    type ColumnType = DefaultColumnType;
 
-    async fn run(&mut self, sql: &str) -> Result<DBOutput> {
+    async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>> {
         let mut output = vec![];
 
         let is_query_sql = {
@@ -304,12 +305,12 @@ impl sqllogictest::AsyncDB for Postgres<Extended> {
         if output.is_empty() {
             let stmt = self.client.prepare(sql).await?;
             Ok(DBOutput::Rows {
-                types: vec![ColumnType::Any; stmt.columns().len()],
+                types: vec![DefaultColumnType::Any; stmt.columns().len()],
                 rows: vec![],
             })
         } else {
             Ok(DBOutput::Rows {
-                types: vec![ColumnType::Any; output[0].len()],
+                types: vec![DefaultColumnType::Any; output[0].len()],
                 rows: output,
             })
         }

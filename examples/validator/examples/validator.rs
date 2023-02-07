@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use sqllogictest::{ColumnType, DBOutput};
+use sqllogictest::{DBOutput, DefaultColumnType};
 
 pub struct FakeDB;
 
@@ -17,10 +17,11 @@ impl std::error::Error for FakeDBError {}
 
 impl sqllogictest::DB for FakeDB {
     type Error = FakeDBError;
+    type ColumnType = DefaultColumnType;
 
-    fn run(&mut self, _sql: &str) -> Result<DBOutput, FakeDBError> {
+    fn run(&mut self, _sql: &str) -> Result<DBOutput<Self::ColumnType>, FakeDBError> {
         Ok(DBOutput::Rows {
-            types: vec![ColumnType::Text],
+            types: vec![DefaultColumnType::Text],
             rows: vec![vec!["Hello, world!".to_string()]],
         })
     }
