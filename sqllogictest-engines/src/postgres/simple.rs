@@ -1,15 +1,16 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use sqllogictest::{ColumnType, DBOutput};
+use sqllogictest::{DBOutput, DefaultColumnType};
 
 use super::{Postgres, Result, Simple};
 
 #[async_trait]
 impl sqllogictest::AsyncDB for Postgres<Simple> {
     type Error = tokio_postgres::error::Error;
+    type ColumnType = DefaultColumnType;
 
-    async fn run(&mut self, sql: &str) -> Result<DBOutput> {
+    async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>> {
         let mut output = vec![];
 
         // NOTE:
@@ -50,7 +51,7 @@ impl sqllogictest::AsyncDB for Postgres<Simple> {
             Ok(DBOutput::StatementComplete(cnt))
         } else {
             Ok(DBOutput::Rows {
-                types: vec![ColumnType::Any; output[0].len()],
+                types: vec![DefaultColumnType::Any; output[0].len()],
                 rows: output,
             })
         }

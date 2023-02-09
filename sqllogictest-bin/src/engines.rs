@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use async_trait::async_trait;
 use clap::ArgEnum;
-use sqllogictest::{AsyncDB, DBOutput};
+use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
 use sqllogictest_engines::external::ExternalDriver;
 use sqllogictest_engines::postgres::{PostgresConfig, PostgresExtended, PostgresSimple};
 use tokio::process::Command;
@@ -82,7 +82,7 @@ impl std::error::Error for AnyhowError {
 }
 
 impl Engines {
-    async fn run(&mut self, sql: &str) -> Result<DBOutput, anyhow::Error> {
+    async fn run(&mut self, sql: &str) -> Result<DBOutput<DefaultColumnType>, anyhow::Error> {
         Ok(match self {
             Engines::Postgres(e) => e.run(sql).await?,
             Engines::PostgresExtended(e) => e.run(sql).await?,
@@ -94,8 +94,9 @@ impl Engines {
 #[async_trait]
 impl AsyncDB for Engines {
     type Error = AnyhowError;
+    type ColumnType = DefaultColumnType;
 
-    async fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error> {
+    async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, Self::Error> {
         self.run(sql).await.map_err(AnyhowError)
     }
 }

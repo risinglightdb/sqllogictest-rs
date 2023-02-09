@@ -34,9 +34,11 @@
 //! }
 //! ```
 
+pub mod column_type;
 pub mod parser;
 pub mod runner;
 
+pub use self::column_type::*;
 pub use self::parser::*;
 pub use self::runner::*;
 
