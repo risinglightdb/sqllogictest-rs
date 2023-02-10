@@ -913,6 +913,7 @@ impl<D: AsyncDB> Runner<D> {
         filename: impl AsRef<Path>,
         col_separator: &str,
         validator: Validator,
+        column_type_validator: ColumnTypeValidator<D::ColumnType>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use std::io::{Read, Seek, SeekFrom, Write};
         use std::path::PathBuf;
@@ -1024,6 +1025,7 @@ impl<D: AsyncDB> Runner<D> {
                         &record_output,
                         col_separator,
                         validator,
+                        column_type_validator,
                     )
                     .unwrap_or(record);
                     writeln!(outfile, "{record}")?;
@@ -1052,6 +1054,7 @@ pub fn update_record_with_output<T: ColumnType>(
     record_output: &RecordOutput<T>,
     col_separator: &str,
     validator: Validator,
+    column_type_validator: ColumnTypeValidator<T>,
 ) -> Option<Record<T>> {
     match (record.clone(), record_output) {
         (_, RecordOutput::Nothing) => None,
@@ -1147,13 +1150,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 sql,
                 expected_results,
             },
-            RecordOutput::Query {
-                // FIXME: maybe we should use output's types instead of orignal query's types
-                // Fix it after https://github.com/risinglightdb/sqllogictest-rs/issues/36 is resolved.
-                types: _,
-                rows,
-                error,
-            },
+            RecordOutput::Query { types, rows, error },
         ) => {
             match (error, expected_error) {
                 (None, _) => {}
@@ -1192,12 +1189,19 @@ pub fn update_record_with_output<T: ColumnType>(
                 rows.iter().map(|cols| cols.join(col_separator)).collect()
             };
 
+            let types = if column_type_validator(types, &expected_types) {
+                // If validation is successful, we respect the original file's expected types.
+                expected_types
+            } else {
+                types.clone()
+            };
+
             Some(Record::Query {
                 sql,
                 expected_error: None,
                 loc,
                 conditions,
-                expected_types,
+                expected_types: types,
                 sort_mode,
                 label,
                 expected_results: results,
@@ -1215,6 +1219,27 @@ mod tests {
     use crate::DefaultColumnType;
 
     #[test]
+    fn test_query_replacement_no_changes() {
+        let record = "query   I?\n\
+                    select * from foo;\n\
+                    ----\n\
+                    3      4";
+        TestCase {
+            // keep the input values
+            input: record,
+
+            // Model a run that produced a 3,4 as output
+            record_output: query_output(
+                &[&["3", "4"]],
+                vec![DefaultColumnType::Integer, DefaultColumnType::Any],
+            ),
+
+            expected: Some(record),
+        }
+        .run()
+    }
+
+    #[test]
     fn test_query_replacement() {
         TestCase {
             // input should be ignored
@@ -1224,10 +1249,13 @@ mod tests {
                     1 2",
 
             // Model a run that produced a 3,4 as output
-            record_output: query_output(&[&["3", "4"]]),
+            record_output: query_output(
+                &[&["3", "4"]],
+                vec![DefaultColumnType::Integer, DefaultColumnType::Any],
+            ),
 
             expected: Some(
-                "query III\n\
+                "query I?\n\
                  select * from foo;\n\
                  ----\n\
                  3 4",
@@ -1240,15 +1268,18 @@ mod tests {
     fn test_query_replacement_no_input() {
         TestCase {
             // input has no query results
-            input: "query III\n\
+            input: "query\n\
                     select * from foo;\n\
                     ----",
 
             // Model a run that produced a 3,4 as output
-            record_output: query_output(&[&["3", "4"]]),
+            record_output: query_output(
+                &[&["3", "4"]],
+                vec![DefaultColumnType::Integer, DefaultColumnType::Any],
+            ),
 
             expected: Some(
-                "query III\n\
+                "query I?\n\
                  select * from foo;\n\
                  ----\n\
                  3 4",
@@ -1261,7 +1292,7 @@ mod tests {
     fn test_query_replacement_no_output() {
         TestCase {
             // input has no query results
-            input: "query III\n\
+            input: "query\n\
                     select * from foo;\n\
                     ----",
 
@@ -1301,7 +1332,10 @@ mod tests {
                     create table foo;",
 
             // Model a run that produced a 3,4 as output
-            record_output: query_output(&[&["3", "4"]]),
+            record_output: query_output(
+                &[&["3", "4"]],
+                vec![DefaultColumnType::Integer, DefaultColumnType::Any],
+            ),
 
             expected: Some(
                 "statement ok\n\
@@ -1448,7 +1482,13 @@ mod tests {
             println!("**expected:\n{}\n", expected.unwrap_or(""));
             let input = parse_to_record(input);
             let expected = expected.map(parse_to_record);
-            let output = update_record_with_output(&input, &record_output, " ", default_validator);
+            let output = update_record_with_output(
+                &input,
+                &record_output,
+                " ",
+                default_validator,
+                strict_column_validator,
+            );
 
             assert_eq!(
                 &output,
@@ -1473,13 +1513,14 @@ mod tests {
     }
 
     /// Returns a RecordOutput that models the successful execution of a query
-    fn query_output(rows: &[&[&str]]) -> RecordOutput<DefaultColumnType> {
+    fn query_output(
+        rows: &[&[&str]],
+        types: Vec<DefaultColumnType>,
+    ) -> RecordOutput<DefaultColumnType> {
         let rows = rows
             .iter()
             .map(|cols| cols.iter().map(|c| c.to_string()).collect::<Vec<_>>())
             .collect::<Vec<_>>();
-
-        let types = rows.iter().map(|_| DefaultColumnType::Any).collect();
 
         RecordOutput::Query {
             types,

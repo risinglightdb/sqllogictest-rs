@@ -527,7 +527,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                             .map_err(|e| e.at(loc.clone()))?;
                         label = res.get(1).map(|s| s.to_string());
                     }
-                    _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
+                    [] => {}
                 }
 
                 // The SQL for the query is found on second an subsequent lines of the record
@@ -710,6 +710,30 @@ select * from unknown_type
         assert_eq!(error_kind, ParseErrorKind::InvalidType('A'));
     }
 
+    #[test]
+    fn test_parse_no_types() {
+        let script = "\
+query
+select * from foo;
+----
+";
+        let records = parse::<DefaultColumnType>(script).unwrap();
+
+        assert_eq!(
+            records,
+            vec![Record::Query {
+                loc: Location::new("<unknown>", 1),
+                conditions: vec![],
+                expected_types: vec![],
+                sort_mode: None,
+                label: None,
+                expected_error: None,
+                sql: "select * from foo;".to_string(),
+                expected_results: vec![],
+            }]
+        );
+    }
+
     /// Verifies Display impl is consistent with parsing by ensuring
     /// roundtrip parse(unparse(parse())) is consistent
     fn parse_roundtrip<T: ColumnType>(filename: impl AsRef<Path>) {
@@ -723,7 +747,7 @@ select * from unknown_type
 
         let output_contents = unparsed.join("\n");
 
-        // The orignal and parsed records should be logically requivalent
+        // The original and parsed records should be logically equivalent
         let mut output_file = tempfile::NamedTempFile::new().expect("Error creating tempfile");
         output_file
             .write_all(output_contents.as_bytes())
