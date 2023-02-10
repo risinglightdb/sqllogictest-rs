@@ -1292,7 +1292,7 @@ mod tests {
     fn test_query_replacement_no_output() {
         TestCase {
             // input has no query results
-            input: "query\n\
+            input: "query III\n\
                     select * from foo;\n\
                     ----",
 
