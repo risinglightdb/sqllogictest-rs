@@ -16,7 +16,7 @@ use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
 use rand::seq::SliceRandom;
 use sqllogictest::{
-    default_column_validator, default_validator, update_record_with_output, AsyncDB, Injected,
+    default_validator, strict_column_validator, update_record_with_output, AsyncDB, Injected,
     Record, Runner,
 };
 
@@ -690,7 +690,7 @@ async fn update_record<D: AsyncDB>(
         &record_output,
         "\t",
         default_validator,
-        default_column_validator,
+        strict_column_validator,
     ) {
         Some(new_record) => {
             writeln!(outfile, "{new_record}")?;
