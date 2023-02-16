@@ -8,7 +8,7 @@ name: Release
 jobs:
   release:
     name: Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v2
         name: Checkout 🛎️
