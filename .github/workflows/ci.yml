@@ -69,7 +69,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: install
-          args: cargo-semver-checks --locked
+          args: cargo-semver-checks --version ^0.17 --locked
       - name: Check semver
         run: |
          cargo semver-checks check-release -p sqllogictest
