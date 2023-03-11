@@ -395,6 +395,14 @@ pub fn parse<T: ColumnType>(script: &str) -> Result<Vec<Record<T>>, ParseError> 
     parse_inner(&Location::new("<unknown>", 0), script)
 }
 
+/// Parse a sqllogictest script into a list of records with a given script name.
+pub fn parse_with_name<T: ColumnType>(
+    script: &str,
+    name: impl Into<Arc<str>>,
+) -> Result<Vec<Record<T>>, ParseError> {
+    parse_inner(&Location::new(name, 0), script)
+}
+
 #[allow(clippy::collapsible_match)]
 fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record<T>>, ParseError> {
     let mut lines = script.lines().enumerate().peekable();

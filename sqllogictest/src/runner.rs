@@ -802,6 +802,16 @@ impl<D: AsyncDB> Runner<D> {
         self.run_multi_async(records).await
     }
 
+    /// Run a sqllogictest script with a given script name.
+    pub async fn run_script_with_name_async(
+        &mut self,
+        script: &str,
+        name: impl Into<Arc<str>>,
+    ) -> Result<(), TestError> {
+        let records = parse_with_name(script, name).expect("failed to parse sqllogictest");
+        self.run_multi_async(records).await
+    }
+
     /// Run a sqllogictest file.
     pub async fn run_file_async(&mut self, filename: impl AsRef<Path>) -> Result<(), TestError> {
         let records = parse_file(filename)?;
@@ -811,6 +821,15 @@ impl<D: AsyncDB> Runner<D> {
     /// Run a sqllogictest script.
     pub fn run_script(&mut self, script: &str) -> Result<(), TestError> {
         block_on(self.run_script_async(script))
+    }
+
+    /// Run a sqllogictest script with a given script name.
+    pub fn run_script_with_name(
+        &mut self,
+        script: &str,
+        name: impl Into<Arc<str>>,
+    ) -> Result<(), TestError> {
+        block_on(self.run_script_with_name_async(script, name))
     }
 
     /// Run a sqllogictest file.
