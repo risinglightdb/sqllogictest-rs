@@ -20,18 +20,13 @@ use sqllogictest::{
     Record, Runner,
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
 #[must_use]
 pub enum Color {
+    #[default]
     Auto,
     Always,
     Never,
-}
-
-impl Default for Color {
-    fn default() -> Self {
-        Color::Auto
-    }
 }
 
 #[derive(Parser, Debug, Clone)]
