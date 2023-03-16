@@ -88,6 +88,9 @@ struct Opt {
     /// The database password.
     #[clap(short = 'w', long, default_value = "postgres")]
     pass: String,
+    /// The database options.
+    #[clap(long)]
+    options: Option<String>,
 
     /// Overrides the test files with the actual output of the database.
     #[clap(long)]
@@ -108,6 +111,8 @@ struct DBConfig {
     user: String,
     /// The database password.
     pass: String,
+    /// Command line options.
+    options: Option<String>,
 }
 
 impl DBConfig {
@@ -134,6 +139,7 @@ pub async fn main_okk() -> Result<()> {
         db,
         user,
         pass,
+        options,
         r#override,
         format,
     } = Opt::parse();
@@ -189,6 +195,7 @@ pub async fn main_okk() -> Result<()> {
         db,
         user,
         pass,
+        options,
     };
 
     if r#override || format {
