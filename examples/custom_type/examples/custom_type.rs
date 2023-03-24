@@ -55,6 +55,11 @@ impl sqllogictest::DB for FakeDB {
                     vec!["3".to_string(), "true".to_string()],
                 ],
             })
+        } else if sql == "select * from no_results" {
+            Ok(DBOutput::Rows {
+                types: vec![CustomColumnType::Integer, CustomColumnType::Boolean],
+                rows: vec![],
+            })
         } else {
             Err(FakeDBError)
         }

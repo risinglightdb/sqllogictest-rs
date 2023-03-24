@@ -40,6 +40,9 @@ impl From<&DBConfig> for PostgresConfig {
             .dbname(&config.db)
             .user(&config.user)
             .password(&config.pass);
+        if let Some(options) = &config.options {
+            pg_config.options(options);
+        }
 
         pg_config
     }

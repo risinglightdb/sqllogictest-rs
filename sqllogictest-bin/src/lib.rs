@@ -16,21 +16,17 @@ use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
 use rand::seq::SliceRandom;
 use sqllogictest::{
-    default_validator, update_record_with_output, AsyncDB, Injected, Record, Runner,
+    default_validator, strict_column_validator, update_record_with_output, AsyncDB, Injected,
+    Record, Runner,
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
 #[must_use]
 pub enum Color {
+    #[default]
     Auto,
     Always,
     Never,
-}
-
-impl Default for Color {
-    fn default() -> Self {
-        Color::Auto
-    }
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -87,6 +83,9 @@ struct Opt {
     /// The database password.
     #[clap(short = 'w', long, default_value = "postgres")]
     pass: String,
+    /// The database options.
+    #[clap(long)]
+    options: Option<String>,
 
     /// Overrides the test files with the actual output of the database.
     #[clap(long)]
@@ -107,6 +106,8 @@ struct DBConfig {
     user: String,
     /// The database password.
     pass: String,
+    /// Command line options.
+    options: Option<String>,
 }
 
 impl DBConfig {
@@ -133,6 +134,7 @@ pub async fn main_okk() -> Result<()> {
         db,
         user,
         pass,
+        options,
         r#override,
         format,
     } = Opt::parse();
@@ -188,6 +190,7 @@ pub async fn main_okk() -> Result<()> {
         db,
         user,
         pass,
+        options,
     };
 
     if r#override || format {
@@ -684,7 +687,13 @@ async fn update_record<D: AsyncDB>(
     }
 
     let record_output = runner.apply_record(record.clone()).await;
-    match update_record_with_output(&record, &record_output, "\t", default_validator) {
+    match update_record_with_output(
+        &record,
+        &record_output,
+        "\t",
+        default_validator,
+        strict_column_validator,
+    ) {
         Some(new_record) => {
             writeln!(outfile, "{new_record}")?;
         }
