@@ -61,3 +61,16 @@ select * from example_basic
 Alice
 Bob
 Eve
+
+# error is a regex. Special characters change the meaning of a regex and have to be escaped
+statement error The operation \(describe\) is not supported. Did you mean \[describe\]\?
+desc table example_basic;
+
+statement error The operation \(describe\) is not supported. Did you mean [describe]?
+desc table example_basic;
+
+query error The operation \(describe\) is not supported. Did you mean \[describe\]\?
+desc table example_basic;
+
+query error The operation \(describe\) is not supported. Did you mean [describe]?
+desc table example_basic;

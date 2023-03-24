@@ -5,11 +5,11 @@ use sqllogictest::{DBOutput, DefaultColumnType};
 pub struct FakeDB;
 
 #[derive(Debug)]
-pub struct FakeDBError;
+pub struct FakeDBError(String);
 
 impl std::fmt::Display for FakeDBError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", "Hey you got FakeDBError!")
+        write!(f, "{:?}", self.0)
     }
 }
 
@@ -39,7 +39,12 @@ impl sqllogictest::DB for FakeDB {
         if sql.starts_with("drop") {
             return Ok(DBOutput::StatementComplete(0));
         }
-        Err(FakeDBError)
+        if sql.starts_with("desc") {
+            return Err(FakeDBError(
+                "The operation (describe) is not supported. Did you mean [describe]?".to_string(),
+            ));
+        }
+        Err(FakeDBError("Hey you got FakeDBError!".to_string()))
     }
 }
 
