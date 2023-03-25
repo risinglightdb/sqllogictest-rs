@@ -1151,7 +1151,7 @@ pub fn update_record_with_output<T: ColumnType>(
             // Error mismatch, update expected error
             (Some(e), _) => Some(Record::Statement {
                 sql,
-                expected_error: Some(Regex::new(&e.to_string()).unwrap()),
+                expected_error: Some(Regex::new(&regex::escape(&e.to_string())).unwrap()),
                 loc,
                 conditions,
                 expected_count: None,
@@ -1190,7 +1190,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 (Some(e), _) => {
                     return Some(Record::Query {
                         sql,
-                        expected_error: Some(Regex::new(&e.to_string()).unwrap()),
+                        expected_error: Some(Regex::new(&regex::escape(&e.to_string())).unwrap()),
                         loc,
                         conditions,
                         expected_types: vec![],
@@ -1476,6 +1476,86 @@ mod tests {
             expected: Some(
                 "statement error TestError: foo\n\
                  insert into foo values(2);",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
+    fn test_statement_error_special_chars() {
+        TestCase {
+            // statement expected error
+            input: "statement error tbd\n\
+                    inser into foo values(2);",
+
+            // Model a run that produced an error message that contains regex special characters
+            record_output: statement_output_error("The operation (inser) is not supported. Did you mean [insert]?"),
+
+            // expect the output includes foo
+            expected: Some(
+                "statement error TestError: The operation \\(inser\\) is not supported\\. Did you mean \\[insert\\]\\?\n\
+                 inser into foo values(2);",
+            ),
+        }
+            .run()
+    }
+
+    #[test]
+    fn test_statement_keep_error_regex_when_matches() {
+        TestCase {
+            // statement expected error
+            input: "statement error TestError: The operation \\([a-z]+\\) is not supported.*\n\
+                    inser into foo values(2);",
+
+            // Model a run that produced an error message that contains regex special characters
+            record_output: statement_output_error(
+                "The operation (inser) is not supported. Did you mean [insert]?",
+            ),
+
+            // expect the output includes foo
+            expected: Some(
+                "statement error TestError: The operation \\([a-z]+\\) is not supported.*\n\
+                 inser into foo values(2);",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
+    fn test_query_error_special_chars() {
+        TestCase {
+            // statement expected error
+            input: "query error tbd\n\
+                    selec *;",
+
+            // Model a run that produced an error message that contains regex special characters
+            record_output: query_output_error("The operation (selec) is not supported. Did you mean [select]?"),
+
+            // expect the output includes foo
+            expected: Some(
+                "query error TestError: The operation \\(selec\\) is not supported\\. Did you mean \\[select\\]\\?\n\
+                 selec *;",
+            ),
+        }
+            .run()
+    }
+
+    #[test]
+    fn test_query_error_special_chars_when_matches() {
+        TestCase {
+            // statement expected error
+            input: "query error TestError: The operation \\([a-z]+\\) is not supported.*\n\
+                    selec *;",
+
+            // Model a run that produced an error message that contains regex special characters
+            record_output: query_output_error(
+                "The operation (selec) is not supported. Did you mean [select]?",
+            ),
+
+            // expect the output includes foo
+            expected: Some(
+                "query error TestError: The operation \\([a-z]+\\) is not supported.*\n\
+                 selec *;",
             ),
         }
         .run()
