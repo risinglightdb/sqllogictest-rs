@@ -1,66 +1,29 @@
 //! Sqllogictest runner.
 
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use std::vec;
 
 use async_trait::async_trait;
-use difference::Difference;
 use futures::executor::block_on;
 use futures::{stream, Future, StreamExt};
 use itertools::Itertools;
+use md5::Digest;
 use owo_colors::OwoColorize;
 use regex::Regex;
+use similar::{Change, ChangeTag, TextDiff};
 use tempfile::{tempdir, TempDir};
 
 use crate::parser::*;
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[non_exhaustive]
-pub enum ColumnType {
-    Text,
-    Integer,
-    FloatingPoint,
-    /// Do not check the type of the column.
-    Any,
-    Unknown(char),
-}
-
-impl Display for ColumnType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ColumnType::Text => write!(f, "T"),
-            ColumnType::Integer => write!(f, "I"),
-            ColumnType::FloatingPoint => write!(f, "R"),
-            ColumnType::Any => write!(f, "?"),
-            ColumnType::Unknown(c) => write!(f, "{}", c),
-        }
-    }
-}
-
-impl TryFrom<char> for ColumnType {
-    type Error = ParseErrorKind;
-
-    fn try_from(c: char) -> Result<Self, Self::Error> {
-        match c {
-            'T' => Ok(Self::Text),
-            'I' => Ok(Self::Integer),
-            'R' => Ok(Self::FloatingPoint),
-            '?' => Ok(Self::Any),
-            // FIXME:
-            // _ => Err(ParseErrorKind::InvalidType(c)),
-            _ => Ok(Self::Unknown(c)),
-        }
-    }
-}
+use crate::ColumnType;
 
 #[derive(Debug, Clone)]
-pub enum RecordOutput {
+pub enum RecordOutput<T: ColumnType> {
     Nothing,
     Query {
-        types: Vec<ColumnType>,
+        types: Vec<T>,
         rows: Vec<Vec<String>>,
         error: Option<Arc<dyn std::error::Error + Send + Sync>>,
     },
@@ -71,9 +34,9 @@ pub enum RecordOutput {
 }
 
 #[non_exhaustive]
-pub enum DBOutput {
+pub enum DBOutput<T: ColumnType> {
     Rows {
-        types: Vec<ColumnType>,
+        types: Vec<T>,
         rows: Vec<Vec<String>>,
     },
     /// A statement in the query has completed.
@@ -89,9 +52,11 @@ pub enum DBOutput {
 pub trait AsyncDB: Send {
     /// The error type of SQL execution.
     type Error: std::error::Error + Send + Sync + 'static;
+    /// The type of result columns
+    type ColumnType: ColumnType;
 
     /// Async run a SQL query and return the output.
-    async fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error>;
+    async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, Self::Error>;
 
     /// Engine name of current database.
     fn engine_name(&self) -> &str {
@@ -112,9 +77,11 @@ pub trait AsyncDB: Send {
 pub trait DB: Send {
     /// The error type of SQL execution.
     type Error: std::error::Error + Send + Sync + 'static;
+    /// The type of result columns
+    type ColumnType: ColumnType;
 
     /// Run a SQL query and return the output.
-    fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error>;
+    fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, Self::Error>;
 
     /// Engine name of current database.
     fn engine_name(&self) -> &str {
@@ -128,14 +95,15 @@ impl<D> AsyncDB for D
 where
     D: DB,
 {
-    type Error = <D as DB>::Error;
+    type Error = D::Error;
+    type ColumnType = D::ColumnType;
 
-    async fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error> {
-        <D as DB>::run(self, sql)
+    async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, Self::Error> {
+        D::run(self, sql)
     }
 
     fn engine_name(&self) -> &str {
-        <D as DB>::engine_name(self)
+        D::engine_name(self)
     }
 }
 
@@ -186,7 +154,7 @@ impl Display for ParallelTestError {
         writeln!(f, "parallel test failed")?;
         write!(f, "Caused by:")?;
         for i in &self.errors {
-            writeln!(f, "{}", i)?;
+            writeln!(f, "{i}")?;
         }
         Ok(())
     }
@@ -221,7 +189,7 @@ impl ParallelTestError {
 
 impl std::fmt::Debug for TestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "{self}")
     }
 }
 
@@ -284,18 +252,21 @@ pub enum TestErrorKind {
     // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
     #[error(
         "query result mismatch:\n[SQL] {sql}\n[Diff] (-expected|+actual)\n{}",
-        difference::Changeset::new(.expected, .actual, "\n").diffs.iter().format_with("\n", |diff, f| format_diff(diff, f, false))
+        TextDiff::from_lines(.expected, .actual).iter_all_changes().format_with("\n", |diff, f| format_diff(&diff, f, false))
     )]
     QueryResultMismatch {
         sql: String,
         expected: String,
         actual: String,
     },
-    #[error("expected results are invalid: expected {expected} columns, got {actual} columns\n[SQL] {sql}")]
-    QueryResultColumnCountMismatch {
+    #[error(
+        "query columns mismatch:\n[SQL] {sql}\n{}",
+        format_column_diff(expected, actual, false)
+    )]
+    QueryResultColumnsMismatch {
         sql: String,
-        expected: usize,
-        actual: usize,
+        expected: String,
+        actual: String,
     },
 }
 
@@ -353,33 +324,44 @@ impl<'a> Display for TestErrorKindDisplay<'a> {
                 "query result mismatch:\n[SQL] {sql}\n[Diff] ({}|{})\n{}",
                 "-expected".bright_red(),
                 "+actual".bright_green(),
-                difference::Changeset::new(expected, actual, "\n")
-                    .diffs
-                    .iter()
-                    .format_with("\n", |diff, f| format_diff(diff, f, true))
+                TextDiff::from_lines(expected, actual)
+                    .iter_all_changes()
+                    .format_with("\n", |diff, f| format_diff(&diff, f, true))
             ),
+            TestErrorKind::QueryResultColumnsMismatch {
+                sql,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "query columns mismatch:\n[SQL] {sql}\n{}",
+                    format_column_diff(expected, actual, true)
+                )
+            }
             _ => write!(f, "{}", self.error),
         }
     }
 }
 
 fn format_diff(
-    diff: &Difference,
+    diff: &Change<&str>,
     f: &mut dyn FnMut(&dyn std::fmt::Display) -> std::fmt::Result,
     colorize: bool,
 ) -> std::fmt::Result {
-    match *diff {
-        Difference::Same(ref x) => f(&x
+    match diff.tag() {
+        ChangeTag::Equal => f(&diff
+            .value()
             .lines()
             .format_with("\n", |line, f| f(&format_args!("    {line}")))),
-        Difference::Add(ref x) => f(&x.lines().format_with("\n", |line, f| {
+        ChangeTag::Insert => f(&diff.value().lines().format_with("\n", |line, f| {
             if colorize {
                 f(&format_args!("+   {line}").bright_green())
             } else {
                 f(&format_args!("+   {line}"))
             }
         })),
-        Difference::Rem(ref x) => f(&x.lines().format_with("\n", |line, f| {
+        ChangeTag::Delete => f(&diff.value().lines().format_with("\n", |line, f| {
             if colorize {
                 f(&format_args!("-   {line}").bright_red())
             } else {
@@ -389,7 +371,44 @@ fn format_diff(
     }
 }
 
-/// Validator will be used by `Runner` to validate the output.
+fn format_column_diff(expected: &str, actual: &str, colorize: bool) -> String {
+    let (expected, actual) = TextDiff::from_chars(expected, actual)
+        .iter_all_changes()
+        .fold(
+            ("".to_string(), "".to_string()),
+            |(expected, actual), change| match change.tag() {
+                ChangeTag::Equal => (
+                    format!("{}{}", expected, change.value()),
+                    format!("{}{}", actual, change.value()),
+                ),
+                ChangeTag::Delete => (
+                    if colorize {
+                        format!("{}[{}]", expected, change.value().bright_red())
+                    } else {
+                        format!("{}[{}]", expected, change.value())
+                    },
+                    actual,
+                ),
+                ChangeTag::Insert => (
+                    expected,
+                    if colorize {
+                        format!("{}[{}]", actual, change.value().bright_green())
+                    } else {
+                        format!("{}[{}]", actual, change.value())
+                    },
+                ),
+            },
+        );
+    format!("[Expected] {expected}\n[Actual  ] {actual}")
+}
+
+/// Trim and replace multiple whitespaces with one.
+#[allow(clippy::ptr_arg)]
+fn normalize_string(s: &String) -> String {
+    s.trim().split_ascii_whitespace().join(" ")
+}
+
+/// Validator will be used by [`Runner`] to validate the output.
 ///
 /// # Default
 ///
@@ -406,11 +425,36 @@ pub fn default_validator(actual: &[Vec<String>], expected: &[String]) -> bool {
     normalized_rows == expected_results
 }
 
+/// [`Runner`] uses this validator to check that the expected column types match an actual output.
+///
+/// # Default
+///
+/// By default ([`default_column_validator`]), columns are not validated.
+pub type ColumnTypeValidator<T> = fn(actual: &Vec<T>, expected: &Vec<T>) -> bool;
+
+/// The default validator always returns success for any inputs of expected and actual sets of
+/// columns.
+pub fn default_column_validator<T: ColumnType>(_: &Vec<T>, _: &Vec<T>) -> bool {
+    true
+}
+
+/// The strict validator checks:
+/// - the number of columns is as expected
+/// - each column has the same type as expected
+pub fn strict_column_validator<T: ColumnType>(actual: &Vec<T>, expected: &Vec<T>) -> bool {
+    actual.len() == expected.len()
+        && !actual
+            .iter()
+            .zip(expected.iter())
+            .any(|(actual_column, expected_column)| actual_column != expected_column)
+}
+
 /// Sqllogictest runner.
 pub struct Runner<D: AsyncDB> {
     db: D,
     // validator is used for validate if the result of query equals to expected.
     validator: Validator,
+    column_type_validator: ColumnTypeValidator<D::ColumnType>,
     testdir: Option<TempDir>,
     sort_mode: Option<SortMode>,
     /// 0 means never hashing
@@ -423,6 +467,7 @@ impl<D: AsyncDB> Runner<D> {
         Runner {
             db,
             validator: default_validator,
+            column_type_validator: default_column_validator,
             testdir: None,
             sort_mode: None,
             hash_threshold: 0,
@@ -441,11 +486,18 @@ impl<D: AsyncDB> Runner<D> {
         self.validator = validator;
     }
 
+    pub fn with_column_validator(&mut self, validator: ColumnTypeValidator<D::ColumnType>) {
+        self.column_type_validator = validator;
+    }
+
     pub fn with_hash_threshold(&mut self, hash_threshold: usize) {
         self.hash_threshold = hash_threshold;
     }
 
-    pub async fn apply_record(&mut self, record: Record) -> RecordOutput {
+    pub async fn apply_record(
+        &mut self,
+        record: Record<D::ColumnType>,
+    ) -> RecordOutput<D::ColumnType> {
         match record {
             Record::Statement { conditions, .. } if self.should_skip(&conditions) => {
                 RecordOutput::Nothing
@@ -487,7 +539,7 @@ impl<D: AsyncDB> Runner<D> {
                 sort_mode,
 
                 // compare result in run_async
-                type_string: _,
+                expected_types: _,
                 expected_error: _,
                 expected_results: _,
                 loc: _,
@@ -500,7 +552,7 @@ impl<D: AsyncDB> Runner<D> {
                     Ok(out) => match out {
                         DBOutput::Rows { types, rows } => (types, rows),
                         DBOutput::StatementComplete(count) => {
-                            return RecordOutput::Statement { count, error: None }
+                            return RecordOutput::Statement { count, error: None };
                         }
                     },
                     Err(e) => {
@@ -508,7 +560,7 @@ impl<D: AsyncDB> Runner<D> {
                             error: Some(Arc::new(e)),
                             types: vec![],
                             rows: vec![],
-                        }
+                        };
                     }
                 };
 
@@ -521,16 +573,16 @@ impl<D: AsyncDB> Runner<D> {
                 };
 
                 if self.hash_threshold > 0 && rows.len() * types.len() > self.hash_threshold {
-                    let mut md5 = md5::Context::new();
+                    let mut md5 = md5::Md5::new();
                     for line in &rows {
                         for value in line {
-                            md5.consume(value.as_bytes());
-                            md5.consume(b"\n");
+                            md5.update(value.as_bytes());
+                            md5.update(b"\n");
                         }
                     }
-                    let hash = md5.compute();
+                    let hash = format!("{:2x}", md5.finalize());
                     rows = vec![vec![format!(
-                        "{} values hashing to {:?}",
+                        "{} values hashing to {}",
                         rows.len() * rows[0].len(),
                         hash
                     )]];
@@ -567,8 +619,8 @@ impl<D: AsyncDB> Runner<D> {
     }
 
     /// Run a single record.
-    pub async fn run_async(&mut self, record: Record) -> Result<(), TestError> {
-        tracing::info!(?record, "testing");
+    pub async fn run_async(&mut self, record: Record<D::ColumnType>) -> Result<(), TestError> {
+        tracing::debug!(?record, "testing");
 
         match (record.clone(), self.apply_record(record).await) {
             (_, RecordOutput::Nothing) => {}
@@ -645,7 +697,7 @@ impl<D: AsyncDB> Runner<D> {
                 Record::Query {
                     loc,
                     conditions: _,
-                    type_string,
+                    expected_types,
                     sort_mode: _,
                     label: _,
                     expected_error,
@@ -660,7 +712,7 @@ impl<D: AsyncDB> Runner<D> {
                             sql,
                             kind: RecordKind::Query,
                         }
-                        .at(loc))
+                        .at(loc));
                     }
                     (None, None) => {}
                     (Some(e), Some(expected_error)) => {
@@ -685,23 +737,13 @@ impl<D: AsyncDB> Runner<D> {
                     }
                 };
 
-                // check number of columns
-                if types.len() != type_string.len() {
-                    // FIXME: do not validate type-string now
-                    // return Err(TestErrorKind::QueryResultColumnCountMismatch {
-                    //     sql,
-                    //     expected: type_string.len(),
-                    //     actual: types.len(),
-                    // }
-                    // .at(loc));
-                }
-                for (t_actual, t_expected) in types.iter().zip(type_string.iter()) {
-                    if t_actual != &ColumnType::Any
-                        && t_expected != &ColumnType::Any
-                        && t_actual != t_expected
-                    {
-                        // FIXME: do not validate type-string now
+                if !(self.column_type_validator)(&types, &expected_types) {
+                    return Err(TestErrorKind::QueryResultColumnsMismatch {
+                        sql,
+                        expected: expected_types.iter().map(|c| c.to_char()).join(""),
+                        actual: types.iter().map(|c| c.to_char()).join(""),
                     }
+                    .at(loc));
                 }
 
                 if !(self.validator)(&rows, &expected_results) {
@@ -724,7 +766,7 @@ impl<D: AsyncDB> Runner<D> {
     }
 
     /// Run a single record.
-    pub fn run(&mut self, record: Record) -> Result<(), TestError> {
+    pub fn run(&mut self, record: Record<D::ColumnType>) -> Result<(), TestError> {
         futures::executor::block_on(self.run_async(record))
     }
 
@@ -733,7 +775,7 @@ impl<D: AsyncDB> Runner<D> {
     /// The runner will stop early once a halt record is seen.
     pub async fn run_multi_async(
         &mut self,
-        records: impl IntoIterator<Item = Record>,
+        records: impl IntoIterator<Item = Record<D::ColumnType>>,
     ) -> Result<(), TestError> {
         for record in records.into_iter() {
             if let Record::Halt { .. } = record {
@@ -749,7 +791,7 @@ impl<D: AsyncDB> Runner<D> {
     /// The runner will stop early once a halt record is seen.
     pub fn run_multi(
         &mut self,
-        records: impl IntoIterator<Item = Record>,
+        records: impl IntoIterator<Item = Record<D::ColumnType>>,
     ) -> Result<(), TestError> {
         block_on(self.run_multi_async(records))
     }
@@ -757,6 +799,16 @@ impl<D: AsyncDB> Runner<D> {
     /// Run a sqllogictest script.
     pub async fn run_script_async(&mut self, script: &str) -> Result<(), TestError> {
         let records = parse(script).expect("failed to parse sqllogictest");
+        self.run_multi_async(records).await
+    }
+
+    /// Run a sqllogictest script with a given script name.
+    pub async fn run_script_with_name_async(
+        &mut self,
+        script: &str,
+        name: impl Into<Arc<str>>,
+    ) -> Result<(), TestError> {
+        let records = parse_with_name(script, name).expect("failed to parse sqllogictest");
         self.run_multi_async(records).await
     }
 
@@ -771,12 +823,21 @@ impl<D: AsyncDB> Runner<D> {
         block_on(self.run_script_async(script))
     }
 
+    /// Run a sqllogictest script with a given script name.
+    pub fn run_script_with_name(
+        &mut self,
+        script: &str,
+        name: impl Into<Arc<str>>,
+    ) -> Result<(), TestError> {
+        block_on(self.run_script_with_name_async(script, name))
+    }
+
     /// Run a sqllogictest file.
     pub fn run_file(&mut self, filename: impl AsRef<Path>) -> Result<(), TestError> {
         block_on(self.run_file_async(filename))
     }
 
-    /// aceept the tasks, spawn jobs task to run slt test. the tasks are (AsyncDB, slt filename)
+    /// accept the tasks, spawn jobs task to run slt test. the tasks are (AsyncDB, slt filename)
     /// pairs.
     pub async fn run_parallel_async<Fut>(
         &mut self,
@@ -803,7 +864,7 @@ impl<D: AsyncDB> Runner<D> {
             let db_name = db_name.replace([' ', '.', '-'], "_");
 
             self.db
-                .run(&format!("CREATE DATABASE {};", db_name))
+                .run(&format!("CREATE DATABASE {db_name};"))
                 .await
                 .expect("create db failed");
             let target = hosts[idx % hosts.len()].clone();
@@ -856,24 +917,164 @@ impl<D: AsyncDB> Runner<D> {
             .iter()
             .any(|c| c.should_skip(self.db.engine_name()))
     }
-}
 
-/// Trim and replace multiple whitespaces with one.
-#[allow(clippy::ptr_arg)]
-fn normalize_string(s: &String) -> String {
-    s.trim().split_ascii_whitespace().join(" ")
+    /// Updates a test file with the output produced by a Database. It is an utility function
+    /// wrapping [`update_test_file_with_runner`].
+    ///
+    /// Specifically, it will create `"{filename}.temp"` to buffer the updated records and then
+    /// override the original file with it.
+    ///
+    /// Some other notes:
+    /// - empty lines at the end of the file are cleaned.
+    /// - `halt` and `include` are correctly handled.
+    pub async fn update_test_file(
+        &mut self,
+        filename: impl AsRef<Path>,
+        col_separator: &str,
+        validator: Validator,
+        column_type_validator: ColumnTypeValidator<D::ColumnType>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::io::{Read, Seek, SeekFrom, Write};
+        use std::path::PathBuf;
+
+        use fs_err::{File, OpenOptions};
+
+        fn create_outfile(filename: impl AsRef<Path>) -> std::io::Result<(PathBuf, File)> {
+            let filename = filename.as_ref();
+            let outfilename = filename.file_name().unwrap().to_str().unwrap().to_owned() + ".temp";
+            let outfilename = filename.parent().unwrap().join(outfilename);
+            // create a temp file in read-write mode
+            let outfile = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .read(true)
+                .open(&outfilename)?;
+            Ok((outfilename, outfile))
+        }
+
+        fn override_with_outfile(
+            filename: &String,
+            outfilename: &PathBuf,
+            outfile: &mut File,
+        ) -> std::io::Result<()> {
+            // check whether outfile ends with multiple newlines, which happens if
+            // - the last record is statement/query
+            // - the original file ends with multiple newlines
+
+            const N: usize = 8;
+            let mut buf = [0u8; N];
+            loop {
+                outfile.seek(SeekFrom::End(-(N as i64))).unwrap();
+                outfile.read_exact(&mut buf).unwrap();
+                let num_newlines = buf.iter().rev().take_while(|&&b| b == b'\n').count();
+                assert!(num_newlines > 0);
+
+                if num_newlines > 1 {
+                    // if so, remove the last ones
+                    outfile
+                        .set_len(outfile.metadata().unwrap().len() - num_newlines as u64 + 1)
+                        .unwrap();
+                }
+
+                if num_newlines == 1 || num_newlines < N {
+                    break;
+                }
+            }
+
+            outfile.flush()?;
+            fs_err::rename(outfilename, filename)?;
+
+            Ok(())
+        }
+
+        struct Item {
+            filename: String,
+            outfilename: PathBuf,
+            outfile: File,
+            halt: bool,
+        }
+
+        let filename = filename.as_ref();
+        let records = parse_file(filename)?;
+
+        let (outfilename, outfile) = create_outfile(filename)?;
+        let mut stack = vec![Item {
+            filename: filename.to_string_lossy().to_string(),
+            outfilename,
+            outfile,
+            halt: false,
+        }];
+
+        for record in records {
+            let Item {
+                filename,
+                outfilename,
+                outfile,
+                halt,
+            } = stack.last_mut().unwrap();
+
+            match &record {
+                Record::Injected(Injected::BeginInclude(filename)) => {
+                    let (outfilename, outfile) = create_outfile(filename)?;
+                    stack.push(Item {
+                        filename: filename.clone(),
+                        outfilename,
+                        outfile,
+                        halt: false,
+                    });
+                }
+                Record::Injected(Injected::EndInclude(_)) => {
+                    override_with_outfile(filename, outfilename, outfile)?;
+                    stack.pop();
+                }
+                _ => {
+                    if *halt {
+                        writeln!(outfile, "{record}")?;
+                        continue;
+                    }
+                    if matches!(record, Record::Halt { .. }) {
+                        *halt = true;
+                        writeln!(outfile, "{record}")?;
+                        continue;
+                    }
+                    let record_output = self.apply_record(record.clone()).await;
+                    let record = update_record_with_output(
+                        &record,
+                        &record_output,
+                        col_separator,
+                        validator,
+                        column_type_validator,
+                    )
+                    .unwrap_or(record);
+                    writeln!(outfile, "{record}")?;
+                }
+            }
+        }
+
+        let Item {
+            filename,
+            outfilename,
+            outfile,
+            halt: _,
+        } = stack.last_mut().unwrap();
+        override_with_outfile(filename, outfilename, outfile)?;
+
+        Ok(())
+    }
 }
 
 /// Updates the specified [`Record`] with the [`QueryOutput`] produced
 /// by a Database, returning `Some(new_record)`.
 ///
 /// If an update is not supported, returns `None`
-pub fn update_record_with_output(
-    record: &Record,
-    record_output: &RecordOutput,
+pub fn update_record_with_output<T: ColumnType>(
+    record: &Record<T>,
+    record_output: &RecordOutput<T>,
     col_separator: &str,
     validator: Validator,
-) -> Option<Record> {
+    column_type_validator: ColumnTypeValidator<T>,
+) -> Option<Record<T>> {
     match (record.clone(), record_output) {
         (_, RecordOutput::Nothing) => None,
         // statement, query
@@ -950,7 +1151,7 @@ pub fn update_record_with_output(
             // Error mismatch, update expected error
             (Some(e), _) => Some(Record::Statement {
                 sql,
-                expected_error: Some(Regex::new(&e.to_string()).unwrap()),
+                expected_error: Some(Regex::new(&regex::escape(&e.to_string())).unwrap()),
                 loc,
                 conditions,
                 expected_count: None,
@@ -961,20 +1162,14 @@ pub fn update_record_with_output(
             Record::Query {
                 loc,
                 conditions,
-                type_string,
+                expected_types,
                 sort_mode,
                 label,
                 expected_error,
                 sql,
                 expected_results,
             },
-            RecordOutput::Query {
-                // FIXME: maybe we should use output's types instead of orignal query's types
-                // Fix it after https://github.com/risinglightdb/sqllogictest-rs/issues/36 is resolved.
-                types: _,
-                rows,
-                error,
-            },
+            RecordOutput::Query { types, rows, error },
         ) => {
             match (error, expected_error) {
                 (None, _) => {}
@@ -985,24 +1180,24 @@ pub fn update_record_with_output(
                         expected_error: Some(expected_error),
                         loc,
                         conditions,
-                        type_string: vec![],
+                        expected_types: vec![],
                         sort_mode,
                         label,
                         expected_results: vec![],
-                    })
+                    });
                 }
                 // Error mismatch
                 (Some(e), _) => {
                     return Some(Record::Query {
                         sql,
-                        expected_error: Some(Regex::new(&e.to_string()).unwrap()),
+                        expected_error: Some(Regex::new(&regex::escape(&e.to_string())).unwrap()),
                         loc,
                         conditions,
-                        type_string: vec![],
+                        expected_types: vec![],
                         sort_mode,
                         label,
                         expected_results: vec![],
-                    })
+                    });
                 }
             };
 
@@ -1013,12 +1208,19 @@ pub fn update_record_with_output(
                 rows.iter().map(|cols| cols.join(col_separator)).collect()
             };
 
+            let types = if column_type_validator(types, &expected_types) {
+                // If validation is successful, we respect the original file's expected types.
+                expected_types
+            } else {
+                types.clone()
+            };
+
             Some(Record::Query {
                 sql,
                 expected_error: None,
                 loc,
                 conditions,
-                type_string,
+                expected_types: types,
                 sort_mode,
                 label,
                 expected_results: results,
@@ -1030,148 +1232,31 @@ pub fn update_record_with_output(
     }
 }
 
-/// Updates a test file with the output produced by a Database. It is an utility function wrapping
-/// [`update_test_file_with_runner`].
-///
-/// Specifically, it will create `"{filename}.temp"` to buffer the updated records and then override
-/// the original file with it.
-///
-/// Some other notes:
-/// - empty lines at the end of the file are cleaned.
-/// - `halt` and `include` are correctly handled.
-pub async fn update_test_file<D: AsyncDB>(
-    filename: impl AsRef<Path>,
-    runner: &mut Runner<D>,
-    col_separator: &str,
-    validator: Validator,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use std::io::{Read, Seek, SeekFrom, Write};
-    use std::path::PathBuf;
-
-    use fs_err::{File, OpenOptions};
-
-    fn create_outfile(filename: impl AsRef<Path>) -> std::io::Result<(PathBuf, File)> {
-        let filename = filename.as_ref();
-        let outfilename = filename.file_name().unwrap().to_str().unwrap().to_owned() + ".temp";
-        let outfilename = filename.parent().unwrap().join(outfilename);
-        // create a temp file in read-write mode
-        let outfile = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .read(true)
-            .open(&outfilename)?;
-        Ok((outfilename, outfile))
-    }
-
-    fn override_with_outfile(
-        filename: &String,
-        outfilename: &PathBuf,
-        outfile: &mut File,
-    ) -> std::io::Result<()> {
-        // check whether outfile ends with multiple newlines, which happens if
-        // - the last record is statement/query
-        // - the original file ends with multiple newlines
-
-        const N: usize = 8;
-        let mut buf = [0u8; N];
-        loop {
-            outfile.seek(SeekFrom::End(-(N as i64))).unwrap();
-            outfile.read_exact(&mut buf).unwrap();
-            let num_newlines = buf.iter().rev().take_while(|&&b| b == b'\n').count();
-            assert!(num_newlines > 0);
-
-            if num_newlines > 1 {
-                // if so, remove the last ones
-                outfile
-                    .set_len(outfile.metadata().unwrap().len() - num_newlines as u64 + 1)
-                    .unwrap();
-            }
-
-            if num_newlines == 1 || num_newlines < N {
-                break;
-            }
-        }
-
-        outfile.flush()?;
-        fs_err::rename(outfilename, filename)?;
-
-        Ok(())
-    }
-
-    struct Item {
-        filename: String,
-        outfilename: PathBuf,
-        outfile: File,
-        halt: bool,
-    }
-
-    let filename = filename.as_ref();
-    let records = parse_file(filename)?;
-
-    let (outfilename, outfile) = create_outfile(filename)?;
-    let mut stack = vec![Item {
-        filename: filename.to_string_lossy().to_string(),
-        outfilename,
-        outfile,
-        halt: false,
-    }];
-
-    for record in records {
-        let Item {
-            filename,
-            outfilename,
-            outfile,
-            halt,
-        } = stack.last_mut().unwrap();
-
-        match &record {
-            Record::Injected(Injected::BeginInclude(filename)) => {
-                let (outfilename, outfile) = create_outfile(filename)?;
-                stack.push(Item {
-                    filename: filename.clone(),
-                    outfilename,
-                    outfile,
-                    halt: false,
-                });
-            }
-            Record::Injected(Injected::EndInclude(_)) => {
-                override_with_outfile(filename, outfilename, outfile)?;
-                stack.pop();
-            }
-            _ => {
-                if *halt {
-                    writeln!(outfile, "{}", record)?;
-                    continue;
-                }
-                if matches!(record, Record::Halt { .. }) {
-                    *halt = true;
-                    writeln!(outfile, "{}", record)?;
-                    continue;
-                }
-                let record_output = runner.apply_record(record.clone()).await;
-                let record =
-                    update_record_with_output(&record, &record_output, col_separator, validator)
-                        .unwrap_or(record);
-                writeln!(outfile, "{}", record)?;
-            }
-        }
-    }
-
-    let Item {
-        filename,
-        outfilename,
-        outfile,
-        halt: _,
-    } = stack.last_mut().unwrap();
-    override_with_outfile(filename, outfilename, outfile)?;
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DefaultColumnType;
+
+    #[test]
+    fn test_query_replacement_no_changes() {
+        let record = "query   I?\n\
+                    select * from foo;\n\
+                    ----\n\
+                    3      4";
+        TestCase {
+            // keep the input values
+            input: record,
+
+            // Model a run that produced a 3,4 as output
+            record_output: query_output(
+                &[&["3", "4"]],
+                vec![DefaultColumnType::Integer, DefaultColumnType::Any],
+            ),
+
+            expected: Some(record),
+        }
+        .run()
+    }
 
     #[test]
     fn test_query_replacement() {
@@ -1183,10 +1268,13 @@ mod tests {
                     1 2",
 
             // Model a run that produced a 3,4 as output
-            record_output: query_output(&[&["3", "4"]]),
+            record_output: query_output(
+                &[&["3", "4"]],
+                vec![DefaultColumnType::Integer, DefaultColumnType::Any],
+            ),
 
             expected: Some(
-                "query III\n\
+                "query I?\n\
                  select * from foo;\n\
                  ----\n\
                  3 4",
@@ -1199,15 +1287,18 @@ mod tests {
     fn test_query_replacement_no_input() {
         TestCase {
             // input has no query results
-            input: "query III\n\
+            input: "query\n\
                     select * from foo;\n\
                     ----",
 
             // Model a run that produced a 3,4 as output
-            record_output: query_output(&[&["3", "4"]]),
+            record_output: query_output(
+                &[&["3", "4"]],
+                vec![DefaultColumnType::Integer, DefaultColumnType::Any],
+            ),
 
             expected: Some(
-                "query III\n\
+                "query I?\n\
                  select * from foo;\n\
                  ----\n\
                  3 4",
@@ -1260,7 +1351,10 @@ mod tests {
                     create table foo;",
 
             // Model a run that produced a 3,4 as output
-            record_output: query_output(&[&["3", "4"]]),
+            record_output: query_output(
+                &[&["3", "4"]],
+                vec![DefaultColumnType::Integer, DefaultColumnType::Any],
+            ),
 
             expected: Some(
                 "statement ok\n\
@@ -1387,10 +1481,90 @@ mod tests {
         .run()
     }
 
+    #[test]
+    fn test_statement_error_special_chars() {
+        TestCase {
+            // statement expected error
+            input: "statement error tbd\n\
+                    inser into foo values(2);",
+
+            // Model a run that produced an error message that contains regex special characters
+            record_output: statement_output_error("The operation (inser) is not supported. Did you mean [insert]?"),
+
+            // expect the output includes foo
+            expected: Some(
+                "statement error TestError: The operation \\(inser\\) is not supported\\. Did you mean \\[insert\\]\\?\n\
+                 inser into foo values(2);",
+            ),
+        }
+            .run()
+    }
+
+    #[test]
+    fn test_statement_keep_error_regex_when_matches() {
+        TestCase {
+            // statement expected error
+            input: "statement error TestError: The operation \\([a-z]+\\) is not supported.*\n\
+                    inser into foo values(2);",
+
+            // Model a run that produced an error message that contains regex special characters
+            record_output: statement_output_error(
+                "The operation (inser) is not supported. Did you mean [insert]?",
+            ),
+
+            // expect the output includes foo
+            expected: Some(
+                "statement error TestError: The operation \\([a-z]+\\) is not supported.*\n\
+                 inser into foo values(2);",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
+    fn test_query_error_special_chars() {
+        TestCase {
+            // statement expected error
+            input: "query error tbd\n\
+                    selec *;",
+
+            // Model a run that produced an error message that contains regex special characters
+            record_output: query_output_error("The operation (selec) is not supported. Did you mean [select]?"),
+
+            // expect the output includes foo
+            expected: Some(
+                "query error TestError: The operation \\(selec\\) is not supported\\. Did you mean \\[select\\]\\?\n\
+                 selec *;",
+            ),
+        }
+            .run()
+    }
+
+    #[test]
+    fn test_query_error_special_chars_when_matches() {
+        TestCase {
+            // statement expected error
+            input: "query error TestError: The operation \\([a-z]+\\) is not supported.*\n\
+                    selec *;",
+
+            // Model a run that produced an error message that contains regex special characters
+            record_output: query_output_error(
+                "The operation (selec) is not supported. Did you mean [select]?",
+            ),
+
+            // expect the output includes foo
+            expected: Some(
+                "query error TestError: The operation \\([a-z]+\\) is not supported.*\n\
+                 selec *;",
+            ),
+        }
+        .run()
+    }
+
     #[derive(Debug)]
     struct TestCase {
         input: &'static str,
-        record_output: RecordOutput,
+        record_output: RecordOutput<DefaultColumnType>,
         expected: Option<&'static str>,
     }
 
@@ -1407,7 +1581,13 @@ mod tests {
             println!("**expected:\n{}\n", expected.unwrap_or(""));
             let input = parse_to_record(input);
             let expected = expected.map(parse_to_record);
-            let output = update_record_with_output(&input, &record_output, " ", default_validator);
+            let output = update_record_with_output(
+                &input,
+                &record_output,
+                " ",
+                default_validator,
+                strict_column_validator,
+            );
 
             assert_eq!(
                 &output,
@@ -1425,20 +1605,21 @@ mod tests {
         }
     }
 
-    fn parse_to_record(s: &str) -> Record {
+    fn parse_to_record(s: &str) -> Record<DefaultColumnType> {
         let mut records = parse(s).unwrap();
         assert_eq!(records.len(), 1);
         records.pop().unwrap()
     }
 
     /// Returns a RecordOutput that models the successful execution of a query
-    fn query_output(rows: &[&[&str]]) -> RecordOutput {
+    fn query_output(
+        rows: &[&[&str]],
+        types: Vec<DefaultColumnType>,
+    ) -> RecordOutput<DefaultColumnType> {
         let rows = rows
             .iter()
             .map(|cols| cols.iter().map(|c| c.to_string()).collect::<Vec<_>>())
             .collect::<Vec<_>>();
-
-        let types = rows.iter().map(|_| ColumnType::Any).collect();
 
         RecordOutput::Query {
             types,
@@ -1448,7 +1629,7 @@ mod tests {
     }
 
     /// Returns a RecordOutput that models the error of a query
-    fn query_output_error(error_message: &str) -> RecordOutput {
+    fn query_output_error(error_message: &str) -> RecordOutput<DefaultColumnType> {
         RecordOutput::Query {
             types: vec![],
             rows: vec![],
@@ -1456,12 +1637,12 @@ mod tests {
         }
     }
 
-    fn statement_output(count: u64) -> RecordOutput {
+    fn statement_output(count: u64) -> RecordOutput<DefaultColumnType> {
         RecordOutput::Statement { count, error: None }
     }
 
     /// RecordOutput that models a statement with error
-    fn statement_output_error(error_message: &str) -> RecordOutput {
+    fn statement_output_error(error_message: &str) -> RecordOutput<DefaultColumnType> {
         RecordOutput::Statement {
             count: 0,
             error: Some(Arc::new(TestError(error_message.to_string()))),

@@ -1,55 +1,16 @@
-use std::sync::Arc;
+use std::time::Duration;
 
-use anyhow::Context;
 use async_trait::async_trait;
-use sqllogictest::{ColumnType, DBOutput};
-use tokio::task::JoinHandle;
+use sqllogictest::{DBOutput, DefaultColumnType};
 
-use crate::{DBConfig, Result};
-
-pub struct Postgres {
-    client: Arc<tokio_postgres::Client>,
-    join_handle: JoinHandle<()>,
-}
-
-impl Postgres {
-    pub(super) async fn connect(config: &DBConfig) -> Result<Self> {
-        let (host, port) = config.random_addr();
-
-        let (client, connection) = tokio_postgres::Config::new()
-            .host(host)
-            .port(port)
-            .dbname(&config.db)
-            .user(&config.user)
-            .password(&config.pass)
-            .connect(tokio_postgres::NoTls)
-            .await
-            .context(format!("failed to connect to postgres at {host}:{port}"))?;
-
-        let join_handle = tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                log::error!("Postgres connection error: {:?}", e);
-            }
-        });
-
-        Ok(Self {
-            client: Arc::new(client),
-            join_handle,
-        })
-    }
-}
-
-impl Drop for Postgres {
-    fn drop(&mut self) {
-        self.join_handle.abort()
-    }
-}
+use super::{Postgres, Result, Simple};
 
 #[async_trait]
-impl sqllogictest::AsyncDB for Postgres {
+impl sqllogictest::AsyncDB for Postgres<Simple> {
     type Error = tokio_postgres::error::Error;
+    type ColumnType = DefaultColumnType;
 
-    async fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error> {
+    async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>> {
         let mut output = vec![];
 
         // NOTE:
@@ -90,7 +51,7 @@ impl sqllogictest::AsyncDB for Postgres {
             Ok(DBOutput::StatementComplete(cnt))
         } else {
             Ok(DBOutput::Rows {
-                types: vec![ColumnType::Any; output[0].len()],
+                types: vec![DefaultColumnType::Any; output[0].len()],
                 rows: output,
             })
         }
@@ -98,5 +59,9 @@ impl sqllogictest::AsyncDB for Postgres {
 
     fn engine_name(&self) -> &str {
         "postgres"
+    }
+
+    async fn sleep(dur: Duration) {
+        tokio::time::sleep(dur).await
     }
 }

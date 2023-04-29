@@ -13,7 +13,7 @@ env:
 
 jobs:
   fmt:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -33,7 +33,7 @@ jobs:
           args: --all-targets -- -D warnings
 
   test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -56,3 +56,21 @@ jobs:
           do
               cargo run --example "$(basename "$example")"
           done
+
+  semver:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+      - name: Install semver-checks
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cargo-semver-checks --version ^0.17 --locked
+      - name: Check semver
+        run: |
+         cargo semver-checks check-release -p sqllogictest
+         cargo semver-checks check-release -p sqllogictest-engines

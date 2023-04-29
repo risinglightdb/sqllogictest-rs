@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), 
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.2] - 2023-03-24
+
+* `Runner::update_test_file` properly escapes regex special characters.
+
+## [0.13.1] - 2023-03-16
+
+* Support postgres options.
+
+## [0.13.0] - 2023-02-15
+
+* `sqllogictest-bin` now uses the strict validator to update records (the runner still doesn't check schema).
+* The query syntax now allows optional columns (`query\n` without any column arguments).
+
+## [0.12.0] - 2023-02-09
+
+* customizable column types and validators
+
+## [0.11.2] - 2023-02-09
+
+* support multiple files as input in cli
+* remove unnecessary debug
+
 ## [0.11.1] - 2023-01-15
 
 * fix parsing for trailing comments

@@ -1,55 +1,14 @@
 use std::fmt::Write;
-use std::sync::Arc;
+use std::time::Duration;
 
-use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
-use futures::{pin_mut, StreamExt};
 use pg_interval::Interval;
-use postgres_types::{ToSql, Type};
+use postgres_types::Type;
 use rust_decimal::Decimal;
-use sqllogictest::{ColumnType, DBOutput};
-use tokio::task::JoinHandle;
+use sqllogictest::{DBOutput, DefaultColumnType};
 
-use crate::{DBConfig, Result};
-
-pub struct PostgresExtended {
-    client: Arc<tokio_postgres::Client>,
-    join_handle: JoinHandle<()>,
-}
-
-impl PostgresExtended {
-    pub(super) async fn connect(config: &DBConfig) -> Result<Self> {
-        let (host, port) = config.random_addr();
-
-        let (client, connection) = tokio_postgres::Config::new()
-            .host(host)
-            .port(port)
-            .dbname(&config.db)
-            .user(&config.user)
-            .password(&config.pass)
-            .connect(tokio_postgres::NoTls)
-            .await
-            .context(format!("failed to connect to postgres at {host}:{port}"))?;
-
-        let join_handle = tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                log::error!("PostgresExtended connection error: {:?}", e);
-            }
-        });
-
-        Ok(Self {
-            client: Arc::new(client),
-            join_handle,
-        })
-    }
-}
-
-impl Drop for PostgresExtended {
-    fn drop(&mut self) {
-        self.join_handle.abort()
-    }
-}
+use super::{Extended, Postgres, Result};
 
 macro_rules! array_process {
     ($row:ident, $row_vec:ident, $idx:ident, $t:ty) => {
@@ -220,23 +179,32 @@ fn float8_to_str(value: &f64) -> String {
 }
 
 #[async_trait]
-impl sqllogictest::AsyncDB for PostgresExtended {
+impl sqllogictest::AsyncDB for Postgres<Extended> {
     type Error = tokio_postgres::error::Error;
+    type ColumnType = DefaultColumnType;
 
-    async fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error> {
+    async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>> {
         let mut output = vec![];
 
-        let stmt = self.client.prepare(sql).await?;
-        let rows = self
-            .client
-            .query_raw(&stmt, std::iter::empty::<&(dyn ToSql + Sync)>())
-            .await?;
+        let is_query_sql = {
+            let lower_sql = sql.trim_start().to_ascii_lowercase();
+            lower_sql.starts_with("select")
+                || lower_sql.starts_with("values")
+                || lower_sql.starts_with("show")
+                || lower_sql.starts_with("with")
+                || lower_sql.starts_with("describe")
+                || ((lower_sql.starts_with("insert")
+                    || lower_sql.starts_with("update")
+                    || lower_sql.starts_with("delete"))
+                    && lower_sql.contains("returning"))
+        };
+        if !is_query_sql {
+            self.client.execute(sql, &[]).await?;
+            return Ok(DBOutput::StatementComplete(0));
+        }
 
-        pin_mut!(rows);
-
-        while let Some(row) = rows.next().await {
-            let row = row?;
-
+        let rows = self.client.query(sql, &[]).await?;
+        for row in rows {
             let mut row_vec = vec![];
 
             for (idx, column) in row.columns().iter().enumerate() {
@@ -335,16 +303,14 @@ impl sqllogictest::AsyncDB for PostgresExtended {
         }
 
         if output.is_empty() {
-            match rows.rows_affected() {
-                Some(rows) => Ok(DBOutput::StatementComplete(rows)),
-                None => Ok(DBOutput::Rows {
-                    types: vec![ColumnType::Any; stmt.columns().len()],
-                    rows: vec![],
-                }),
-            }
+            let stmt = self.client.prepare(sql).await?;
+            Ok(DBOutput::Rows {
+                types: vec![DefaultColumnType::Any; stmt.columns().len()],
+                rows: vec![],
+            })
         } else {
             Ok(DBOutput::Rows {
-                types: vec![ColumnType::Any; output[0].len()],
+                types: vec![DefaultColumnType::Any; output[0].len()],
                 rows: output,
             })
         }
@@ -352,5 +318,9 @@ impl sqllogictest::AsyncDB for PostgresExtended {
 
     fn engine_name(&self) -> &str {
         "postgres-extended"
+    }
+
+    async fn sleep(dur: Duration) {
+        tokio::time::sleep(dur).await
     }
 }

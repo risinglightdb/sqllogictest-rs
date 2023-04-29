@@ -27,7 +27,8 @@ struct Database {...}
 
 impl sqllogictest::DB for Database {
     type Error = ...;
-    fn run(&mut self, sql: &str) -> Result<sqllogictest::DBOutput, Self::Error> {
+    type ColumnType = ...;
+    fn run(&mut self, sql: &str) -> Result<sqllogictest::DBOutput<Self::ColumnType>, Self::Error> {
         ...
     }
 }
@@ -116,6 +117,7 @@ DROP VIEW foo, bar;
 - [RisingWave](https://github.com/risingwavelabs/risingwave): The next-generation streaming database in the cloud
 - [DataFusion](https://github.com/apache/arrow-datafusion): Apache Arrow DataFusion SQL Query Engine
 - [Databend](https://github.com/datafuselabs/databend): A powerful cloud data warehouse
+- [CnosDB](https://github.com/cnosdb/cnosdb): Open Source Distributed Time Series Database
 
 ## Contributing
 

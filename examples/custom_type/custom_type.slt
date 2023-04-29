@@ -1,0 +1,11 @@
+query IB
+select * from example_typed
+----
+1 true
+2 false
+3 true
+
+
+query IB
+select * from no_results
+----
