@@ -8,6 +8,10 @@ license = { workspace = true }
 repository = { workspace = true }
 description = "Sqllogictest CLI."
 
+[[bin]]
+name = "sqllogictest"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = { version = "1" }
 async-trait = "0.1"

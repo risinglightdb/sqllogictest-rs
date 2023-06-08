@@ -119,7 +119,8 @@ impl DBConfig {
     }
 }
 
-pub async fn main_okk() -> Result<()> {
+#[tokio::main]
+pub async fn main() -> Result<()> {
     env_logger::init();
 
     let Opt {
