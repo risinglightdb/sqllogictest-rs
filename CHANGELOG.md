@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), 
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2023-06-08
+
+* Add `--label` option for `skipif` and `onlyif` conditions.
+* Add `Runner::add_label`. Change the field names of `Condition`.
+
 ## [0.13.2] - 2023-03-24
 
 * `Runner::update_test_file` properly escapes regex special characters.
