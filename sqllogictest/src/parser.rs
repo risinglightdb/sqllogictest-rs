@@ -1,4 +1,6 @@
 //! Sqllogictest parser.
+
+use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
@@ -244,12 +246,8 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 Control::SortMode(m) => write!(f, "control sortmode {}", m.as_str()),
             },
             Record::Condition(cond) => match cond {
-                Condition::OnlyIf { engine_name } => {
-                    write!(f, "onlyif {engine_name}")
-                }
-                Condition::SkipIf { engine_name } => {
-                    write!(f, "skipif {engine_name}")
-                }
+                Condition::OnlyIf { label } => write!(f, "onlyif {label}"),
+                Condition::SkipIf { label } => write!(f, "skipif {label}"),
             },
             Record::HashThreshold { loc: _, threshold } => {
                 write!(f, "hash-threshold {threshold}")
@@ -287,20 +285,18 @@ pub enum Injected {
 /// The condition to run a query.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Condition {
-    /// The statement or query is skipped if an `onlyif` record for a different database engine is
-    /// seen.
-    OnlyIf { engine_name: String },
-    /// The statement or query is not evaluated if a `skipif` record for the target database engine
-    /// is seen in the prefix.
-    SkipIf { engine_name: String },
+    /// The statement or query is evaluated only if a config with the same name (including database engine) is seen.
+    OnlyIf { label: String },
+    /// The statement or query is not evaluated if a config with the same name (including database engine) is seen.
+    SkipIf { label: String },
 }
 
 impl Condition {
     /// Evaluate condition on given `targe_name`, returns whether to skip this record.
-    pub fn should_skip(&self, target_name: &str) -> bool {
+    pub(crate) fn should_skip(&self, labels: &HashSet<String>) -> bool {
         match self {
-            Condition::OnlyIf { engine_name } => engine_name != target_name,
-            Condition::SkipIf { engine_name } => engine_name == target_name,
+            Condition::OnlyIf { label } => !labels.contains(label),
+            Condition::SkipIf { label } => labels.contains(label),
         }
     }
 }
@@ -457,16 +453,16 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     loc,
                 });
             }
-            ["skipif", engine_name] => {
+            ["skipif", label] => {
                 let cond = Condition::SkipIf {
-                    engine_name: engine_name.to_string(),
+                    label: label.to_string(),
                 };
                 conditions.push(cond.clone());
                 records.push(Record::Condition(cond));
             }
-            ["onlyif", engine_name] => {
+            ["onlyif", label] => {
                 let cond = Condition::OnlyIf {
-                    engine_name: engine_name.to_string(),
+                    label: label.to_string(),
                 };
                 conditions.push(cond.clone());
                 records.push(Record::Condition(cond));

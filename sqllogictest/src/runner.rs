@@ -1,5 +1,6 @@
 //! Sqllogictest runner.
 
+use std::collections::HashSet;
 use std::fmt::{Debug, Display};
 use std::path::Path;
 use std::sync::Arc;
@@ -459,19 +460,27 @@ pub struct Runner<D: AsyncDB> {
     sort_mode: Option<SortMode>,
     /// 0 means never hashing
     hash_threshold: usize,
+    /// Labels for condition `skipif` and `onlyif`.
+    labels: HashSet<String>,
 }
 
 impl<D: AsyncDB> Runner<D> {
     /// Create a new test runner on the database.
     pub fn new(db: D) -> Self {
         Runner {
-            db,
             validator: default_validator,
             column_type_validator: default_column_validator,
             testdir: None,
             sort_mode: None,
             hash_threshold: 0,
+            labels: [db.engine_name().to_string()].into_iter().collect(),
+            db,
         }
+    }
+
+    /// Add a label for condition `skipif` and `onlyif`.
+    pub fn add_label(&mut self, label: &str) {
+        self.labels.insert(label.to_string());
     }
 
     /// Replace the pattern `__TEST_DIR__` in SQL with a temporary directory path.
@@ -913,9 +922,7 @@ impl<D: AsyncDB> Runner<D> {
 
     /// Returns whether we should skip this record, according to given `conditions`.
     fn should_skip(&self, conditions: &[Condition]) -> bool {
-        conditions
-            .iter()
-            .any(|c| c.should_skip(self.db.engine_name()))
+        conditions.iter().any(|c| c.should_skip(&self.labels))
     }
 
     /// Updates a test file with the output produced by a Database. It is an utility function
