@@ -292,7 +292,7 @@ pub enum Condition {
 }
 
 impl Condition {
-    /// Evaluate condition on given `targe_name`, returns whether to skip this record.
+    /// Evaluate condition on given `label`, returns whether to skip this record.
     pub(crate) fn should_skip(&self, labels: &HashSet<String>) -> bool {
         match self {
             Condition::OnlyIf { label } => !labels.contains(label),
