@@ -285,9 +285,9 @@ pub enum Injected {
 /// The condition to run a query.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Condition {
-    /// The statement or query is evaluated only if a config with the same name (including database engine) is seen.
+    /// The statement or query is evaluated only if the label is seen.
     OnlyIf { label: String },
-    /// The statement or query is not evaluated if a config with the same name (including database engine) is seen.
+    /// The statement or query is not evaluated if the label is seen.
     SkipIf { label: String },
 }
 
