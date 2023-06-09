@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), 
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2023-06-08
+
+* We enhanced how `skipif` and `onlyif` works. Previously it checks against `DB::engine_name()`, and `sqllogictest-bin` didn't implement it.
+  - (parser) A minor **breaking change**: Change the field names of `Condition:: OnlyIf/SkipIf`.
+  - (runner) Add `Runner::add_label`. Now multiple labels are supported ( `DB::engine_name()` is still included). The condition evaluates to true if *any* of the provided labels match the `skipif/onlyif <lable>`.
+  - (bin) Add `--label` option to specify custom labels.
+
 ## [0.13.2] - 2023-03-24
 
 * `Runner::update_test_file` properly escapes regex special characters.

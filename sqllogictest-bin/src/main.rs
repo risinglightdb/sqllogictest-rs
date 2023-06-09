@@ -93,6 +93,15 @@ struct Opt {
     /// Reformats the test files.
     #[clap(long)]
     format: bool,
+
+    /// Add a label for conditions.
+    ///
+    /// Records with `skipif label` will be skipped if the label is present.
+    /// Records with `onlyif label` will be executed only if the label is present.
+    ///
+    /// The engine name is a label by default.
+    #[clap(long = "label")]
+    labels: Vec<String>,
 }
 
 /// Connection configuration.
@@ -119,7 +128,8 @@ impl DBConfig {
     }
 }
 
-pub async fn main_okk() -> Result<()> {
+#[tokio::main]
+pub async fn main() -> Result<()> {
     env_logger::init();
 
     let Opt {
@@ -137,6 +147,7 @@ pub async fn main_okk() -> Result<()> {
         options,
         r#override,
         format,
+        labels,
     } = Opt::parse();
 
     if host.len() != port.len() {
@@ -204,9 +215,26 @@ pub async fn main_okk() -> Result<()> {
     test_suite.set_timestamp(Local::now());
 
     let result = if let Some(jobs) = jobs {
-        run_parallel(jobs, &mut test_suite, files, &engine, config, junit.clone()).await
+        run_parallel(
+            jobs,
+            &mut test_suite,
+            files,
+            &engine,
+            config,
+            &labels,
+            junit.clone(),
+        )
+        .await
     } else {
-        run_serial(&mut test_suite, files, &engine, config, junit.clone()).await
+        run_serial(
+            &mut test_suite,
+            files,
+            &engine,
+            config,
+            &labels,
+            junit.clone(),
+        )
+        .await
     };
 
     report.add_test_suite(test_suite);
@@ -224,6 +252,7 @@ async fn run_parallel(
     files: Vec<PathBuf>,
     engine: &EngineConfig,
     config: DBConfig,
+    labels: &[String],
     junit: Option<String>,
 ) -> Result<()> {
     let mut create_databases = BTreeMap::new();
@@ -257,10 +286,13 @@ async fn run_parallel(
             config.db = db_name;
             let file = filename.to_string_lossy().to_string();
             let engine = engine.clone();
+            let labels = labels.to_vec();
             async move {
                 let (buf, res) = tokio::spawn(async move {
                     let mut buf = vec![];
-                    let res = connect_and_run_test_file(&mut buf, filename, &engine, config).await;
+                    let res =
+                        connect_and_run_test_file(&mut buf, filename, &engine, config, &labels)
+                            .await;
                     (buf, res)
                 })
                 .await
@@ -331,13 +363,17 @@ async fn run_serial(
     files: Vec<PathBuf>,
     engine: &EngineConfig,
     config: DBConfig,
+    labels: &[String],
     junit: Option<String>,
 ) -> Result<()> {
     let mut failed_case = vec![];
 
     for file in files {
         let engine = engines::connect(engine, &config).await?;
-        let runner = Runner::new(engine);
+        let mut runner = Runner::new(engine);
+        for label in labels {
+            runner.add_label(label);
+        }
 
         let filename = file.to_string_lossy().to_string();
         let test_case_name = filename.replace(['/', ' ', '.', '-'], "_");
@@ -405,9 +441,13 @@ async fn connect_and_run_test_file(
     filename: PathBuf,
     engine: &EngineConfig,
     config: DBConfig,
+    labels: &[String],
 ) -> Result<Duration> {
     let engine = engines::connect(engine, &config).await?;
-    let runner = Runner::new(engine);
+    let mut runner = Runner::new(engine);
+    for label in labels {
+        runner.add_label(label);
+    }
     let result = run_test_file(out, runner, filename).await?;
 
     Ok(result)

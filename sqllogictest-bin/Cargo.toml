@@ -8,6 +8,10 @@ license = { workspace = true }
 repository = { workspace = true }
 description = "Sqllogictest CLI."
 
+[[bin]]
+name = "sqllogictest"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = { version = "1" }
 async-trait = "0.1"
@@ -20,8 +24,8 @@ glob = "0.3"
 itertools = "0.10"
 quick-junit = { version = "0.2" }
 rand = "0.8"
-sqllogictest = { path = "../sqllogictest", version = "0.13" }
-sqllogictest-engines = { path = "../sqllogictest-engines", version = "0.13" }
+sqllogictest = { path = "../sqllogictest", version = "0.14" }
+sqllogictest-engines = { path = "../sqllogictest-engines", version = "0.14" }
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
