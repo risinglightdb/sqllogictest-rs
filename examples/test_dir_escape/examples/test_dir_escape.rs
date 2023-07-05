@@ -28,7 +28,7 @@ impl sqllogictest::DB for FakeDB {
 }
 
 fn main() {
-    let mut tester = sqllogictest::Runner::new(FakeDB);
+    let mut tester = sqllogictest::Runner::new_once(FakeDB);
     // enable `__TEST_DIR__` override
     tester.enable_testdir();
 

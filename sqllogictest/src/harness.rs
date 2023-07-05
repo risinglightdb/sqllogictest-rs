@@ -3,7 +3,7 @@ use std::path::Path;
 pub use glob::glob;
 pub use libtest_mimic::{run, Arguments, Failed, Trial};
 
-use crate::{AsyncDB, Runner};
+use crate::{AsyncDB, MakeOnce, Runner};
 
 /// * `db_fn`: `fn() -> sqllogictest::AsyncDB`
 /// * `pattern`: The glob used to match against and select each file to be tested. It is relative to
@@ -33,7 +33,7 @@ macro_rules! harness {
 }
 
 pub fn test(filename: impl AsRef<Path>, db: impl AsyncDB) -> Result<(), Failed> {
-    let mut tester = Runner::new(db);
+    let mut tester = Runner::new(MakeOnce::new(db));
     tester.run_file(filename)?;
     Ok(())
 }

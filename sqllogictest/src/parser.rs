@@ -82,6 +82,7 @@ pub enum Record<T: ColumnType> {
     Statement {
         loc: Location,
         conditions: Vec<Condition>,
+        connection: Connection,
         /// The SQL command is expected to fail with an error messages that matches the given
         /// regex. If the regex is an empty string, any error message is accepted.
         #[educe(PartialEq(method = "cmp_regex"))]
@@ -96,6 +97,7 @@ pub enum Record<T: ColumnType> {
     Query {
         loc: Location,
         conditions: Vec<Condition>,
+        connection: Connection,
         expected_types: Vec<T>,
         sort_mode: Option<SortMode>,
         label: Option<String>,
@@ -136,6 +138,7 @@ pub enum Record<T: ColumnType> {
         threshold: u64,
     },
     Condition(Condition),
+    Connection(Connection),
     Comment(Vec<String>),
     Newline,
     /// Internally injected record which should not occur in the test file.
@@ -175,6 +178,7 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
             Record::Statement {
                 loc: _,
                 conditions: _,
+                connection: _,
                 expected_error,
                 sql,
                 expected_count,
@@ -199,6 +203,7 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
             Record::Query {
                 loc: _,
                 conditions: _,
+                connection: _,
                 expected_types,
                 sort_mode,
                 label,
@@ -249,6 +254,12 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 Condition::OnlyIf { label } => write!(f, "onlyif {label}"),
                 Condition::SkipIf { label } => write!(f, "skipif {label}"),
             },
+            Record::Connection(conn) => {
+                if let Connection::Named(conn) = conn {
+                    write!(f, "connection {}", conn)?;
+                }
+                Ok(())
+            }
             Record::HashThreshold { loc: _, threshold } => {
                 write!(f, "hash-threshold {threshold}")
             }
@@ -297,6 +308,22 @@ impl Condition {
         match self {
             Condition::OnlyIf { label } => !labels.contains(label),
             Condition::SkipIf { label } => labels.contains(label),
+        }
+    }
+}
+
+#[derive(Default, Debug, PartialEq, Eq, Hash, Clone)]
+pub enum Connection {
+    #[default]
+    Default,
+    Named(String),
+}
+
+impl Connection {
+    fn new(name: impl AsRef<str>) -> Self {
+        match name.as_ref() {
+            "default" => Self::Default,
+            name => Self::Named(name.to_owned()),
         }
     }
 }
@@ -404,6 +431,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
     let mut lines = script.lines().enumerate().peekable();
     let mut records = vec![];
     let mut conditions = vec![];
+    let mut connection = Connection::Default;
     let mut comments = vec![];
 
     while let Some((num, line)) = lines.next() {
@@ -467,6 +495,11 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 conditions.push(cond.clone());
                 records.push(Record::Condition(cond));
             }
+            ["connection", label] => {
+                let conn = Connection::new(label);
+                connection = conn.clone();
+                records.push(Record::Connection(conn));
+            }
             ["statement", res @ ..] => {
                 let mut expected_count = None;
                 let mut expected_error = None;
@@ -499,6 +532,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 records.push(Record::Statement {
                     loc,
                     conditions: std::mem::take(&mut conditions),
+                    connection: std::mem::take(&mut connection),
                     expected_error,
                     sql,
                     expected_count,
@@ -565,6 +599,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 records.push(Record::Query {
                     loc,
                     conditions: std::mem::take(&mut conditions),
+                    connection: std::mem::take(&mut connection),
                     expected_types,
                     sort_mode,
                     label,
@@ -728,6 +763,7 @@ select * from foo;
             vec![Record::Query {
                 loc: Location::new("<unknown>", 1),
                 conditions: vec![],
+                connection: Connection::Default,
                 expected_types: vec![],
                 sort_mode: None,
                 label: None,
@@ -799,6 +835,7 @@ select * from foo;
                     // so if new variants are added, this match
                     // statement must be too.
                     Record::Condition(_)
+                    | Record::Connection(_)
                     | Record::Comment(_)
                     | Record::Control(_)
                     | Record::Newline

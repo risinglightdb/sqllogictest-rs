@@ -1,6 +1,6 @@
 //! Sqllogictest runner.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::path::Path;
 use std::sync::Arc;
@@ -9,7 +9,8 @@ use std::vec;
 
 use async_trait::async_trait;
 use futures::executor::block_on;
-use futures::{stream, Future, StreamExt};
+use futures::future::BoxFuture;
+use futures::{stream, Future, FutureExt, StreamExt};
 use itertools::Itertools;
 use md5::Digest;
 use owo_colors::OwoColorize;
@@ -50,7 +51,7 @@ pub enum DBOutput<T: ColumnType> {
 
 /// The async database to be tested.
 #[async_trait]
-pub trait AsyncDB: Send {
+pub trait AsyncDB: Send + 'static {
     /// The error type of SQL execution.
     type Error: std::error::Error + Send + Sync + 'static;
     /// The type of result columns
@@ -75,7 +76,7 @@ pub trait AsyncDB: Send {
 }
 
 /// The database to be tested.
-pub trait DB: Send {
+pub trait DB: Send + 'static {
     /// The error type of SQL execution.
     type Error: std::error::Error + Send + Sync + 'static;
     /// The type of result columns
@@ -450,12 +451,75 @@ pub fn strict_column_validator<T: ColumnType>(actual: &Vec<T>, expected: &Vec<T>
             .any(|(actual_column, expected_column)| actual_column != expected_column)
 }
 
+pub trait MakeConnection: 'static {
+    type D: AsyncDB;
+
+    fn make(&mut self) -> BoxFuture<Result<Self::D, <Self::D as AsyncDB>::Error>>;
+}
+
+impl<D: AsyncDB, F, Fut> MakeConnection for F
+where
+    F: FnMut() -> Fut + 'static,
+    Fut: Future<Output = Result<D, D::Error>> + Send + 'static,
+{
+    type D = D;
+
+    fn make(&mut self) -> BoxFuture<Result<D, <D as AsyncDB>::Error>> {
+        self().boxed()
+    }
+}
+
+pub struct MakeOnce<D>(Option<D>);
+
+impl<D> MakeOnce<D> {
+    pub fn new(db: D) -> Self {
+        MakeOnce(Some(db))
+    }
+}
+
+impl<D: AsyncDB> MakeConnection for MakeOnce<D> {
+    type D = D;
+
+    fn make(&mut self) -> BoxFuture<Result<D, <D as AsyncDB>::Error>> {
+        async { Ok(self.0.take().expect("MakeOnce can only be used once")) }.boxed()
+    }
+}
+
+struct Connections<M: MakeConnection> {
+    make_conn: M,
+    conns: HashMap<Connection, M::D>,
+}
+
+impl<M: MakeConnection> Connections<M> {
+    fn new(make_conn: M) -> Self {
+        Connections {
+            make_conn,
+            conns: HashMap::new(),
+        }
+    }
+
+    async fn get(&mut self, name: Connection) -> Result<&mut M::D, <M::D as AsyncDB>::Error> {
+        if !self.conns.contains_key(&name) {
+            let conn = self.make_conn.make().await?;
+            self.conns.insert(name.clone(), conn);
+        }
+        Ok(self.conns.get_mut(&name).unwrap())
+    }
+
+    async fn run_default(
+        &mut self,
+        sql: &str,
+    ) -> Result<DBOutput<<M::D as AsyncDB>::ColumnType>, <M::D as AsyncDB>::Error> {
+        self.get(Connection::Default).await?.run(sql).await
+    }
+}
+
 /// Sqllogictest runner.
-pub struct Runner<D: AsyncDB> {
-    db: D,
+pub struct Runner<M: MakeConnection> {
+    conn: Connections<M>,
     // validator is used for validate if the result of query equals to expected.
     validator: Validator,
-    column_type_validator: ColumnTypeValidator<D::ColumnType>,
+    column_type_validator: ColumnTypeValidator<<M::D as AsyncDB>::ColumnType>,
     testdir: Option<TempDir>,
     sort_mode: Option<SortMode>,
     /// 0 means never hashing
@@ -464,17 +528,23 @@ pub struct Runner<D: AsyncDB> {
     labels: HashSet<String>,
 }
 
-impl<D: AsyncDB> Runner<D> {
+impl<D: AsyncDB> Runner<MakeOnce<D>> {
+    pub fn new_once(db: D) -> Self {
+        Self::new(MakeOnce::new(db))
+    }
+}
+
+impl<M: MakeConnection> Runner<M> {
     /// Create a new test runner on the database.
-    pub fn new(db: D) -> Self {
+    pub fn new(make_conn: M) -> Self {
         Runner {
             validator: default_validator,
             column_type_validator: default_column_validator,
             testdir: None,
             sort_mode: None,
             hash_threshold: 0,
-            labels: [db.engine_name().to_string()].into_iter().collect(),
-            db,
+            labels: HashSet::new(), // TODO
+            conn: Connections::new(make_conn),
         }
     }
 
@@ -495,7 +565,10 @@ impl<D: AsyncDB> Runner<D> {
         self.validator = validator;
     }
 
-    pub fn with_column_validator(&mut self, validator: ColumnTypeValidator<D::ColumnType>) {
+    pub fn with_column_validator(
+        &mut self,
+        validator: ColumnTypeValidator<<M::D as AsyncDB>::ColumnType>,
+    ) {
         self.column_type_validator = validator;
     }
 
@@ -505,14 +578,15 @@ impl<D: AsyncDB> Runner<D> {
 
     pub async fn apply_record(
         &mut self,
-        record: Record<D::ColumnType>,
-    ) -> RecordOutput<D::ColumnType> {
+        record: Record<<M::D as AsyncDB>::ColumnType>,
+    ) -> RecordOutput<<M::D as AsyncDB>::ColumnType> {
         match record {
             Record::Statement { conditions, .. } if self.should_skip(&conditions) => {
                 RecordOutput::Nothing
             }
             Record::Statement {
                 conditions: _,
+                connection,
                 sql,
 
                 // compare result in run_async
@@ -521,7 +595,18 @@ impl<D: AsyncDB> Runner<D> {
                 loc: _,
             } => {
                 let sql = self.replace_keywords(sql);
-                let ret = self.db.run(&sql).await;
+
+                let conn = match self.conn.get(connection).await {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        return RecordOutput::Statement {
+                            count: 0,
+                            error: Some(Arc::new(e)),
+                        }
+                    }
+                };
+
+                let ret = conn.run(&sql).await;
                 match ret {
                     Ok(out) => match out {
                         DBOutput::Rows { types, rows } => RecordOutput::Query {
@@ -544,6 +629,7 @@ impl<D: AsyncDB> Runner<D> {
             }
             Record::Query {
                 conditions: _,
+                connection,
                 sql,
                 sort_mode,
 
@@ -557,7 +643,19 @@ impl<D: AsyncDB> Runner<D> {
                 label: _,
             } => {
                 let sql = self.replace_keywords(sql);
-                let (types, mut rows) = match self.db.run(&sql).await {
+
+                let conn = match self.conn.get(connection).await {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        return RecordOutput::Query {
+                            error: Some(Arc::new(e)),
+                            types: vec![],
+                            rows: vec![],
+                        }
+                    }
+                };
+
+                let (types, mut rows) = match conn.run(&sql).await {
                     Ok(out) => match out {
                         DBOutput::Rows { types, rows } => (types, rows),
                         DBOutput::StatementComplete(count) => {
@@ -604,7 +702,7 @@ impl<D: AsyncDB> Runner<D> {
                 }
             }
             Record::Sleep { duration, .. } => {
-                D::sleep(duration).await;
+                <M::D as AsyncDB>::sleep(duration).await;
                 RecordOutput::Nothing
             }
             Record::Control(control) => match control {
@@ -623,12 +721,16 @@ impl<D: AsyncDB> Runner<D> {
             | Record::Subtest { .. }
             | Record::Halt { .. }
             | Record::Injected(_)
-            | Record::Condition(_) => RecordOutput::Nothing,
+            | Record::Condition(_)
+            | Record::Connection(_) => RecordOutput::Nothing,
         }
     }
 
     /// Run a single record.
-    pub async fn run_async(&mut self, record: Record<D::ColumnType>) -> Result<(), TestError> {
+    pub async fn run_async(
+        &mut self,
+        record: Record<<M::D as AsyncDB>::ColumnType>,
+    ) -> Result<(), TestError> {
         tracing::debug!(?record, "testing");
 
         match (record.clone(), self.apply_record(record).await) {
@@ -656,6 +758,7 @@ impl<D: AsyncDB> Runner<D> {
             (
                 Record::Statement {
                     loc,
+                    connection: _,
                     conditions: _,
                     expected_error,
                     sql,
@@ -706,6 +809,7 @@ impl<D: AsyncDB> Runner<D> {
                 Record::Query {
                     loc,
                     conditions: _,
+                    connection: _,
                     expected_types,
                     sort_mode: _,
                     label: _,
@@ -775,7 +879,7 @@ impl<D: AsyncDB> Runner<D> {
     }
 
     /// Run a single record.
-    pub fn run(&mut self, record: Record<D::ColumnType>) -> Result<(), TestError> {
+    pub fn run(&mut self, record: Record<<M::D as AsyncDB>::ColumnType>) -> Result<(), TestError> {
         futures::executor::block_on(self.run_async(record))
     }
 
@@ -784,7 +888,7 @@ impl<D: AsyncDB> Runner<D> {
     /// The runner will stop early once a halt record is seen.
     pub async fn run_multi_async(
         &mut self,
-        records: impl IntoIterator<Item = Record<D::ColumnType>>,
+        records: impl IntoIterator<Item = Record<<M::D as AsyncDB>::ColumnType>>,
     ) -> Result<(), TestError> {
         for record in records.into_iter() {
             if let Record::Halt { .. } = record {
@@ -800,7 +904,7 @@ impl<D: AsyncDB> Runner<D> {
     /// The runner will stop early once a halt record is seen.
     pub fn run_multi(
         &mut self,
-        records: impl IntoIterator<Item = Record<D::ColumnType>>,
+        records: impl IntoIterator<Item = Record<<M::D as AsyncDB>::ColumnType>>,
     ) -> Result<(), TestError> {
         block_on(self.run_multi_async(records))
     }
@@ -856,7 +960,7 @@ impl<D: AsyncDB> Runner<D> {
         jobs: usize,
     ) -> Result<(), ParallelTestError>
     where
-        Fut: Future<Output = D>,
+        Fut: Future<Output = M::D> + Send + 'static,
     {
         let files = glob::glob(glob).expect("failed to read glob pattern");
         let mut tasks = vec![];
@@ -872,14 +976,14 @@ impl<D: AsyncDB> Runner<D> {
                 .expect("not a UTF-8 filename");
             let db_name = db_name.replace([' ', '.', '-'], "_");
 
-            self.db
-                .run(&format!("CREATE DATABASE {db_name};"))
+            self.conn
+                .run_default(&format!("CREATE DATABASE {db_name};"))
                 .await
                 .expect("create db failed");
             let target = hosts[idx % hosts.len()].clone();
             tasks.push(async move {
-                let db = conn_builder(target, db_name).await;
-                let mut tester = Runner::new(db);
+                let mut tester =
+                    Runner::new(move || conn_builder(target.clone(), db_name.clone()).map(Ok));
                 let filename = file.to_string_lossy().to_string();
                 tester.run_file_async(filename).await
             })
@@ -906,7 +1010,7 @@ impl<D: AsyncDB> Runner<D> {
         jobs: usize,
     ) -> Result<(), ParallelTestError>
     where
-        Fut: Future<Output = D>,
+        Fut: Future<Output = M::D> + Send + 'static,
     {
         block_on(self.run_parallel_async(glob, hosts, conn_builder, jobs))
     }
@@ -939,7 +1043,7 @@ impl<D: AsyncDB> Runner<D> {
         filename: impl AsRef<Path>,
         col_separator: &str,
         validator: Validator,
-        column_type_validator: ColumnTypeValidator<D::ColumnType>,
+        column_type_validator: ColumnTypeValidator<<M::D as AsyncDB>::ColumnType>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use std::io::{Read, Seek, SeekFrom, Write};
         use std::path::PathBuf;
@@ -1090,6 +1194,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 sql,
                 loc,
                 conditions,
+                connection,
                 expected_error: None,
                 expected_count,
             },
@@ -1107,6 +1212,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 expected_error: None,
                 loc,
                 conditions,
+                connection,
                 expected_count,
             })
         }
@@ -1116,6 +1222,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 sql,
                 loc,
                 conditions,
+                connection,
                 ..
             },
             RecordOutput::Statement { error: None, .. },
@@ -1124,6 +1231,7 @@ pub fn update_record_with_output<T: ColumnType>(
             expected_error: None,
             loc,
             conditions,
+            connection,
             expected_count: None,
         }),
         // statement, statement
@@ -1131,6 +1239,7 @@ pub fn update_record_with_output<T: ColumnType>(
             Record::Statement {
                 loc,
                 conditions,
+                connection,
                 expected_error,
                 sql,
                 expected_count,
@@ -1143,6 +1252,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 expected_error: None,
                 loc,
                 conditions,
+                connection,
                 expected_count: expected_count.map(|_| *count),
             }),
             // Error match
@@ -1152,6 +1262,7 @@ pub fn update_record_with_output<T: ColumnType>(
                     expected_error: Some(expected_error),
                     loc,
                     conditions,
+                    connection,
                     expected_count: None,
                 })
             }
@@ -1161,6 +1272,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 expected_error: Some(Regex::new(&regex::escape(&e.to_string())).unwrap()),
                 loc,
                 conditions,
+                connection,
                 expected_count: None,
             }),
         },
@@ -1169,6 +1281,7 @@ pub fn update_record_with_output<T: ColumnType>(
             Record::Query {
                 loc,
                 conditions,
+                connection,
                 expected_types,
                 sort_mode,
                 label,
@@ -1187,6 +1300,7 @@ pub fn update_record_with_output<T: ColumnType>(
                         expected_error: Some(expected_error),
                         loc,
                         conditions,
+                        connection,
                         expected_types: vec![],
                         sort_mode,
                         label,
@@ -1200,6 +1314,7 @@ pub fn update_record_with_output<T: ColumnType>(
                         expected_error: Some(Regex::new(&regex::escape(&e.to_string())).unwrap()),
                         loc,
                         conditions,
+                        connection,
                         expected_types: vec![],
                         sort_mode,
                         label,
@@ -1227,6 +1342,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 expected_error: None,
                 loc,
                 conditions,
+                connection,
                 expected_types: types,
                 sort_mode,
                 label,

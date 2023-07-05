@@ -41,7 +41,7 @@ impl sqllogictest::DB for FakeDB {
 }
 
 fn main() {
-    let mut tester = sqllogictest::Runner::new(FakeDB);
+    let mut tester = sqllogictest::Runner::new_once(FakeDB);
 
     let mut filename = PathBuf::from(file!());
     filename.pop();
