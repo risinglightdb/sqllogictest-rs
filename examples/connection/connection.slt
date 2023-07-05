@@ -14,6 +14,7 @@ select counter()
 ----
 1
 
+# `default` is the name of the default connection if not specified
 connection default
 query I
 select counter()
@@ -26,6 +27,7 @@ select counter()
 ----
 2
 
+# connection names are case sensitive
 connection AnOtHeR
 query I
 select counter()
