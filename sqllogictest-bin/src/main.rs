@@ -716,7 +716,7 @@ async fn update_test_file<T: std::io::Write, M: MakeConnection>(
 async fn update_record<M: MakeConnection>(
     outfile: &mut File,
     runner: &mut Runner<M>,
-    record: Record<<M::D as AsyncDB>::ColumnType>,
+    record: Record<<M::Conn as AsyncDB>::ColumnType>,
     format: bool,
 ) -> Result<()> {
     assert!(!matches!(record, Record::Injected(_)));

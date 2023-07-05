@@ -9,7 +9,6 @@ use std::vec;
 
 use async_trait::async_trait;
 use futures::executor::block_on;
-use futures::future::BoxFuture;
 use futures::{stream, Future, FutureExt, StreamExt};
 use itertools::Itertools;
 use md5::Digest;
@@ -51,7 +50,7 @@ pub enum DBOutput<T: ColumnType> {
 
 /// The async database to be tested.
 #[async_trait]
-pub trait AsyncDB: Send + 'static {
+pub trait AsyncDB {
     /// The error type of SQL execution.
     type Error: std::error::Error + Send + Sync + 'static;
     /// The type of result columns
@@ -76,7 +75,7 @@ pub trait AsyncDB: Send + 'static {
 }
 
 /// The database to be tested.
-pub trait DB: Send + 'static {
+pub trait DB {
     /// The error type of SQL execution.
     type Error: std::error::Error + Send + Sync + 'static;
     /// The type of result columns
@@ -95,7 +94,7 @@ pub trait DB: Send + 'static {
 #[async_trait]
 impl<D> AsyncDB for D
 where
-    D: DB,
+    D: DB + Send,
 {
     type Error = D::Error;
     type ColumnType = D::ColumnType;
@@ -451,21 +450,23 @@ pub fn strict_column_validator<T: ColumnType>(actual: &Vec<T>, expected: &Vec<T>
             .any(|(actual_column, expected_column)| actual_column != expected_column)
 }
 
-pub trait MakeConnection: 'static {
-    type D: AsyncDB;
+pub trait MakeConnection {
+    type Conn: AsyncDB;
+    type MakeFuture: Future<Output = Result<Self::Conn, <Self::Conn as AsyncDB>::Error>>;
 
-    fn make(&mut self) -> BoxFuture<Result<Self::D, <Self::D as AsyncDB>::Error>>;
+    fn make(&mut self) -> Self::MakeFuture;
 }
 
 impl<D: AsyncDB, F, Fut> MakeConnection for F
 where
-    F: FnMut() -> Fut + 'static,
-    Fut: Future<Output = Result<D, D::Error>> + Send + 'static,
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<D, D::Error>>,
 {
-    type D = D;
+    type Conn = D;
+    type MakeFuture = Fut;
 
-    fn make(&mut self) -> BoxFuture<Result<D, <D as AsyncDB>::Error>> {
-        self().boxed()
+    fn make(&mut self) -> Self::MakeFuture {
+        self()
     }
 }
 
@@ -478,16 +479,17 @@ impl<D> MakeOnce<D> {
 }
 
 impl<D: AsyncDB> MakeConnection for MakeOnce<D> {
-    type D = D;
+    type Conn = D;
+    type MakeFuture = futures::future::Ready<Result<D, D::Error>>;
 
-    fn make(&mut self) -> BoxFuture<Result<D, <D as AsyncDB>::Error>> {
-        async { Ok(self.0.take().expect("MakeOnce can only be used once")) }.boxed()
+    fn make(&mut self) -> Self::MakeFuture {
+        futures::future::ready(Ok(self.0.take().expect("MakeOnce can only be used once")))
     }
 }
 
 struct Connections<M: MakeConnection> {
     make_conn: M,
-    conns: HashMap<Connection, M::D>,
+    conns: HashMap<Connection, M::Conn>,
 }
 
 impl<M: MakeConnection> Connections<M> {
@@ -498,7 +500,7 @@ impl<M: MakeConnection> Connections<M> {
         }
     }
 
-    async fn get(&mut self, name: Connection) -> Result<&mut M::D, <M::D as AsyncDB>::Error> {
+    async fn get(&mut self, name: Connection) -> Result<&mut M::Conn, <M::Conn as AsyncDB>::Error> {
         if !self.conns.contains_key(&name) {
             let conn = self.make_conn.make().await?;
             self.conns.insert(name.clone(), conn);
@@ -509,7 +511,7 @@ impl<M: MakeConnection> Connections<M> {
     async fn run_default(
         &mut self,
         sql: &str,
-    ) -> Result<DBOutput<<M::D as AsyncDB>::ColumnType>, <M::D as AsyncDB>::Error> {
+    ) -> Result<DBOutput<<M::Conn as AsyncDB>::ColumnType>, <M::Conn as AsyncDB>::Error> {
         self.get(Connection::Default).await?.run(sql).await
     }
 }
@@ -519,7 +521,7 @@ pub struct Runner<M: MakeConnection> {
     conn: Connections<M>,
     // validator is used for validate if the result of query equals to expected.
     validator: Validator,
-    column_type_validator: ColumnTypeValidator<<M::D as AsyncDB>::ColumnType>,
+    column_type_validator: ColumnTypeValidator<<M::Conn as AsyncDB>::ColumnType>,
     testdir: Option<TempDir>,
     sort_mode: Option<SortMode>,
     /// 0 means never hashing
@@ -567,7 +569,7 @@ impl<M: MakeConnection> Runner<M> {
 
     pub fn with_column_validator(
         &mut self,
-        validator: ColumnTypeValidator<<M::D as AsyncDB>::ColumnType>,
+        validator: ColumnTypeValidator<<M::Conn as AsyncDB>::ColumnType>,
     ) {
         self.column_type_validator = validator;
     }
@@ -578,8 +580,8 @@ impl<M: MakeConnection> Runner<M> {
 
     pub async fn apply_record(
         &mut self,
-        record: Record<<M::D as AsyncDB>::ColumnType>,
-    ) -> RecordOutput<<M::D as AsyncDB>::ColumnType> {
+        record: Record<<M::Conn as AsyncDB>::ColumnType>,
+    ) -> RecordOutput<<M::Conn as AsyncDB>::ColumnType> {
         match record {
             Record::Statement { conditions, .. } if self.should_skip(&conditions) => {
                 RecordOutput::Nothing
@@ -702,7 +704,7 @@ impl<M: MakeConnection> Runner<M> {
                 }
             }
             Record::Sleep { duration, .. } => {
-                <M::D as AsyncDB>::sleep(duration).await;
+                <M::Conn as AsyncDB>::sleep(duration).await;
                 RecordOutput::Nothing
             }
             Record::Control(control) => match control {
@@ -729,7 +731,7 @@ impl<M: MakeConnection> Runner<M> {
     /// Run a single record.
     pub async fn run_async(
         &mut self,
-        record: Record<<M::D as AsyncDB>::ColumnType>,
+        record: Record<<M::Conn as AsyncDB>::ColumnType>,
     ) -> Result<(), TestError> {
         tracing::debug!(?record, "testing");
 
@@ -879,7 +881,10 @@ impl<M: MakeConnection> Runner<M> {
     }
 
     /// Run a single record.
-    pub fn run(&mut self, record: Record<<M::D as AsyncDB>::ColumnType>) -> Result<(), TestError> {
+    pub fn run(
+        &mut self,
+        record: Record<<M::Conn as AsyncDB>::ColumnType>,
+    ) -> Result<(), TestError> {
         futures::executor::block_on(self.run_async(record))
     }
 
@@ -888,7 +893,7 @@ impl<M: MakeConnection> Runner<M> {
     /// The runner will stop early once a halt record is seen.
     pub async fn run_multi_async(
         &mut self,
-        records: impl IntoIterator<Item = Record<<M::D as AsyncDB>::ColumnType>>,
+        records: impl IntoIterator<Item = Record<<M::Conn as AsyncDB>::ColumnType>>,
     ) -> Result<(), TestError> {
         for record in records.into_iter() {
             if let Record::Halt { .. } = record {
@@ -904,7 +909,7 @@ impl<M: MakeConnection> Runner<M> {
     /// The runner will stop early once a halt record is seen.
     pub fn run_multi(
         &mut self,
-        records: impl IntoIterator<Item = Record<<M::D as AsyncDB>::ColumnType>>,
+        records: impl IntoIterator<Item = Record<<M::Conn as AsyncDB>::ColumnType>>,
     ) -> Result<(), TestError> {
         block_on(self.run_multi_async(records))
     }
@@ -960,7 +965,7 @@ impl<M: MakeConnection> Runner<M> {
         jobs: usize,
     ) -> Result<(), ParallelTestError>
     where
-        Fut: Future<Output = M::D> + Send + 'static,
+        Fut: Future<Output = M::Conn>,
     {
         let files = glob::glob(glob).expect("failed to read glob pattern");
         let mut tasks = vec![];
@@ -1010,7 +1015,7 @@ impl<M: MakeConnection> Runner<M> {
         jobs: usize,
     ) -> Result<(), ParallelTestError>
     where
-        Fut: Future<Output = M::D> + Send + 'static,
+        Fut: Future<Output = M::Conn>,
     {
         block_on(self.run_parallel_async(glob, hosts, conn_builder, jobs))
     }
@@ -1043,7 +1048,7 @@ impl<M: MakeConnection> Runner<M> {
         filename: impl AsRef<Path>,
         col_separator: &str,
         validator: Validator,
-        column_type_validator: ColumnTypeValidator<<M::D as AsyncDB>::ColumnType>,
+        column_type_validator: ColumnTypeValidator<<M::Conn as AsyncDB>::ColumnType>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use std::io::{Read, Seek, SeekFrom, Write};
         use std::path::PathBuf;
