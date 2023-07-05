@@ -1,6 +1,5 @@
 //! Sqllogictest parser.
 
-use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
@@ -137,7 +136,9 @@ pub enum Record<T: ColumnType> {
         loc: Location,
         threshold: u64,
     },
+    /// Condition statements, including `onlyif` and `skipif`.
     Condition(Condition),
+    /// Connection statements to specify the connection to use for the following statement.
     Connection(Connection),
     Comment(Vec<String>),
     Newline,
@@ -304,18 +305,21 @@ pub enum Condition {
 
 impl Condition {
     /// Evaluate condition on given `label`, returns whether to skip this record.
-    pub(crate) fn should_skip(&self, labels: &HashSet<String>) -> bool {
+    pub(crate) fn should_skip<'a>(&'a self, labels: impl IntoIterator<Item = &'a str>) -> bool {
         match self {
-            Condition::OnlyIf { label } => !labels.contains(label),
-            Condition::SkipIf { label } => labels.contains(label),
+            Condition::OnlyIf { label } => !labels.into_iter().contains(&label.as_str()),
+            Condition::SkipIf { label } => labels.into_iter().contains(&label.as_str()),
         }
     }
 }
 
+/// The connection to use for the following statement.
 #[derive(Default, Debug, PartialEq, Eq, Hash, Clone)]
 pub enum Connection {
+    /// The default connection if not specified or if the name is "default".
     #[default]
     Default,
+    /// A named connection.
     Named(String),
 }
 
@@ -495,8 +499,8 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 conditions.push(cond.clone());
                 records.push(Record::Condition(cond));
             }
-            ["connection", label] => {
-                let conn = Connection::new(label);
+            ["connection", name] => {
+                let conn = Connection::new(name);
                 connection = conn.clone();
                 records.push(Record::Connection(conn));
             }

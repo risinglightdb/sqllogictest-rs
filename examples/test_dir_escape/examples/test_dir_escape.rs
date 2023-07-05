@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use sqllogictest::{DBOutput, DefaultColumnType};
+use sqllogictest::{DBOutput, DefaultColumnType, MakeWith};
 
 pub struct FakeDB;
 
@@ -28,7 +28,7 @@ impl sqllogictest::DB for FakeDB {
 }
 
 fn main() {
-    let mut tester = sqllogictest::Runner::new_once(FakeDB);
+    let mut tester = sqllogictest::Runner::new(MakeWith(|| FakeDB));
     // enable `__TEST_DIR__` override
     tester.enable_testdir();
 

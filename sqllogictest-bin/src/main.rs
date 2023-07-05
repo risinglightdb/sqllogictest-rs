@@ -369,8 +369,7 @@ async fn run_serial(
     let mut failed_case = vec![];
 
     for file in files {
-        let engine = engines::connect(engine, &config).await?;
-        let mut runner = Runner::new_once(engine);
+        let mut runner = Runner::new(|| engines::connect(engine, &config));
         for label in labels {
             runner.add_label(label);
         }
@@ -418,8 +417,7 @@ async fn update_test_files(
     format: bool,
 ) -> Result<()> {
     for file in files {
-        let engine = engines::connect(engine, &config).await?;
-        let runner = Runner::new_once(engine);
+        let runner = Runner::new(|| engines::connect(engine, &config));
 
         if let Err(e) = update_test_file(&mut std::io::stdout(), runner, &file, format).await {
             {
@@ -443,8 +441,7 @@ async fn connect_and_run_test_file(
     config: DBConfig,
     labels: &[String],
 ) -> Result<Duration> {
-    let engine = engines::connect(engine, &config).await?;
-    let mut runner = Runner::new_once(engine);
+    let mut runner = Runner::new(|| engines::connect(engine, &config));
     for label in labels {
         runner.add_label(label);
     }

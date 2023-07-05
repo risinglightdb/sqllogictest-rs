@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use sqllogictest::{DBOutput, DefaultColumnType};
+use sqllogictest::{DBOutput, DefaultColumnType, MakeWith};
 
 pub struct FakeDB {
     engine_name: &'static str,
@@ -43,7 +43,7 @@ impl sqllogictest::DB for FakeDB {
 
 fn main() {
     for engine_name in ["risinglight", "otherdb"] {
-        let mut tester = sqllogictest::Runner::new_once(FakeDB { engine_name });
+        let mut tester = sqllogictest::Runner::new(MakeWith(|| FakeDB { engine_name }));
 
         let mut filename = PathBuf::from(file!());
         filename.pop();

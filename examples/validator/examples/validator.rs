@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use sqllogictest::{DBOutput, DefaultColumnType};
+use sqllogictest::{DBOutput, DefaultColumnType, MakeWith};
 
 pub struct FakeDB;
 
@@ -28,7 +28,7 @@ impl sqllogictest::DB for FakeDB {
 }
 
 fn main() {
-    let mut tester = sqllogictest::Runner::new_once(FakeDB);
+    let mut tester = sqllogictest::Runner::new(MakeWith(|| FakeDB));
     // Validator will always return true.
     tester.with_validator(|_, _| true);
 

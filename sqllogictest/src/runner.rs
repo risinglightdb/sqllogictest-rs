@@ -1,6 +1,6 @@
 //! Sqllogictest runner.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::{Debug, Display};
 use std::path::Path;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ use similar::{Change, ChangeTag, TextDiff};
 use tempfile::{tempdir, TempDir};
 
 use crate::parser::*;
-use crate::ColumnType;
+use crate::{ColumnType, Connections, MakeConnection};
 
 #[derive(Debug, Clone)]
 pub enum RecordOutput<T: ColumnType> {
@@ -450,72 +450,6 @@ pub fn strict_column_validator<T: ColumnType>(actual: &Vec<T>, expected: &Vec<T>
             .any(|(actual_column, expected_column)| actual_column != expected_column)
 }
 
-pub trait MakeConnection {
-    type Conn: AsyncDB;
-    type MakeFuture: Future<Output = Result<Self::Conn, <Self::Conn as AsyncDB>::Error>>;
-
-    fn make(&mut self) -> Self::MakeFuture;
-}
-
-impl<D: AsyncDB, F, Fut> MakeConnection for F
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<D, D::Error>>,
-{
-    type Conn = D;
-    type MakeFuture = Fut;
-
-    fn make(&mut self) -> Self::MakeFuture {
-        self()
-    }
-}
-
-pub struct MakeOnce<D>(Option<D>);
-
-impl<D> MakeOnce<D> {
-    pub fn new(db: D) -> Self {
-        MakeOnce(Some(db))
-    }
-}
-
-impl<D: AsyncDB> MakeConnection for MakeOnce<D> {
-    type Conn = D;
-    type MakeFuture = futures::future::Ready<Result<D, D::Error>>;
-
-    fn make(&mut self) -> Self::MakeFuture {
-        futures::future::ready(Ok(self.0.take().expect("MakeOnce can only be used once")))
-    }
-}
-
-struct Connections<M: MakeConnection> {
-    make_conn: M,
-    conns: HashMap<Connection, M::Conn>,
-}
-
-impl<M: MakeConnection> Connections<M> {
-    fn new(make_conn: M) -> Self {
-        Connections {
-            make_conn,
-            conns: HashMap::new(),
-        }
-    }
-
-    async fn get(&mut self, name: Connection) -> Result<&mut M::Conn, <M::Conn as AsyncDB>::Error> {
-        if !self.conns.contains_key(&name) {
-            let conn = self.make_conn.make().await?;
-            self.conns.insert(name.clone(), conn);
-        }
-        Ok(self.conns.get_mut(&name).unwrap())
-    }
-
-    async fn run_default(
-        &mut self,
-        sql: &str,
-    ) -> Result<DBOutput<<M::Conn as AsyncDB>::ColumnType>, <M::Conn as AsyncDB>::Error> {
-        self.get(Connection::Default).await?.run(sql).await
-    }
-}
-
 /// Sqllogictest runner.
 pub struct Runner<M: MakeConnection> {
     conn: Connections<M>,
@@ -530,14 +464,10 @@ pub struct Runner<M: MakeConnection> {
     labels: HashSet<String>,
 }
 
-impl<D: AsyncDB> Runner<MakeOnce<D>> {
-    pub fn new_once(db: D) -> Self {
-        Self::new(MakeOnce::new(db))
-    }
-}
-
 impl<M: MakeConnection> Runner<M> {
-    /// Create a new test runner on the database.
+    /// Create a new test runner on the database, with the given connection maker.
+    ///
+    /// See [`MakeConnection`] for more details.
     pub fn new(make_conn: M) -> Self {
         Runner {
             validator: default_validator,
@@ -545,7 +475,7 @@ impl<M: MakeConnection> Runner<M> {
             testdir: None,
             sort_mode: None,
             hash_threshold: 0,
-            labels: HashSet::new(), // TODO
+            labels: HashSet::new(),
             conn: Connections::new(make_conn),
         }
     }
@@ -582,12 +512,26 @@ impl<M: MakeConnection> Runner<M> {
         &mut self,
         record: Record<<M::Conn as AsyncDB>::ColumnType>,
     ) -> RecordOutput<<M::Conn as AsyncDB>::ColumnType> {
+        /// Returns whether we should skip this record, according to given `conditions`.
+        fn should_skip(
+            labels: &HashSet<String>,
+            engine_name: &str,
+            conditions: &[Condition],
+        ) -> bool {
+            conditions.iter().any(|c| {
+                c.should_skip(
+                    labels
+                        .iter()
+                        .map(|l| l.as_str())
+                        // attach the engine name to the labels
+                        .chain(Some(engine_name).filter(|n| !n.is_empty())),
+                )
+            })
+        }
+
         match record {
-            Record::Statement { conditions, .. } if self.should_skip(&conditions) => {
-                RecordOutput::Nothing
-            }
             Record::Statement {
-                conditions: _,
+                conditions,
                 connection,
                 sql,
 
@@ -607,6 +551,9 @@ impl<M: MakeConnection> Runner<M> {
                         }
                     }
                 };
+                if should_skip(&self.labels, conn.engine_name(), &conditions) {
+                    return RecordOutput::Nothing;
+                }
 
                 let ret = conn.run(&sql).await;
                 match ret {
@@ -626,11 +573,8 @@ impl<M: MakeConnection> Runner<M> {
                     },
                 }
             }
-            Record::Query { conditions, .. } if self.should_skip(&conditions) => {
-                RecordOutput::Nothing
-            }
             Record::Query {
-                conditions: _,
+                conditions,
                 connection,
                 sql,
                 sort_mode,
@@ -656,6 +600,9 @@ impl<M: MakeConnection> Runner<M> {
                         }
                     }
                 };
+                if should_skip(&self.labels, conn.engine_name(), &conditions) {
+                    return RecordOutput::Nothing;
+                }
 
                 let (types, mut rows) = match conn.run(&sql).await {
                     Ok(out) => match out {
@@ -1027,11 +974,6 @@ impl<M: MakeConnection> Runner<M> {
         } else {
             sql
         }
-    }
-
-    /// Returns whether we should skip this record, according to given `conditions`.
-    fn should_skip(&self, conditions: &[Condition]) -> bool {
-        conditions.iter().any(|c| c.should_skip(&self.labels))
     }
 
     /// Updates a test file with the output produced by a Database. It is an utility function

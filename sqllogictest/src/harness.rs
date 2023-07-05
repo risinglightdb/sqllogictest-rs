@@ -3,7 +3,7 @@ use std::path::Path;
 pub use glob::glob;
 pub use libtest_mimic::{run, Arguments, Failed, Trial};
 
-use crate::{AsyncDB, MakeOnce, Runner};
+use crate::{MakeConnection, Runner};
 
 /// * `db_fn`: `fn() -> sqllogictest::AsyncDB`
 /// * `pattern`: The glob used to match against and select each file to be tested. It is relative to
@@ -19,7 +19,7 @@ macro_rules! harness {
                 let path = entry.expect("failed to read glob entry");
                 tests.push($crate::harness::Trial::test(
                     path.to_str().unwrap().to_string(),
-                    move || $crate::harness::test(&path, $db_fn()),
+                    move || $crate::harness::test(&path, $crate::MakeWith($db_fn)),
                 ));
             }
 
@@ -32,8 +32,8 @@ macro_rules! harness {
     };
 }
 
-pub fn test(filename: impl AsRef<Path>, db: impl AsyncDB) -> Result<(), Failed> {
-    let mut tester = Runner::new(MakeOnce::new(db));
+pub fn test(filename: impl AsRef<Path>, make_conn: impl MakeConnection) -> Result<(), Failed> {
+    let mut tester = Runner::new(make_conn);
     tester.run_file(filename)?;
     Ok(())
 }
