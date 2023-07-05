@@ -1,0 +1,38 @@
+query I
+select counter()
+----
+1
+
+query I
+select counter()
+----
+2
+
+connection another
+query I
+select counter()
+----
+1
+
+connection default
+query I
+select counter()
+----
+3
+
+connection another
+query I
+select counter()
+----
+2
+
+connection AnOtHeR
+query I
+select counter()
+----
+1
+
+query I
+select counter()
+----
+4
