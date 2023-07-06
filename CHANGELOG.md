@@ -2,8 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), 
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.15.0] - 2023-07-06
+
+* Allow multiple connections to the database in a single test case, which is useful for testing the transaction behavior. This can be achieved by attaching a `connection foo` record before the query or statement.
+  - (parser) Add `Record::Connection`.
+  - (runner) **Breaking change**: Since the runner may establish multiple connections at runtime, `Runner::new` now takes a `impl MakeConnection`, which is usually a closure that returns a try-future of the `AsyncDB` instance.
+  - (bin) The connection to the database is now established lazily on the first query or statement.
 
 ## [0.14.0] - 2023-06-08
 

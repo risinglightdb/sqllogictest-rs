@@ -2,7 +2,7 @@
 members = ["examples/*", "sqllogictest", "sqllogictest-bin", "sqllogictest-engines", "tests"]
 
 [workspace.package]
-version = "0.14.0"
+version = "0.15.0"
 edition = "2021"
 homepage = "https://github.com/risinglightdb/sqllogictest-rs"
 keywords = ["sql", "database", "parser", "cli"]
