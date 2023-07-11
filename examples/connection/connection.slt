@@ -34,6 +34,7 @@ select counter()
 ----
 1
 
+# connection only works for one record, the next one will use `default`
 query I
 select counter()
 ----
