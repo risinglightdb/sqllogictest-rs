@@ -33,19 +33,6 @@ where
     }
 }
 
-/// Make connections with a synchronous infallible function.
-#[derive(Debug)]
-pub struct MakeWith<F>(pub F);
-
-impl<F: FnMut() -> D, D: AsyncDB> MakeConnection for MakeWith<F> {
-    type Conn = D;
-    type MakeFuture = futures::future::Ready<Result<D, D::Error>>;
-
-    fn make(&mut self) -> Self::MakeFuture {
-        futures::future::ready(Ok((self.0)()))
-    }
-}
-
 /// Connections established in a [`Runner`](crate::Runner).
 pub(crate) struct Connections<M: MakeConnection> {
     make_conn: M,

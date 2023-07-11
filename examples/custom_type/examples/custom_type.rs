@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use sqllogictest::{strict_column_validator, ColumnType, DBOutput, MakeWith};
+use sqllogictest::{strict_column_validator, ColumnType, DBOutput};
 
 pub struct FakeDB;
 
@@ -67,7 +67,7 @@ impl sqllogictest::DB for FakeDB {
 }
 
 fn main() {
-    let mut tester = sqllogictest::Runner::new(MakeWith(|| FakeDB));
+    let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
     tester.with_column_validator(strict_column_validator);
 
     let mut filename = PathBuf::from(file!());

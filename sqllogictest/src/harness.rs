@@ -19,7 +19,7 @@ macro_rules! harness {
                 let path = entry.expect("failed to read glob entry");
                 tests.push($crate::harness::Trial::test(
                     path.to_str().unwrap().to_string(),
-                    move || $crate::harness::test(&path, $crate::MakeWith($db_fn)),
+                    move || $crate::harness::test(&path, || async { Ok($db_fn()) }),
                 ));
             }
 
