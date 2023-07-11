@@ -17,7 +17,7 @@ use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
 use rand::seq::SliceRandom;
 use sqllogictest::{
     default_validator, strict_column_validator, update_record_with_output, AsyncDB, Injected,
-    Record, Runner,
+    MakeConnection, Record, Runner,
 };
 
 #[derive(Default, Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
@@ -369,8 +369,7 @@ async fn run_serial(
     let mut failed_case = vec![];
 
     for file in files {
-        let engine = engines::connect(engine, &config).await?;
-        let mut runner = Runner::new(engine);
+        let mut runner = Runner::new(|| engines::connect(engine, &config));
         for label in labels {
             runner.add_label(label);
         }
@@ -418,8 +417,7 @@ async fn update_test_files(
     format: bool,
 ) -> Result<()> {
     for file in files {
-        let engine = engines::connect(engine, &config).await?;
-        let runner = Runner::new(engine);
+        let runner = Runner::new(|| engines::connect(engine, &config));
 
         if let Err(e) = update_test_file(&mut std::io::stdout(), runner, &file, format).await {
             {
@@ -443,8 +441,7 @@ async fn connect_and_run_test_file(
     config: DBConfig,
     labels: &[String],
 ) -> Result<Duration> {
-    let engine = engines::connect(engine, &config).await?;
-    let mut runner = Runner::new(engine);
+    let mut runner = Runner::new(|| engines::connect(engine, &config));
     for label in labels {
         runner.add_label(label);
     }
@@ -455,9 +452,9 @@ async fn connect_and_run_test_file(
 
 /// Different from [`Runner::run_file_async`], we re-implement it here to print some progress
 /// information.
-async fn run_test_file<T: std::io::Write, D: AsyncDB>(
+async fn run_test_file<T: std::io::Write, M: MakeConnection>(
     out: &mut T,
-    mut runner: Runner<D>,
+    mut runner: Runner<M::Conn, M>,
     filename: impl AsRef<Path>,
 ) -> Result<Duration> {
     let filename = filename.as_ref();
@@ -558,9 +555,9 @@ fn finish_test_file<T: std::io::Write>(
 
 /// Different from [`sqllogictest::update_test_file`], we re-implement it here to print some
 /// progress information.
-async fn update_test_file<T: std::io::Write, D: AsyncDB>(
+async fn update_test_file<T: std::io::Write, M: MakeConnection>(
     out: &mut T,
-    mut runner: Runner<D>,
+    mut runner: Runner<M::Conn, M>,
     filename: impl AsRef<Path>,
     format: bool,
 ) -> Result<()> {
@@ -713,10 +710,10 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
     Ok(())
 }
 
-async fn update_record<D: AsyncDB>(
+async fn update_record<M: MakeConnection>(
     outfile: &mut File,
-    runner: &mut Runner<D>,
-    record: Record<D::ColumnType>,
+    runner: &mut Runner<M::Conn, M>,
+    record: Record<<M::Conn as AsyncDB>::ColumnType>,
     format: bool,
 ) -> Result<()> {
     assert!(!matches!(record, Record::Injected(_)));

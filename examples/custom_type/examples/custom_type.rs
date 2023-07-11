@@ -67,7 +67,7 @@ impl sqllogictest::DB for FakeDB {
 }
 
 fn main() {
-    let mut tester = sqllogictest::Runner::new(FakeDB);
+    let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
     tester.with_column_validator(strict_column_validator);
 
     let mut filename = PathBuf::from(file!());

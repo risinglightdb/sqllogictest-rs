@@ -19,7 +19,7 @@ postgres-types = { version = "0.2.3", features = ["derive", "with-chrono-0_4"] }
 rust_decimal = { version = "1.7.0", features = ["tokio-pg"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqllogictest = { path = "../sqllogictest", version = "0.14" }
+sqllogictest = { path = "../sqllogictest", version = "0.15" }
 thiserror = "1"
 tokio = { version = "1", features = [
     "rt",

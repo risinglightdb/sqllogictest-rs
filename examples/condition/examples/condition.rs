@@ -43,7 +43,7 @@ impl sqllogictest::DB for FakeDB {
 
 fn main() {
     for engine_name in ["risinglight", "otherdb"] {
-        let mut tester = sqllogictest::Runner::new(FakeDB { engine_name });
+        let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB { engine_name }) });
 
         let mut filename = PathBuf::from(file!());
         filename.pop();

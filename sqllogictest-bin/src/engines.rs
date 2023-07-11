@@ -23,7 +23,7 @@ pub enum EngineConfig {
     External(String),
 }
 
-enum Engines {
+pub(crate) enum Engines {
     Postgres(PostgresSimple),
     PostgresExtended(PostgresExtended),
     External(ExternalDriver),
@@ -48,12 +48,21 @@ impl From<&DBConfig> for PostgresConfig {
     }
 }
 
-pub(super) async fn connect(engine: &EngineConfig, config: &DBConfig) -> Result<impl AsyncDB> {
+pub(crate) async fn connect(
+    engine: &EngineConfig,
+    config: &DBConfig,
+) -> Result<Engines, EnginesError> {
     Ok(match engine {
-        EngineConfig::Postgres => Engines::Postgres(PostgresSimple::connect(config.into()).await?),
-        EngineConfig::PostgresExtended => {
-            Engines::PostgresExtended(PostgresExtended::connect(config.into()).await?)
-        }
+        EngineConfig::Postgres => Engines::Postgres(
+            PostgresSimple::connect(config.into())
+                .await
+                .map_err(|e| EnginesError(e.into()))?,
+        ),
+        EngineConfig::PostgresExtended => Engines::PostgresExtended(
+            PostgresExtended::connect(config.into())
+                .await
+                .map_err(|e| EnginesError(e.into()))?,
+        ),
         EngineConfig::External(cmd_tmpl) => {
             let (host, port) = config.random_addr();
             let cmd_str = cmd_tmpl
@@ -64,21 +73,25 @@ pub(super) async fn connect(engine: &EngineConfig, config: &DBConfig) -> Result<
                 .replace("{pass}", &config.pass);
             let mut cmd = Command::new("bash");
             cmd.args(["-c", &cmd_str]);
-            Engines::External(ExternalDriver::connect(cmd).await?)
+            Engines::External(
+                ExternalDriver::connect(cmd)
+                    .await
+                    .map_err(|e| EnginesError(e.into()))?,
+            )
         }
     })
 }
 
 #[derive(Debug)]
-struct AnyhowError(anyhow::Error);
+pub(crate) struct EnginesError(anyhow::Error);
 
-impl Display for AnyhowError {
+impl Display for EnginesError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
 }
 
-impl std::error::Error for AnyhowError {
+impl std::error::Error for EnginesError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.0.source()
     }
@@ -96,10 +109,10 @@ impl Engines {
 
 #[async_trait]
 impl AsyncDB for Engines {
-    type Error = AnyhowError;
+    type Error = EnginesError;
     type ColumnType = DefaultColumnType;
 
     async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, Self::Error> {
-        self.run(sql).await.map_err(AnyhowError)
+        self.run(sql).await.map_err(EnginesError)
     }
 }
