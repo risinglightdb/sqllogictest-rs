@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use async_trait::async_trait;
-use clap::ArgEnum;
+use clap::ValueEnum;
 use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
 use sqllogictest_engines::external::ExternalDriver;
 use sqllogictest_engines::postgres::{PostgresConfig, PostgresExtended, PostgresSimple};
@@ -9,7 +9,7 @@ use tokio::process::Command;
 
 use super::{DBConfig, Result};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum EngineType {
     Postgres,
     PostgresExtended,

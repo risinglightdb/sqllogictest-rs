@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Local;
-use clap::{ArgEnum, Parser};
+use clap::{Arg, ArgAction, CommandFactory, FromArgMatches, Parser, ValueEnum};
 use console::style;
 use engines::{EngineConfig, EngineType};
 use fs_err::{File, OpenOptions};
@@ -20,7 +20,7 @@ use sqllogictest::{
     MakeConnection, Record, Runner,
 };
 
-#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 #[must_use]
 pub enum Color {
     #[default]
@@ -34,11 +34,11 @@ pub enum Color {
 struct Opt {
     /// Glob(s) of a set of test files.
     /// For example: `./test/**/*.slt`
-    #[clap(required = true, min_values = 1)]
+    #[clap(required = true, num_args = 1..)]
     files: Vec<String>,
 
     /// The database engine name, used by the record conditions.
-    #[clap(short, long, arg_enum, default_value = "postgres")]
+    #[clap(short, long, value_enum, default_value = "postgres")]
     engine: EngineType,
 
     /// Example: "java -cp a.jar com.risingwave.sqllogictest.App
@@ -50,7 +50,7 @@ struct Opt {
     /// Whether to enable colorful output.
     #[clap(
         long,
-        arg_enum,
+        value_enum,
         default_value_t,
         value_name = "WHEN",
         env = "CARGO_TERM_COLOR"
@@ -132,6 +132,13 @@ impl DBConfig {
 pub async fn main() -> Result<()> {
     env_logger::init();
 
+    let cli = Opt::command().disable_help_flag(true).arg(
+        Arg::new("help")
+            .long("help")
+            .help("Print help information")
+            .action(ArgAction::Help),
+    );
+    let matches = cli.get_matches();
     let Opt {
         files,
         engine,
@@ -148,7 +155,9 @@ pub async fn main() -> Result<()> {
         r#override,
         format,
         labels,
-    } = Opt::parse();
+    } = Opt::from_arg_matches(&matches)
+        .map_err(|err| err.exit())
+        .unwrap();
 
     if host.len() != port.len() {
         bail!(
