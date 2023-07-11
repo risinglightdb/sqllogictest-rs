@@ -11,3 +11,15 @@ sqllogictest = { path = "../sqllogictest" }
 name = "harness"
 path = "./harness.rs"
 harness = false
+
+[[test]]
+name = "custom_type"
+path = "./custom_type/custom_type.rs"
+
+[[test]]
+name = "validator"
+path = "./validator/validator.rs"
+
+[[test]]
+name = "test_dir_escape"
+path = "./test_dir_escape/test_dir_escape.rs"

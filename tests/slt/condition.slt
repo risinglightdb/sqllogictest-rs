@@ -4,7 +4,7 @@ create table risinglight_t(v1 int not null)
 
 skipif risinglight
 statement ok
-create table otherdb_t(v1 int not null)
+create table example_basic(v1 int not null)
 
 
 onlyif risinglight
@@ -17,7 +17,7 @@ Eve
 
 skipif risinglight
 query I
-select * from otherdb_t
+select * from example_basic
 ----
 Alice
 Bob

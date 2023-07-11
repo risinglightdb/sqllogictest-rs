@@ -1,5 +1,5 @@
-include ./include_2.slt
-include ./include/*.slt
+include ./include_2.slt.part
+include ./include/*.slt.part
 
 query I
 select * from example_basic

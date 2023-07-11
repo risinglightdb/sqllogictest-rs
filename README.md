@@ -80,7 +80,7 @@ You can find more options in `sqllogictest --help` .
 Test files often have the `.slt` extension and use a dialect of Sqlite [Sqllogictest].
 
 Some commonly used features of `sqlparser-rs` are show below, and many more
-are illustrated in the files in the [examples](./examples) directory.
+are illustrated in the files in the [tests](./tests) directory.
 
 ### Run a statement that should succeed
 
