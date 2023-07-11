@@ -451,11 +451,11 @@ pub fn strict_column_validator<T: ColumnType>(actual: &Vec<T>, expected: &Vec<T>
 }
 
 /// Sqllogictest runner.
-pub struct Runner<M: MakeConnection> {
-    conn: Connections<M>,
+pub struct Runner<D: AsyncDB, M: MakeConnection> {
+    conn: Connections<D, M>,
     // validator is used for validate if the result of query equals to expected.
     validator: Validator,
-    column_type_validator: ColumnTypeValidator<<M::Conn as AsyncDB>::ColumnType>,
+    column_type_validator: ColumnTypeValidator<D::ColumnType>,
     testdir: Option<TempDir>,
     sort_mode: Option<SortMode>,
     /// 0 means never hashing
@@ -464,7 +464,7 @@ pub struct Runner<M: MakeConnection> {
     labels: HashSet<String>,
 }
 
-impl<M: MakeConnection> Runner<M> {
+impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Create a new test runner on the database, with the given connection maker.
     ///
     /// See [`MakeConnection`] for more details.
@@ -497,10 +497,7 @@ impl<M: MakeConnection> Runner<M> {
         self.validator = validator;
     }
 
-    pub fn with_column_validator(
-        &mut self,
-        validator: ColumnTypeValidator<<M::Conn as AsyncDB>::ColumnType>,
-    ) {
+    pub fn with_column_validator(&mut self, validator: ColumnTypeValidator<D::ColumnType>) {
         self.column_type_validator = validator;
     }
 
@@ -510,8 +507,8 @@ impl<M: MakeConnection> Runner<M> {
 
     pub async fn apply_record(
         &mut self,
-        record: Record<<M::Conn as AsyncDB>::ColumnType>,
-    ) -> RecordOutput<<M::Conn as AsyncDB>::ColumnType> {
+        record: Record<D::ColumnType>,
+    ) -> RecordOutput<D::ColumnType> {
         /// Returns whether we should skip this record, according to given `conditions`.
         fn should_skip(
             labels: &HashSet<String>,
@@ -651,7 +648,7 @@ impl<M: MakeConnection> Runner<M> {
                 }
             }
             Record::Sleep { duration, .. } => {
-                <M::Conn as AsyncDB>::sleep(duration).await;
+                D::sleep(duration).await;
                 RecordOutput::Nothing
             }
             Record::Control(control) => match control {
@@ -676,10 +673,7 @@ impl<M: MakeConnection> Runner<M> {
     }
 
     /// Run a single record.
-    pub async fn run_async(
-        &mut self,
-        record: Record<<M::Conn as AsyncDB>::ColumnType>,
-    ) -> Result<(), TestError> {
+    pub async fn run_async(&mut self, record: Record<D::ColumnType>) -> Result<(), TestError> {
         tracing::debug!(?record, "testing");
 
         match (record.clone(), self.apply_record(record).await) {
@@ -828,10 +822,7 @@ impl<M: MakeConnection> Runner<M> {
     }
 
     /// Run a single record.
-    pub fn run(
-        &mut self,
-        record: Record<<M::Conn as AsyncDB>::ColumnType>,
-    ) -> Result<(), TestError> {
+    pub fn run(&mut self, record: Record<D::ColumnType>) -> Result<(), TestError> {
         futures::executor::block_on(self.run_async(record))
     }
 
@@ -840,7 +831,7 @@ impl<M: MakeConnection> Runner<M> {
     /// The runner will stop early once a halt record is seen.
     pub async fn run_multi_async(
         &mut self,
-        records: impl IntoIterator<Item = Record<<M::Conn as AsyncDB>::ColumnType>>,
+        records: impl IntoIterator<Item = Record<D::ColumnType>>,
     ) -> Result<(), TestError> {
         for record in records.into_iter() {
             if let Record::Halt { .. } = record {
@@ -856,7 +847,7 @@ impl<M: MakeConnection> Runner<M> {
     /// The runner will stop early once a halt record is seen.
     pub fn run_multi(
         &mut self,
-        records: impl IntoIterator<Item = Record<<M::Conn as AsyncDB>::ColumnType>>,
+        records: impl IntoIterator<Item = Record<D::ColumnType>>,
     ) -> Result<(), TestError> {
         block_on(self.run_multi_async(records))
     }
@@ -912,7 +903,7 @@ impl<M: MakeConnection> Runner<M> {
         jobs: usize,
     ) -> Result<(), ParallelTestError>
     where
-        Fut: Future<Output = M::Conn>,
+        Fut: Future<Output = D>,
     {
         let files = glob::glob(glob).expect("failed to read glob pattern");
         let mut tasks = vec![];
@@ -962,7 +953,7 @@ impl<M: MakeConnection> Runner<M> {
         jobs: usize,
     ) -> Result<(), ParallelTestError>
     where
-        Fut: Future<Output = M::Conn>,
+        Fut: Future<Output = D>,
     {
         block_on(self.run_parallel_async(glob, hosts, conn_builder, jobs))
     }
@@ -990,7 +981,7 @@ impl<M: MakeConnection> Runner<M> {
         filename: impl AsRef<Path>,
         col_separator: &str,
         validator: Validator,
-        column_type_validator: ColumnTypeValidator<<M::Conn as AsyncDB>::ColumnType>,
+        column_type_validator: ColumnTypeValidator<D::ColumnType>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use std::io::{Read, Seek, SeekFrom, Write};
         use std::path::PathBuf;

@@ -34,12 +34,12 @@ where
 }
 
 /// Connections established in a [`Runner`](crate::Runner).
-pub(crate) struct Connections<M: MakeConnection> {
+pub(crate) struct Connections<D, M> {
     make_conn: M,
-    conns: HashMap<ConnectionName, M::Conn>,
+    conns: HashMap<ConnectionName, D>,
 }
 
-impl<M: MakeConnection> Connections<M> {
+impl<D: AsyncDB, M: MakeConnection<Conn = D>> Connections<D, M> {
     pub fn new(make_conn: M) -> Self {
         Connections {
             make_conn,
@@ -48,10 +48,7 @@ impl<M: MakeConnection> Connections<M> {
     }
 
     /// Get a connection by name. Make a new connection if it doesn't exist.
-    pub async fn get(
-        &mut self,
-        name: ConnectionName,
-    ) -> Result<&mut M::Conn, <M::Conn as AsyncDB>::Error> {
+    pub async fn get(&mut self, name: ConnectionName) -> Result<&mut D, D::Error> {
         use std::collections::hash_map::Entry;
 
         let conn = match self.conns.entry(name) {
@@ -68,10 +65,7 @@ impl<M: MakeConnection> Connections<M> {
     /// Run a SQL statement on the default connection.
     ///
     /// This is a shortcut for calling `get(Default)` then `run`.
-    pub async fn run_default(
-        &mut self,
-        sql: &str,
-    ) -> Result<DBOutput<<M::Conn as AsyncDB>::ColumnType>, <M::Conn as AsyncDB>::Error> {
+    pub async fn run_default(&mut self, sql: &str) -> Result<DBOutput<D::ColumnType>, D::Error> {
         self.get(ConnectionName::Default).await?.run(sql).await
     }
 }

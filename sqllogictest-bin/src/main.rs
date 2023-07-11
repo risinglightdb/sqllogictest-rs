@@ -454,7 +454,7 @@ async fn connect_and_run_test_file(
 /// information.
 async fn run_test_file<T: std::io::Write, M: MakeConnection>(
     out: &mut T,
-    mut runner: Runner<M>,
+    mut runner: Runner<M::Conn, M>,
     filename: impl AsRef<Path>,
 ) -> Result<Duration> {
     let filename = filename.as_ref();
@@ -557,7 +557,7 @@ fn finish_test_file<T: std::io::Write>(
 /// progress information.
 async fn update_test_file<T: std::io::Write, M: MakeConnection>(
     out: &mut T,
-    mut runner: Runner<M>,
+    mut runner: Runner<M::Conn, M>,
     filename: impl AsRef<Path>,
     format: bool,
 ) -> Result<()> {
@@ -712,7 +712,7 @@ async fn update_test_file<T: std::io::Write, M: MakeConnection>(
 
 async fn update_record<M: MakeConnection>(
     outfile: &mut File,
-    runner: &mut Runner<M>,
+    runner: &mut Runner<M::Conn, M>,
     record: Record<<M::Conn as AsyncDB>::ColumnType>,
     format: bool,
 ) -> Result<()> {
