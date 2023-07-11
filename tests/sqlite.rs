@@ -12,7 +12,7 @@ fn hash_threshold(filename: &str) -> usize {
 }
 
 fn main() {
-    let paths = harness::glob("sqlite/**/*.test").unwrap();
+    let paths = harness::glob("sqllogictest-sqlite/test/**/select*.test").unwrap();
     let mut tests = vec![];
     for entry in paths {
         let path = entry.unwrap();

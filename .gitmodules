@@ -1,0 +1,3 @@
+[submodule "tests/sqllogictest-sqlite"]
+	path = tests/sqllogictest-sqlite
+	url = https://github.com/risinglightdb/sqllogictest-sqlite
