@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Local;
-use clap::{ArgEnum, Parser};
+use clap::{Arg, ArgAction, CommandFactory, FromArgMatches, Parser, ValueEnum};
 use console::style;
 use engines::{EngineConfig, EngineType};
 use fs_err::{File, OpenOptions};
@@ -17,10 +17,10 @@ use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
 use rand::seq::SliceRandom;
 use sqllogictest::{
     default_validator, strict_column_validator, update_record_with_output, AsyncDB, Injected,
-    Record, Runner,
+    MakeConnection, Record, Runner,
 };
 
-#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, ArgEnum)]
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 #[must_use]
 pub enum Color {
     #[default]
@@ -34,11 +34,11 @@ pub enum Color {
 struct Opt {
     /// Glob(s) of a set of test files.
     /// For example: `./test/**/*.slt`
-    #[clap(required = true, min_values = 1)]
+    #[clap(required = true, num_args = 1..)]
     files: Vec<String>,
 
     /// The database engine name, used by the record conditions.
-    #[clap(short, long, arg_enum, default_value = "postgres")]
+    #[clap(short, long, value_enum, default_value = "postgres")]
     engine: EngineType,
 
     /// Example: "java -cp a.jar com.risingwave.sqllogictest.App
@@ -50,7 +50,7 @@ struct Opt {
     /// Whether to enable colorful output.
     #[clap(
         long,
-        arg_enum,
+        value_enum,
         default_value_t,
         value_name = "WHEN",
         env = "CARGO_TERM_COLOR"
@@ -93,6 +93,15 @@ struct Opt {
     /// Reformats the test files.
     #[clap(long)]
     format: bool,
+
+    /// Add a label for conditions.
+    ///
+    /// Records with `skipif label` will be skipped if the label is present.
+    /// Records with `onlyif label` will be executed only if the label is present.
+    ///
+    /// The engine name is a label by default.
+    #[clap(long = "label")]
+    labels: Vec<String>,
 }
 
 /// Connection configuration.
@@ -119,9 +128,17 @@ impl DBConfig {
     }
 }
 
-pub async fn main_okk() -> Result<()> {
+#[tokio::main]
+pub async fn main() -> Result<()> {
     env_logger::init();
 
+    let cli = Opt::command().disable_help_flag(true).arg(
+        Arg::new("help")
+            .long("help")
+            .help("Print help information")
+            .action(ArgAction::Help),
+    );
+    let matches = cli.get_matches();
     let Opt {
         files,
         engine,
@@ -137,7 +154,10 @@ pub async fn main_okk() -> Result<()> {
         options,
         r#override,
         format,
-    } = Opt::parse();
+        labels,
+    } = Opt::from_arg_matches(&matches)
+        .map_err(|err| err.exit())
+        .unwrap();
 
     if host.len() != port.len() {
         bail!(
@@ -204,9 +224,26 @@ pub async fn main_okk() -> Result<()> {
     test_suite.set_timestamp(Local::now());
 
     let result = if let Some(jobs) = jobs {
-        run_parallel(jobs, &mut test_suite, files, &engine, config, junit.clone()).await
+        run_parallel(
+            jobs,
+            &mut test_suite,
+            files,
+            &engine,
+            config,
+            &labels,
+            junit.clone(),
+        )
+        .await
     } else {
-        run_serial(&mut test_suite, files, &engine, config, junit.clone()).await
+        run_serial(
+            &mut test_suite,
+            files,
+            &engine,
+            config,
+            &labels,
+            junit.clone(),
+        )
+        .await
     };
 
     report.add_test_suite(test_suite);
@@ -224,6 +261,7 @@ async fn run_parallel(
     files: Vec<PathBuf>,
     engine: &EngineConfig,
     config: DBConfig,
+    labels: &[String],
     junit: Option<String>,
 ) -> Result<()> {
     let mut create_databases = BTreeMap::new();
@@ -257,10 +295,13 @@ async fn run_parallel(
             config.db = db_name;
             let file = filename.to_string_lossy().to_string();
             let engine = engine.clone();
+            let labels = labels.to_vec();
             async move {
                 let (buf, res) = tokio::spawn(async move {
                     let mut buf = vec![];
-                    let res = connect_and_run_test_file(&mut buf, filename, &engine, config).await;
+                    let res =
+                        connect_and_run_test_file(&mut buf, filename, &engine, config, &labels)
+                            .await;
                     (buf, res)
                 })
                 .await
@@ -331,13 +372,16 @@ async fn run_serial(
     files: Vec<PathBuf>,
     engine: &EngineConfig,
     config: DBConfig,
+    labels: &[String],
     junit: Option<String>,
 ) -> Result<()> {
     let mut failed_case = vec![];
 
     for file in files {
-        let engine = engines::connect(engine, &config).await?;
-        let runner = Runner::new(engine);
+        let mut runner = Runner::new(|| engines::connect(engine, &config));
+        for label in labels {
+            runner.add_label(label);
+        }
 
         let filename = file.to_string_lossy().to_string();
         let test_case_name = filename.replace(['/', ' ', '.', '-'], "_");
@@ -382,8 +426,7 @@ async fn update_test_files(
     format: bool,
 ) -> Result<()> {
     for file in files {
-        let engine = engines::connect(engine, &config).await?;
-        let runner = Runner::new(engine);
+        let runner = Runner::new(|| engines::connect(engine, &config));
 
         if let Err(e) = update_test_file(&mut std::io::stdout(), runner, &file, format).await {
             {
@@ -405,9 +448,12 @@ async fn connect_and_run_test_file(
     filename: PathBuf,
     engine: &EngineConfig,
     config: DBConfig,
+    labels: &[String],
 ) -> Result<Duration> {
-    let engine = engines::connect(engine, &config).await?;
-    let runner = Runner::new(engine);
+    let mut runner = Runner::new(|| engines::connect(engine, &config));
+    for label in labels {
+        runner.add_label(label);
+    }
     let result = run_test_file(out, runner, filename).await?;
 
     Ok(result)
@@ -415,9 +461,9 @@ async fn connect_and_run_test_file(
 
 /// Different from [`Runner::run_file_async`], we re-implement it here to print some progress
 /// information.
-async fn run_test_file<T: std::io::Write, D: AsyncDB>(
+async fn run_test_file<T: std::io::Write, M: MakeConnection>(
     out: &mut T,
-    mut runner: Runner<D>,
+    mut runner: Runner<M::Conn, M>,
     filename: impl AsRef<Path>,
 ) -> Result<Duration> {
     let filename = filename.as_ref();
@@ -518,9 +564,9 @@ fn finish_test_file<T: std::io::Write>(
 
 /// Different from [`sqllogictest::update_test_file`], we re-implement it here to print some
 /// progress information.
-async fn update_test_file<T: std::io::Write, D: AsyncDB>(
+async fn update_test_file<T: std::io::Write, M: MakeConnection>(
     out: &mut T,
-    mut runner: Runner<D>,
+    mut runner: Runner<M::Conn, M>,
     filename: impl AsRef<Path>,
     format: bool,
 ) -> Result<()> {
@@ -673,10 +719,10 @@ async fn update_test_file<T: std::io::Write, D: AsyncDB>(
     Ok(())
 }
 
-async fn update_record<D: AsyncDB>(
+async fn update_record<M: MakeConnection>(
     outfile: &mut File,
-    runner: &mut Runner<D>,
-    record: Record<D::ColumnType>,
+    runner: &mut Runner<M::Conn, M>,
+    record: Record<<M::Conn as AsyncDB>::ColumnType>,
     format: bool,
 ) -> Result<()> {
     assert!(!matches!(record, Record::Injected(_)));

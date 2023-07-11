@@ -28,7 +28,7 @@ impl sqllogictest::DB for FakeDB {
 }
 
 fn main() {
-    let mut tester = sqllogictest::Runner::new(FakeDB);
+    let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
     // Validator will always return true.
     tester.with_validator(|_, _| true);
 

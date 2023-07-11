@@ -1,0 +1,41 @@
+query I
+select counter()
+----
+1
+
+query I
+select counter()
+----
+2
+
+connection another
+query I
+select counter()
+----
+1
+
+# `default` is the name of the default connection if not specified
+connection default
+query I
+select counter()
+----
+3
+
+connection another
+query I
+select counter()
+----
+2
+
+# connection names are case sensitive
+connection AnOtHeR
+query I
+select counter()
+----
+1
+
+# connection only works for one record, the next one will use `default`
+query I
+select counter()
+----
+4

@@ -1,4 +1,5 @@
 //! Sqllogictest parser.
+
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
@@ -80,6 +81,7 @@ pub enum Record<T: ColumnType> {
     Statement {
         loc: Location,
         conditions: Vec<Condition>,
+        connection: Connection,
         /// The SQL command is expected to fail with an error messages that matches the given
         /// regex. If the regex is an empty string, any error message is accepted.
         #[educe(PartialEq(method = "cmp_regex"))]
@@ -94,6 +96,7 @@ pub enum Record<T: ColumnType> {
     Query {
         loc: Location,
         conditions: Vec<Condition>,
+        connection: Connection,
         expected_types: Vec<T>,
         sort_mode: Option<SortMode>,
         label: Option<String>,
@@ -133,7 +136,10 @@ pub enum Record<T: ColumnType> {
         loc: Location,
         threshold: u64,
     },
+    /// Condition statements, including `onlyif` and `skipif`.
     Condition(Condition),
+    /// Connection statements to specify the connection to use for the following statement.
+    Connection(Connection),
     Comment(Vec<String>),
     Newline,
     /// Internally injected record which should not occur in the test file.
@@ -173,6 +179,7 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
             Record::Statement {
                 loc: _,
                 conditions: _,
+                connection: _,
                 expected_error,
                 sql,
                 expected_count,
@@ -197,6 +204,7 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
             Record::Query {
                 loc: _,
                 conditions: _,
+                connection: _,
                 expected_types,
                 sort_mode,
                 label,
@@ -244,13 +252,15 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 Control::SortMode(m) => write!(f, "control sortmode {}", m.as_str()),
             },
             Record::Condition(cond) => match cond {
-                Condition::OnlyIf { engine_name } => {
-                    write!(f, "onlyif {engine_name}")
-                }
-                Condition::SkipIf { engine_name } => {
-                    write!(f, "skipif {engine_name}")
-                }
+                Condition::OnlyIf { label } => write!(f, "onlyif {label}"),
+                Condition::SkipIf { label } => write!(f, "skipif {label}"),
             },
+            Record::Connection(conn) => {
+                if let Connection::Named(conn) = conn {
+                    write!(f, "connection {}", conn)?;
+                }
+                Ok(())
+            }
             Record::HashThreshold { loc: _, threshold } => {
                 write!(f, "hash-threshold {threshold}")
             }
@@ -287,20 +297,37 @@ pub enum Injected {
 /// The condition to run a query.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Condition {
-    /// The statement or query is skipped if an `onlyif` record for a different database engine is
-    /// seen.
-    OnlyIf { engine_name: String },
-    /// The statement or query is not evaluated if a `skipif` record for the target database engine
-    /// is seen in the prefix.
-    SkipIf { engine_name: String },
+    /// The statement or query is evaluated only if the label is seen.
+    OnlyIf { label: String },
+    /// The statement or query is not evaluated if the label is seen.
+    SkipIf { label: String },
 }
 
 impl Condition {
-    /// Evaluate condition on given `targe_name`, returns whether to skip this record.
-    pub fn should_skip(&self, target_name: &str) -> bool {
+    /// Evaluate condition on given `label`, returns whether to skip this record.
+    pub(crate) fn should_skip<'a>(&'a self, labels: impl IntoIterator<Item = &'a str>) -> bool {
         match self {
-            Condition::OnlyIf { engine_name } => engine_name != target_name,
-            Condition::SkipIf { engine_name } => engine_name == target_name,
+            Condition::OnlyIf { label } => !labels.into_iter().contains(&label.as_str()),
+            Condition::SkipIf { label } => labels.into_iter().contains(&label.as_str()),
+        }
+    }
+}
+
+/// The connection to use for the following statement.
+#[derive(Default, Debug, PartialEq, Eq, Hash, Clone)]
+pub enum Connection {
+    /// The default connection if not specified or if the name is "default".
+    #[default]
+    Default,
+    /// A named connection.
+    Named(String),
+}
+
+impl Connection {
+    fn new(name: impl AsRef<str>) -> Self {
+        match name.as_ref() {
+            "default" => Self::Default,
+            name => Self::Named(name.to_owned()),
         }
     }
 }
@@ -408,6 +435,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
     let mut lines = script.lines().enumerate().peekable();
     let mut records = vec![];
     let mut conditions = vec![];
+    let mut connection = Connection::Default;
     let mut comments = vec![];
 
     while let Some((num, line)) = lines.next() {
@@ -457,19 +485,24 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     loc,
                 });
             }
-            ["skipif", engine_name] => {
+            ["skipif", label] => {
                 let cond = Condition::SkipIf {
-                    engine_name: engine_name.to_string(),
+                    label: label.to_string(),
                 };
                 conditions.push(cond.clone());
                 records.push(Record::Condition(cond));
             }
-            ["onlyif", engine_name] => {
+            ["onlyif", label] => {
                 let cond = Condition::OnlyIf {
-                    engine_name: engine_name.to_string(),
+                    label: label.to_string(),
                 };
                 conditions.push(cond.clone());
                 records.push(Record::Condition(cond));
+            }
+            ["connection", name] => {
+                let conn = Connection::new(name);
+                connection = conn.clone();
+                records.push(Record::Connection(conn));
             }
             ["statement", res @ ..] => {
                 let mut expected_count = None;
@@ -503,6 +536,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 records.push(Record::Statement {
                     loc,
                     conditions: std::mem::take(&mut conditions),
+                    connection: std::mem::take(&mut connection),
                     expected_error,
                     sql,
                     expected_count,
@@ -569,6 +603,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 records.push(Record::Query {
                     loc,
                     conditions: std::mem::take(&mut conditions),
+                    connection: std::mem::take(&mut connection),
                     expected_types,
                     sort_mode,
                     label,
@@ -732,6 +767,7 @@ select * from foo;
             vec![Record::Query {
                 loc: Location::new("<unknown>", 1),
                 conditions: vec![],
+                connection: Connection::Default,
                 expected_types: vec![],
                 sort_mode: None,
                 label: None,
@@ -803,6 +839,7 @@ select * from foo;
                     // so if new variants are added, this match
                     // statement must be too.
                     Record::Condition(_)
+                    | Record::Connection(_)
                     | Record::Comment(_)
                     | Record::Control(_)
                     | Record::Newline

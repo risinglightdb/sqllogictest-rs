@@ -2,7 +2,16 @@ use std::path::PathBuf;
 
 use sqllogictest::{DBOutput, DefaultColumnType};
 
-pub struct FakeDB;
+pub struct FakeDB {
+    counter: u64,
+}
+
+impl FakeDB {
+    #[allow(clippy::unused_async)]
+    async fn connect() -> Result<Self, FakeDBError> {
+        Ok(Self { counter: 0 })
+    }
+}
 
 #[derive(Debug)]
 pub struct FakeDBError;
@@ -20,22 +29,25 @@ impl sqllogictest::DB for FakeDB {
     type ColumnType = DefaultColumnType;
 
     fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, FakeDBError> {
-        // Output will be: sqllogictests yields copy test to '/tmp/.tmp6xSyMa/test.csv';
-        println!("sqllogictests yields {sql}");
-        assert!(!sql.contains("__TEST_DIR__"));
-        Ok(DBOutput::StatementComplete(0))
+        if sql == "select counter()" {
+            self.counter += 1;
+            Ok(DBOutput::Rows {
+                types: vec![DefaultColumnType::Integer],
+                rows: vec![vec![self.counter.to_string()]],
+            })
+        } else {
+            Err(FakeDBError)
+        }
     }
 }
 
 fn main() {
-    let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
-    // enable `__TEST_DIR__` override
-    tester.enable_testdir();
+    let mut tester = sqllogictest::Runner::new(FakeDB::connect);
 
     let mut filename = PathBuf::from(file!());
     filename.pop();
     filename.pop();
-    filename.push("test_dir_escape.slt");
+    filename.push("connection.slt");
 
     tester.run_file(filename).unwrap();
 }

@@ -35,10 +35,12 @@
 //! ```
 
 pub mod column_type;
+pub mod connection;
 pub mod parser;
 pub mod runner;
 
 pub use self::column_type::*;
+pub use self::connection::*;
 pub use self::parser::*;
 pub use self::runner::*;
 
