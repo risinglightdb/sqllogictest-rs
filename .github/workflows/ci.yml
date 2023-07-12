@@ -50,12 +50,6 @@ jobs:
         with:
           command: test
           args: --no-fail-fast
-      - name: Run examples
-        run: |
-          for example in examples/*
-          do
-              cargo run --example "$(basename "$example")"
-          done
 
   semver:
     runs-on: ubuntu-22.04

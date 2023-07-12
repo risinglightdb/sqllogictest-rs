@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use sqllogictest::{DBOutput, DefaultColumnType};
 
 pub struct FakeDB;
@@ -27,15 +25,13 @@ impl sqllogictest::DB for FakeDB {
     }
 }
 
-fn main() {
+#[test]
+fn test() {
     let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
     // enable `__TEST_DIR__` override
     tester.enable_testdir();
 
-    let mut filename = PathBuf::from(file!());
-    filename.pop();
-    filename.pop();
-    filename.push("test_dir_escape.slt");
-
-    tester.run_file(filename).unwrap();
+    tester
+        .run_file("./test_dir_escape/test_dir_escape.slt")
+        .unwrap();
 }

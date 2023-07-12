@@ -163,13 +163,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "604178f6c5c21f02dc555784810edfb88d34ac2c73b2eae109655649ee73ce3d"
 
 [[package]]
-name = "basic"
-version = "0.1.0"
-dependencies = [
- "sqllogictest",
-]
-
-[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -362,20 +355,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 
 [[package]]
-name = "condition"
-version = "0.1.0"
-dependencies = [
- "sqllogictest",
-]
-
-[[package]]
-name = "connection"
-version = "0.1.0"
-dependencies = [
- "sqllogictest",
-]
-
-[[package]]
 name = "console"
 version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -411,13 +390,6 @@ checksum = "1bfb12502f3fc46cca1bb51ac28df9d618d813cdc3d2f25b9fe775a34af26bb3"
 dependencies = [
  "generic-array",
  "typenum",
-]
-
-[[package]]
-name = "custom_type"
-version = "0.1.0"
-dependencies = [
- "sqllogictest",
 ]
 
 [[package]]
@@ -521,13 +493,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e51093e27b0797c359783294ca4f0a911c270184cb10f85783b118614a1501be"
 dependencies = [
  "instant",
-]
-
-[[package]]
-name = "file_level_sort_mode"
-version = "0.1.0"
-dependencies = [
- "sqllogictest",
 ]
 
 [[package]]
@@ -736,13 +701,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
 dependencies = [
  "cc",
-]
-
-[[package]]
-name = "include"
-version = "0.1.0"
-dependencies = [
- "sqllogictest",
 ]
 
 [[package]]
@@ -1277,13 +1235,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rowsort"
-version = "0.1.0"
-dependencies = [
- "sqllogictest",
-]
-
-[[package]]
 name = "rust_decimal"
 version = "1.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1595,13 +1546,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "test_dir_escape"
-version = "0.1.0"
-dependencies = [
- "sqllogictest",
-]
-
-[[package]]
 name = "tests"
 version = "0.1.0"
 dependencies = [
@@ -1816,13 +1760,6 @@ name = "uuid"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d023da39d1fde5a8a3fe1f3e01ca9632ada0a63e9797de55a879d6e2236277be"
-
-[[package]]
-name = "validator"
-version = "0.1.0"
-dependencies = [
- "sqllogictest",
-]
 
 [[package]]
 name = "version_check"

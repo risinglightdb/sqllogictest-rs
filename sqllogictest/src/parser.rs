@@ -699,45 +699,44 @@ mod tests {
 
     #[test]
     fn test_include_glob() {
-        let records = parse_file::<DefaultColumnType>("../examples/include/include_1.slt").unwrap();
+        let records =
+            parse_file::<DefaultColumnType>("../tests/slt/include/include_1.slt").unwrap();
         assert_eq!(15, records.len());
     }
 
     #[test]
     fn test_basic() {
-        parse_roundtrip::<DefaultColumnType>("../examples/basic/basic.slt")
+        parse_roundtrip::<DefaultColumnType>("../tests/slt/basic.slt")
     }
 
     #[test]
     fn test_condition() {
-        parse_roundtrip::<DefaultColumnType>("../examples/condition/condition.slt")
+        parse_roundtrip::<DefaultColumnType>("../tests/slt/condition.slt")
     }
 
     #[test]
     fn test_file_level_sort_mode() {
-        parse_roundtrip::<DefaultColumnType>(
-            "../examples/file_level_sort_mode/file_level_sort_mode.slt",
-        )
+        parse_roundtrip::<DefaultColumnType>("../tests/slt/file_level_sort_mode.slt")
     }
 
     #[test]
     fn test_rowsort() {
-        parse_roundtrip::<DefaultColumnType>("../examples/rowsort/rowsort.slt")
+        parse_roundtrip::<DefaultColumnType>("../tests/slt/rowsort.slt")
     }
 
     #[test]
     fn test_test_dir_escape() {
-        parse_roundtrip::<DefaultColumnType>("../examples/test_dir_escape/test_dir_escape.slt")
+        parse_roundtrip::<DefaultColumnType>("../tests/test_dir_escape/test_dir_escape.slt")
     }
 
     #[test]
     fn test_validator() {
-        parse_roundtrip::<DefaultColumnType>("../examples/validator/validator.slt")
+        parse_roundtrip::<DefaultColumnType>("../tests/validator/validator.slt")
     }
 
     #[test]
     fn test_custom_type() {
-        parse_roundtrip::<CustomColumnType>("../examples/custom_type/custom_type.slt")
+        parse_roundtrip::<CustomColumnType>("../tests/custom_type/custom_type.slt")
     }
 
     #[test]
@@ -780,6 +779,7 @@ select * from foo;
 
     /// Verifies Display impl is consistent with parsing by ensuring
     /// roundtrip parse(unparse(parse())) is consistent
+    #[track_caller]
     fn parse_roundtrip<T: ColumnType>(filename: impl AsRef<Path>) {
         let filename = filename.as_ref();
         let records = parse_file::<T>(filename).expect("parsing to complete");
