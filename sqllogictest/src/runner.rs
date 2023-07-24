@@ -244,14 +244,6 @@ pub enum TestErrorKind {
         expected_err: String,
         kind: RecordKind,
     },
-    #[error(
-        "{kind} is expected to fail with error:\n\t{expected_err}\nbut pass test\n[SQL] {sql}"
-    )]
-    MismatchPass {
-        sql: String,
-        expected_err: String,
-        kind: RecordKind,
-    },
     #[error("statement is expected to affect {expected} rows, but actually {actual}\n[SQL] {sql}")]
     StatementResultMismatch {
         sql: String,
@@ -697,9 +689,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 RecordOutput::Query { error: None, .. },
             ) => {
                 if expected_error.is_some() {
-                    return Err(TestErrorKind::MismatchPass {
+                    return Err(TestErrorKind::Ok {
                         sql,
-                        expected_err: expected_error.unwrap().to_string(),
                         kind: RecordKind::Query,
                     }
                     .at(loc));
@@ -710,10 +701,18 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     expected_results,
                     loc,
                     sql,
+                    expected_error,
                     ..
                 },
                 RecordOutput::Statement { error: None, .. },
             ) => {
+                if expected_error.is_some() {
+                    return Err(TestErrorKind::Ok {
+                        sql,
+                        kind: RecordKind::Query,
+                    }
+                    .at(loc));
+                }
                 if !expected_results.is_empty() {
                     return Err(TestErrorKind::QueryResultMismatch {
                         sql,
