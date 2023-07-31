@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.15.2] - 2023-07-31
+
+* fix(bin): do not print stack backtrace on error
+
 ## [0.15.1] - 2023-07-24
 
 * fix `statement error` unexpectedly passed when result is a successful `query`. Similarly for expected `query error` but successful `statement ok`.
