@@ -328,7 +328,7 @@ async fn run_parallel(
                 case
             }
             Err(e) => {
-                writeln!(buf, "{}\n\n{:?}", style("[FAILED]").red().bold(), e)?;
+                writeln!(buf, "{}\n\n{}", style("[FAILED]").red().bold(), e)?;
                 writeln!(buf)?;
                 failed_case.push(file.clone());
                 let mut status = TestCaseStatus::non_success(NonSuccessKind::Failure);
