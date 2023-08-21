@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.15.3] - 2023-08-02
+
+* fix(bin): fix error context display. To avoid stack backtrace being printed, unset `RUST_BACKTRACE` environment variable, or use pre-built binaries built with stable toolchain instead.
+
 ## [0.15.2] - 2023-07-31
 
 * fix(bin): do not print stack backtrace on error
