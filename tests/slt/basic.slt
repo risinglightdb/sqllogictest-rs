@@ -5,7 +5,7 @@ statement ok
 insert into t values(1,4,2), (2,3,3), (3,4,4), (4,3,5)
 
 
-query I
+query T
 select * from example_basic
 ----
 Alice
@@ -39,7 +39,7 @@ give me an error
 
 hash-threshold 3
 
-query I
+query T
 select * from example_basic
 ----
 Alice
@@ -48,14 +48,14 @@ Eve
 
 hash-threshold 1
 
-query I
+query T
 select * from example_basic
 ----
 3 values hashing to b5b44edac84d34d6af3be2a88bfae352
 
 hash-threshold 0
 
-query I
+query T
 select * from example_basic
 ----
 Alice
