@@ -1,7 +1,7 @@
 include ./include_2.slt.part
 include ./include/*.slt.part
 
-query I
+query T
 select * from example_basic
 ----
 Alice

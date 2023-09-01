@@ -8,7 +8,7 @@ create table example_basic(v1 int not null)
 
 
 onlyif risinglight
-query I
+query T
 select * from risinglight_t
 ----
 Alice
@@ -16,7 +16,7 @@ Bob
 Eve
 
 skipif risinglight
-query I
+query T
 select * from example_basic
 ----
 Alice
