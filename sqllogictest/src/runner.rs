@@ -597,8 +597,15 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     return RecordOutput::Nothing;
                 }
 
-                let mut cmd = std::process::Command::new("bash");
-                cmd.arg("-c").arg(command);
+                let cmd = if cfg!(target_os = "windows") {
+                    let mut cmd = std::process::Command::new("cmd");
+                    cmd.arg("/C").arg(command);
+                    cmd
+                } else {
+                    let mut cmd = std::process::Command::new("sh");
+                    cmd.arg("-c").arg(command);
+                    cmd
+                };
                 let result = D::run_command(cmd).await;
 
                 #[derive(thiserror::Error, Debug)]
