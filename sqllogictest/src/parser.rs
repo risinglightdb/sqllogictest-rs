@@ -775,7 +775,7 @@ mod tests {
 
     #[test]
     fn test_system_command() {
-        parse_roundtrip::<DefaultColumnType>("../examples/system_command/system_command.slt")
+        parse_roundtrip::<DefaultColumnType>("../tests/system_command/system_command.slt")
     }
 
     #[test]
