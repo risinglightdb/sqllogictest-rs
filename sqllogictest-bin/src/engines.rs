@@ -1,4 +1,6 @@
 use std::fmt::Display;
+use std::process::ExitStatus;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use clap::ValueEnum;
@@ -97,14 +99,14 @@ impl std::error::Error for EnginesError {
     }
 }
 
-impl Engines {
-    async fn run(&mut self, sql: &str) -> Result<DBOutput<DefaultColumnType>, anyhow::Error> {
-        Ok(match self {
-            Engines::Postgres(e) => e.run(sql).await?,
-            Engines::PostgresExtended(e) => e.run(sql).await?,
-            Engines::External(e) => e.run(sql).await?,
-        })
-    }
+macro_rules! dispatch_engines {
+    ($impl:expr, $inner:ident, $body:tt) => {{
+        match $impl {
+            Engines::Postgres($inner) => $body,
+            Engines::PostgresExtended($inner) => $body,
+            Engines::External($inner) => $body,
+        }
+    }};
 }
 
 #[async_trait]
@@ -113,6 +115,22 @@ impl AsyncDB for Engines {
     type ColumnType = DefaultColumnType;
 
     async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, Self::Error> {
-        self.run(sql).await.map_err(EnginesError)
+        dispatch_engines!(self, e, {
+            e.run(sql)
+                .await
+                .map_err(|e| EnginesError(anyhow::Error::from(e)))
+        })
+    }
+
+    fn engine_name(&self) -> &str {
+        dispatch_engines!(self, e, { e.engine_name() })
+    }
+
+    async fn sleep(dur: Duration) {
+        tokio::time::sleep(dur).await
+    }
+
+    async fn run_command(command: std::process::Command) -> std::io::Result<ExitStatus> {
+        Command::from(command).status().await
     }
 }

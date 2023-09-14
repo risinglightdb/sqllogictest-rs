@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::fmt::{Debug, Display};
 use std::path::Path;
+use std::process::{Command, ExitStatus};
 use std::sync::Arc;
 use std::time::Duration;
 use std::vec;
@@ -30,6 +31,9 @@ pub enum RecordOutput<T: ColumnType> {
     },
     Statement {
         count: u64,
+        error: Option<Arc<dyn std::error::Error + Send + Sync>>,
+    },
+    System {
         error: Option<Arc<dyn std::error::Error + Send + Sync>>,
     },
 }
@@ -71,6 +75,15 @@ pub trait AsyncDB {
     /// this by `tokio::time::sleep`.
     async fn sleep(dur: Duration) {
         std::thread::sleep(dur);
+    }
+
+    /// [`Runner`] calls this function to run a system command.
+    ///
+    /// The default implementation is `std::process::Command::status`, which is universial to any
+    /// async runtime but would block the current thread. If you are running in tokio runtime, you
+    /// should override this by `tokio::process::Command::status`.
+    async fn run_command(mut command: Command) -> std::io::Result<ExitStatus> {
+        command.status()
     }
 }
 
@@ -235,6 +248,11 @@ pub enum TestErrorKind {
         sql: String,
         err: Arc<dyn std::error::Error + Send + Sync>,
         kind: RecordKind,
+    },
+    #[error("system command failed: {err}\n[CMD] {command}")]
+    SystemFail {
+        command: String,
+        err: Arc<dyn std::error::Error + Send + Sync>,
     },
     // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
     #[error("{kind} is expected to fail with error:\n\t{expected_err}\nbut got error:\n\t{err}\n[SQL] {sql}")]
@@ -570,6 +588,31 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     },
                 }
             }
+            Record::System {
+                conditions,
+                command,
+                loc: _,
+            } => {
+                if should_skip(&self.labels, "", &conditions) {
+                    return RecordOutput::Nothing;
+                }
+
+                let mut cmd = std::process::Command::new("bash");
+                cmd.arg("-c").arg(command);
+                let result = D::run_command(cmd).await;
+
+                #[derive(thiserror::Error, Debug)]
+                #[error("external command exited unsuccessfully: {0}")]
+                struct SystemError(ExitStatus);
+
+                let error: Option<Arc<dyn std::error::Error + Send + Sync>> = match result {
+                    Ok(status) if status.success() => None,
+                    Ok(status) => Some(Arc::new(SystemError(status))),
+                    Err(e) => Some(Arc::new(e)),
+                };
+
+                RecordOutput::System { error }
+            }
             Record::Query {
                 conditions,
                 connection,
@@ -837,6 +880,18 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         actual: output_rows.join("\n"),
                     }
                     .at(loc));
+                }
+            }
+            (
+                Record::System {
+                    loc,
+                    conditions: _,
+                    command,
+                },
+                RecordOutput::System { error },
+            ) => {
+                if let Some(err) = error {
+                    return Err(TestErrorKind::SystemFail { command, err }.at(loc));
                 }
             }
             _ => unreachable!(),

@@ -1,3 +1,4 @@
+use std::process::{Command, ExitStatus};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -63,5 +64,9 @@ impl sqllogictest::AsyncDB for Postgres<Simple> {
 
     async fn sleep(dur: Duration) {
         tokio::time::sleep(dur).await
+    }
+
+    async fn run_command(command: Command) -> std::io::Result<ExitStatus> {
+        tokio::process::Command::from(command).status().await
     }
 }

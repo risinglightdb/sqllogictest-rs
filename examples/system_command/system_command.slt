@@ -1,0 +1,15 @@
+system ok
+echo 114514 > /tmp/test.txt
+
+query T
+select read()
+----
+114514
+
+system ok
+echo 1919810 > /tmp/test.txt
+
+query T
+select read()
+----
+1919810
