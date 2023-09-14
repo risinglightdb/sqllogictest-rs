@@ -22,6 +22,7 @@ use crate::parser::*;
 use crate::{ColumnType, Connections, MakeConnection};
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum RecordOutput<T: ColumnType> {
     Nothing,
     Query {
@@ -238,6 +239,7 @@ impl std::fmt::Display for RecordKind {
 ///
 /// For colored error message, use `self.display()`.
 #[derive(thiserror::Error, Debug, Clone)]
+#[non_exhaustive]
 pub enum TestErrorKind {
     #[error("parse error: {0}")]
     ParseError(ParseErrorKind),
