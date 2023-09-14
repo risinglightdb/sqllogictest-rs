@@ -593,6 +593,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 command,
                 loc: _,
             } => {
+                let command = self.replace_keywords(command);
+
                 if should_skip(&self.labels, "", &conditions) {
                     return RecordOutput::Nothing;
                 }

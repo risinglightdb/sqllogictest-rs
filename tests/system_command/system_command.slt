@@ -1,15 +1,15 @@
 system ok
-echo 114514 > /tmp/test.txt
+echo 114514 > __TEST_DIR__/test.txt
 
 query T
-select read()
+select read("__TEST_DIR__/test.txt")
 ----
 114514
 
 system ok
-echo 1919810 > /tmp/test.txt
+echo 1919810 > __TEST_DIR__/test.txt
 
 query T
-select read()
+select read("__TEST_DIR__/test.txt")
 ----
 1919810

@@ -18,25 +18,30 @@ impl sqllogictest::DB for FakeDB {
     type ColumnType = DefaultColumnType;
 
     fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, FakeDBError> {
-        if sql == "select read()" {
-            let content = std::fs::read_to_string("/tmp/test.txt")
-                .map_err(|_| FakeDBError)?
-                .trim()
-                .to_string();
+        let path = regex::Regex::new(r#"^select read\("(.+)"\)$"#)
+            .unwrap()
+            .captures(sql)
+            .and_then(|c| c.get(1))
+            .ok_or(FakeDBError)?
+            .as_str();
 
-            Ok(DBOutput::Rows {
-                types: vec![DefaultColumnType::Text],
-                rows: vec![vec![content]],
-            })
-        } else {
-            Err(FakeDBError)
-        }
+        let content = std::fs::read_to_string(path)
+            .map_err(|_| FakeDBError)?
+            .trim()
+            .to_string();
+
+        Ok(DBOutput::Rows {
+            types: vec![DefaultColumnType::Text],
+            rows: vec![vec![content]],
+        })
     }
 }
 
 #[test]
 fn test() {
     let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
+    // enable `__TEST_DIR__` override
+    tester.enable_testdir();
 
     tester
         .run_file("./system_command/system_command.slt")

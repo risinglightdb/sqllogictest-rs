@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+regex = "1.9.1"
 sqllogictest = { path = "../sqllogictest" }
 
 [[test]]
