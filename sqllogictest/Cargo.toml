@@ -24,3 +24,6 @@ regex = "1.9.1"
 owo-colors = "3.5.0"
 md-5 = "0.10"
 fs-err = "2.9.0"
+
+[dev-dependencies]
+pretty_assertions = "1"

@@ -109,6 +109,8 @@ pub enum Record<T: ColumnType> {
         /// The expected results.
         expected_results: Vec<String>,
     },
+    /// A system command is an external command that is to be executed by the shell. Currently it
+    /// must succeed and the output is ignored.
     System {
         loc: Location,
         conditions: Vec<Condition>,
@@ -772,6 +774,11 @@ mod tests {
     }
 
     #[test]
+    fn test_system_command() {
+        parse_roundtrip::<DefaultColumnType>("../examples/system_command/system_command.slt")
+    }
+
+    #[test]
     fn test_fail_unknown_type() {
         let script = "\
 query IA
@@ -837,18 +844,7 @@ select * from foo;
         let records = normalize_filename(records);
         let reparsed_records = normalize_filename(reparsed_records);
 
-        assert_eq!(
-            records, reparsed_records,
-            "Mismatch in reparsed records\n\
-                    *********\n\
-                    original:\n\
-                    *********\n\
-                    {records:#?}\n\n\
-                    *********\n\
-                    reparsed:\n\
-                    *********\n\
-                    {reparsed_records:#?}\n\n",
-        );
+        pretty_assertions::assert_eq!(records, reparsed_records, "Mismatch in reparsed records");
     }
 
     /// Replaces the actual filename in all Records with
