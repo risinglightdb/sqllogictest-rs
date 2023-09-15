@@ -47,3 +47,16 @@ fn test() {
         .run_file("./system_command/system_command.slt")
         .unwrap();
 }
+
+#[test]
+fn test_fail() {
+    let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
+    // enable `__TEST_DIR__` override
+    tester.enable_testdir();
+
+    let err = tester
+        .run_file("./system_command/system_command_fail.slt")
+        .unwrap_err();
+
+    assert!(err.to_string().contains("system command failed"), "{err}");
+}

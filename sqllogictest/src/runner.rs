@@ -613,7 +613,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 let result = D::run_command(cmd).await;
 
                 #[derive(thiserror::Error, Debug)]
-                #[error("external command exited unsuccessfully: {0}")]
+                #[error("process exited unsuccessfully: {0}")] // message from unstable `ExitStatusError`
                 struct SystemError(ExitStatus);
 
                 let error: Option<Arc<dyn std::error::Error + Send + Sync>> = match result {
