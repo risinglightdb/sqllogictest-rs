@@ -267,11 +267,9 @@ async fn run_parallel(
     let mut create_databases = BTreeMap::new();
     for file in files {
         let db_name = file
-            .file_name()
-            .ok_or_else(|| anyhow!("not a valid filename"))?
             .to_str()
             .ok_or_else(|| anyhow!("not a UTF-8 filename"))?;
-        let db_name = db_name.replace([' ', '.', '-'], "_");
+        let db_name = db_name.replace([' ', '.', '-', '/'], "_");
         eprintln!("+ Discovered Test: {db_name}");
         if create_databases.insert(db_name.to_string(), file).is_some() {
             return Err(anyhow!("duplicated file name found: {}", db_name));
