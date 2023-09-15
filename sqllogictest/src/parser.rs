@@ -109,6 +109,14 @@ pub enum Record<T: ColumnType> {
         /// The expected results.
         expected_results: Vec<String>,
     },
+    /// A system command is an external command that is to be executed by the shell. Currently it
+    /// must succeed and the output is ignored.
+    System {
+        loc: Location,
+        conditions: Vec<Condition>,
+        /// The external command.
+        command: String,
+    },
     /// A sleep period.
     Sleep {
         loc: Location,
@@ -238,6 +246,13 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 }
                 // query always ends with a blank line
                 writeln!(f)
+            }
+            Record::System {
+                loc: _,
+                conditions: _,
+                command,
+            } => {
+                writeln!(f, "system ok\n{command}")
             }
             Record::Sleep { loc: _, duration } => {
                 write!(f, "sleep {}", humantime::format_duration(*duration))
@@ -612,6 +627,25 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     expected_error,
                 });
             }
+            ["system", "ok"] => {
+                // TODO: we don't support asserting error message for system command
+                let mut command = match lines.next() {
+                    Some((_, line)) => line.into(),
+                    None => return Err(ParseErrorKind::UnexpectedEOF.at(loc.next_line())),
+                };
+                for (_, line) in &mut lines {
+                    if line.is_empty() {
+                        break;
+                    }
+                    command += "\n";
+                    command += line;
+                }
+                records.push(Record::System {
+                    loc,
+                    conditions: std::mem::take(&mut conditions),
+                    command,
+                });
+            }
             ["control", res @ ..] => match res {
                 ["sortmode", sort_mode] => match SortMode::try_from_str(sort_mode) {
                     Ok(sort_mode) => records.push(Record::Control(Control::SortMode(sort_mode))),
@@ -740,6 +774,11 @@ mod tests {
     }
 
     #[test]
+    fn test_system_command() {
+        parse_roundtrip::<DefaultColumnType>("../tests/system_command/system_command.slt")
+    }
+
+    #[test]
     fn test_fail_unknown_type() {
         let script = "\
 query IA
@@ -805,18 +844,7 @@ select * from foo;
         let records = normalize_filename(records);
         let reparsed_records = normalize_filename(reparsed_records);
 
-        assert_eq!(
-            records, reparsed_records,
-            "Mismatch in reparsed records\n\
-                    *********\n\
-                    original:\n\
-                    *********\n\
-                    {records:#?}\n\n\
-                    *********\n\
-                    reparsed:\n\
-                    *********\n\
-                    {reparsed_records:#?}\n\n",
-        );
+        pretty_assertions::assert_eq!(records, reparsed_records, "Mismatch in reparsed records");
     }
 
     /// Replaces the actual filename in all Records with
@@ -829,6 +857,7 @@ select * from foo;
                 match &mut record {
                     Record::Include { loc, .. } => normalize_loc(loc),
                     Record::Statement { loc, .. } => normalize_loc(loc),
+                    Record::System { loc, .. } => normalize_loc(loc),
                     Record::Query { loc, .. } => normalize_loc(loc),
                     Record::Sleep { loc, .. } => normalize_loc(loc),
                     Record::Subtest { loc, .. } => normalize_loc(loc),

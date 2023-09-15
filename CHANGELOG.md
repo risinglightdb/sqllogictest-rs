@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.16.0] - 2023-09-15
+
+* Support running external system commands with the syntax below. This is useful for manipulating some external resources during the test.
+  ```
+  system ok
+  echo "Hello, world!"
+  ```
+  The runner will check the exit code of the command, and the output will be ignored. Currently, only `ok` is supported.
+
+  Changes:
+  - (parser) **Breaking change**: Add `Record::System`, and corresponding `TestErrorKind` and `RecordOutput`. Mark `TestErrorKind` and `RecordOutput` as `#[non_exhaustive]`.
+  - (runner) Add `run_command` to `AsyncDB` trait. The default implementation will run the command with `std::process::Command::status`. Implementors can override this method to utilize an asynchronous runtime such as `tokio`.
+
+* fix(runner): fix database name duplication for parallel tests by using the **full path** of the test file (instead of the file name) as the database name.
+
 ## [0.15.3] - 2023-08-02
 
 * fix(bin): fix error context display. To avoid stack backtrace being printed, unset `RUST_BACKTRACE` environment variable, or use pre-built binaries built with stable toolchain instead.

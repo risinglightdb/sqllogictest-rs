@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::fmt::{Debug, Display};
 use std::path::Path;
+use std::process::{Command, ExitStatus};
 use std::sync::Arc;
 use std::time::Duration;
 use std::vec;
@@ -21,6 +22,7 @@ use crate::parser::*;
 use crate::{ColumnType, Connections, MakeConnection};
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum RecordOutput<T: ColumnType> {
     Nothing,
     Query {
@@ -30,6 +32,9 @@ pub enum RecordOutput<T: ColumnType> {
     },
     Statement {
         count: u64,
+        error: Option<Arc<dyn std::error::Error + Send + Sync>>,
+    },
+    System {
         error: Option<Arc<dyn std::error::Error + Send + Sync>>,
     },
 }
@@ -71,6 +76,15 @@ pub trait AsyncDB {
     /// this by `tokio::time::sleep`.
     async fn sleep(dur: Duration) {
         std::thread::sleep(dur);
+    }
+
+    /// [`Runner`] calls this function to run a system command.
+    ///
+    /// The default implementation is `std::process::Command::status`, which is universial to any
+    /// async runtime but would block the current thread. If you are running in tokio runtime, you
+    /// should override this by `tokio::process::Command::status`.
+    async fn run_command(mut command: Command) -> std::io::Result<ExitStatus> {
+        command.status()
     }
 }
 
@@ -225,6 +239,7 @@ impl std::fmt::Display for RecordKind {
 ///
 /// For colored error message, use `self.display()`.
 #[derive(thiserror::Error, Debug, Clone)]
+#[non_exhaustive]
 pub enum TestErrorKind {
     #[error("parse error: {0}")]
     ParseError(ParseErrorKind),
@@ -235,6 +250,11 @@ pub enum TestErrorKind {
         sql: String,
         err: Arc<dyn std::error::Error + Send + Sync>,
         kind: RecordKind,
+    },
+    #[error("system command failed: {err}\n[CMD] {command}")]
+    SystemFail {
+        command: String,
+        err: Arc<dyn std::error::Error + Send + Sync>,
     },
     // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
     #[error("{kind} is expected to fail with error:\n\t{expected_err}\nbut got error:\n\t{err}\n[SQL] {sql}")]
@@ -570,6 +590,40 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     },
                 }
             }
+            Record::System {
+                conditions,
+                command,
+                loc: _,
+            } => {
+                let command = self.replace_keywords(command);
+
+                if should_skip(&self.labels, "", &conditions) {
+                    return RecordOutput::Nothing;
+                }
+
+                let cmd = if cfg!(target_os = "windows") {
+                    let mut cmd = std::process::Command::new("cmd");
+                    cmd.arg("/C").arg(command);
+                    cmd
+                } else {
+                    let mut cmd = std::process::Command::new("sh");
+                    cmd.arg("-c").arg(command);
+                    cmd
+                };
+                let result = D::run_command(cmd).await;
+
+                #[derive(thiserror::Error, Debug)]
+                #[error("process exited unsuccessfully: {0}")] // message from unstable `ExitStatusError`
+                struct SystemError(ExitStatus);
+
+                let error: Option<Arc<dyn std::error::Error + Send + Sync>> = match result {
+                    Ok(status) if status.success() => None,
+                    Ok(status) => Some(Arc::new(SystemError(status))),
+                    Err(e) => Some(Arc::new(e)),
+                };
+
+                RecordOutput::System { error }
+            }
             Record::Query {
                 conditions,
                 connection,
@@ -837,6 +891,18 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         actual: output_rows.join("\n"),
                     }
                     .at(loc));
+                }
+            }
+            (
+                Record::System {
+                    loc,
+                    conditions: _,
+                    command,
+                },
+                RecordOutput::System { error },
+            ) => {
+                if let Some(err) = error {
+                    return Err(TestErrorKind::SystemFail { command, err }.at(loc));
                 }
             }
             _ => unreachable!(),
