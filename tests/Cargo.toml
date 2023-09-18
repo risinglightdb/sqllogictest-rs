@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 regex = "1.9.1"
+rusty-fork = "0.3"
 sqllogictest = { path = "../sqllogictest" }
 
 [[test]]
@@ -28,3 +29,7 @@ path = "./test_dir_escape/test_dir_escape.rs"
 [[test]]
 name = "system_command"
 path = "./system_command/system_command.rs"
+
+[[test]]
+name = "substitution"
+path = "./substitution/substitution.rs"

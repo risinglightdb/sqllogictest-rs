@@ -1,0 +1,39 @@
+# by default, substitution is off so we're strictly compatible with other implementations
+query T
+select $MY_USERNAME
+----
+$MY_USERNAME
+
+# enable substitution with `control`
+control substitution on
+
+# now we can use variables in different forms
+query T
+select $MY_USERNAME, ${MY_PASSWORD}, ${MY_INEXISTENT_PORT:11451}, ${MY_DATABASE:$MY_USERNAME-db}
+----
+sqllogictest, rust, 11451, sqllogictest-db
+
+# also in statements
+statement ok
+check $MY_USERNAME
+
+# also in commands
+system ok
+echo "$MY_USERNAME"
+
+# a special variable `__TEST_DIR__` is available with a temporary directory
+statement ok
+path $__TEST_DIR__
+
+# non existent variables without default values are errors
+statement error No such variable
+check $NONEXISTENT_VARIABLE
+
+# disable substitution with `control`
+control substitution off
+
+# now we can't use variables
+query T
+select $MY_USERNAME
+----
+$MY_USERNAME

@@ -21,6 +21,8 @@ use crate::parser::*;
 use crate::substitution::Substitution;
 use crate::{ColumnType, Connections, MakeConnection};
 
+type AnyError = Arc<dyn std::error::Error + Send + Sync>;
+
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum RecordOutput<T: ColumnType> {
@@ -28,14 +30,14 @@ pub enum RecordOutput<T: ColumnType> {
     Query {
         types: Vec<T>,
         rows: Vec<Vec<String>>,
-        error: Option<Arc<dyn std::error::Error + Send + Sync>>,
+        error: Option<AnyError>,
     },
     Statement {
         count: u64,
-        error: Option<Arc<dyn std::error::Error + Send + Sync>>,
+        error: Option<AnyError>,
     },
     System {
-        error: Option<Arc<dyn std::error::Error + Send + Sync>>,
+        error: Option<AnyError>,
     },
 }
 
@@ -248,19 +250,16 @@ pub enum TestErrorKind {
     #[error("{kind} failed: {err}\n[SQL] {sql}")]
     Fail {
         sql: String,
-        err: Arc<dyn std::error::Error + Send + Sync>,
+        err: AnyError,
         kind: RecordKind,
     },
     #[error("system command failed: {err}\n[CMD] {command}")]
-    SystemFail {
-        command: String,
-        err: Arc<dyn std::error::Error + Send + Sync>,
-    },
+    SystemFail { command: String, err: AnyError },
     // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
     #[error("{kind} is expected to fail with error:\n\t{expected_err}\nbut got error:\n\t{err}\n[SQL] {sql}")]
     ErrorMismatch {
         sql: String,
-        err: Arc<dyn std::error::Error + Send + Sync>,
+        err: AnyError,
         expected_err: String,
         kind: RecordKind,
     },
@@ -549,7 +548,15 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 expected_count: _,
                 loc: _,
             } => {
-                let sql = self.may_substitute(sql);
+                let sql = match self.may_substitute(sql) {
+                    Ok(sql) => sql,
+                    Err(error) => {
+                        return RecordOutput::Statement {
+                            count: 0,
+                            error: Some(error),
+                        }
+                    }
+                };
 
                 let conn = match self.conn.get(connection).await {
                     Ok(conn) => conn,
@@ -587,7 +594,10 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 command,
                 loc: _,
             } => {
-                let command = self.may_substitute(command);
+                let command = match self.may_substitute(command) {
+                    Ok(command) => command,
+                    Err(error) => return RecordOutput::System { error: Some(error) },
+                };
 
                 if should_skip(&self.labels, "", &conditions) {
                     return RecordOutput::Nothing;
@@ -608,7 +618,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 #[error("process exited unsuccessfully: {0}")] // message from unstable `ExitStatusError`
                 struct SystemError(ExitStatus);
 
-                let error: Option<Arc<dyn std::error::Error + Send + Sync>> = match result {
+                let error: Option<AnyError> = match result {
                     Ok(status) if status.success() => None,
                     Ok(status) => Some(Arc::new(SystemError(status))),
                     Err(e) => Some(Arc::new(e)),
@@ -631,7 +641,16 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 // not handle yet,
                 label: _,
             } => {
-                let sql = self.may_substitute(sql);
+                let sql = match self.may_substitute(sql) {
+                    Ok(sql) => sql,
+                    Err(error) => {
+                        return RecordOutput::Query {
+                            error: Some(error),
+                            types: vec![],
+                            rows: vec![],
+                        }
+                    }
+                };
 
                 let conn = match self.conn.get(connection).await {
                     Ok(conn) => conn,
@@ -1050,11 +1069,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
     /// Substitute the input SQL or command with environment variables and `__TEST_DIR__`, if
     /// enabled with `control`.
-    fn may_substitute(&self, input: String) -> String {
+    fn may_substitute(&self, input: String) -> Result<String, AnyError> {
         if let Some(substitution) = &self.substitution {
-            subst::substitute(&input, substitution).expect("invalid substitution")
+            subst::substitute(&input, substitution).map_err(|e| Arc::new(e) as AnyError)
         } else {
-            input
+            Ok(input)
         }
     }
 
