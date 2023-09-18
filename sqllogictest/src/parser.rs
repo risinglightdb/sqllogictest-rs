@@ -265,6 +265,7 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
             }
             Record::Control(c) => match c {
                 Control::SortMode(m) => write!(f, "control sortmode {}", m.as_str()),
+                Control::Substitution(s) => write!(f, "control substitution {}", s.as_str()),
             },
             Record::Condition(cond) => match cond {
                 Condition::OnlyIf { label } => write!(f, "onlyif {label}"),
@@ -294,9 +295,34 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+pub enum OnOff {
+    On,
+    Off,
+}
+
+impl OnOff {
+    pub fn try_from_str(s: &str) -> Result<Self, ParseErrorKind> {
+        match s {
+            "on" => Ok(Self::On),
+            "off" => Ok(Self::Off),
+            _ => Err(ParseErrorKind::InvalidControl(s.to_string())),
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::On => "on",
+            Self::Off => "off",
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Control {
     /// Control sort mode.
     SortMode(SortMode),
+    /// Control whether or not to substitute variables in the SQL.
+    Substitution(OnOff),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -649,6 +675,10 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
             ["control", res @ ..] => match res {
                 ["sortmode", sort_mode] => match SortMode::try_from_str(sort_mode) {
                     Ok(sort_mode) => records.push(Record::Control(Control::SortMode(sort_mode))),
+                    Err(k) => return Err(k.at(loc)),
+                },
+                ["substitution", on_off] => match OnOff::try_from_str(on_off) {
+                    Ok(on_off) => records.push(Record::Control(Control::Substitution(on_off))),
                     Err(k) => return Err(k.at(loc)),
                 },
                 _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),

@@ -16,9 +16,9 @@ use md5::Digest;
 use owo_colors::OwoColorize;
 use regex::Regex;
 use similar::{Change, ChangeTag, TextDiff};
-use tempfile::{tempdir, TempDir};
 
 use crate::parser::*;
+use crate::substitution::Substitution;
 use crate::{ColumnType, Connections, MakeConnection};
 
 #[derive(Debug, Clone)]
@@ -476,7 +476,7 @@ pub struct Runner<D: AsyncDB, M: MakeConnection> {
     // validator is used for validate if the result of query equals to expected.
     validator: Validator,
     column_type_validator: ColumnTypeValidator<D::ColumnType>,
-    testdir: Option<TempDir>,
+    substitution: Option<Substitution>,
     sort_mode: Option<SortMode>,
     /// 0 means never hashing
     hash_threshold: usize,
@@ -492,7 +492,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         Runner {
             validator: default_validator,
             column_type_validator: default_column_validator,
-            testdir: None,
+            substitution: None,
             sort_mode: None,
             hash_threshold: 0,
             labels: HashSet::new(),
@@ -503,14 +503,6 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Add a label for condition `skipif` and `onlyif`.
     pub fn add_label(&mut self, label: &str) {
         self.labels.insert(label.to_string());
-    }
-
-    /// Replace the pattern `__TEST_DIR__` in SQL with a temporary directory path.
-    ///
-    /// This feature is useful in those tests where data will be written to local
-    /// files, e.g. `COPY`.
-    pub fn enable_testdir(&mut self) {
-        self.testdir = Some(tempdir().expect("failed to create testdir"));
     }
 
     pub fn with_validator(&mut self, validator: Validator) {
@@ -557,7 +549,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 expected_count: _,
                 loc: _,
             } => {
-                let sql = self.replace_keywords(sql);
+                let sql = self.may_substitute(sql);
 
                 let conn = match self.conn.get(connection).await {
                     Ok(conn) => conn,
@@ -595,7 +587,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 command,
                 loc: _,
             } => {
-                let command = self.replace_keywords(command);
+                let command = self.may_substitute(command);
 
                 if should_skip(&self.labels, "", &conditions) {
                     return RecordOutput::Nothing;
@@ -639,7 +631,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 // not handle yet,
                 label: _,
             } => {
-                let sql = self.replace_keywords(sql);
+                let sql = self.may_substitute(sql);
 
                 let conn = match self.conn.get(connection).await {
                     Ok(conn) => conn,
@@ -705,12 +697,20 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 D::sleep(duration).await;
                 RecordOutput::Nothing
             }
-            Record::Control(control) => match control {
-                Control::SortMode(sort_mode) => {
-                    self.sort_mode = Some(sort_mode);
-                    RecordOutput::Nothing
+            Record::Control(control) => {
+                match control {
+                    Control::SortMode(sort_mode) => {
+                        self.sort_mode = Some(sort_mode);
+                    }
+                    Control::Substitution(on_off) => match (&mut self.substitution, on_off) {
+                        (s @ None, OnOff::On) => *s = Some(Substitution::default()),
+                        (s @ Some(_), OnOff::Off) => *s = None,
+                        _ => {}
+                    },
                 }
-            },
+
+                RecordOutput::Nothing
+            }
             Record::HashThreshold { loc: _, threshold } => {
                 self.hash_threshold = threshold as usize;
                 RecordOutput::Nothing
@@ -1048,12 +1048,13 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         block_on(self.run_parallel_async(glob, hosts, conn_builder, jobs))
     }
 
-    /// Replace all keywords in the SQL.
-    fn replace_keywords(&self, sql: String) -> String {
-        if let Some(testdir) = &self.testdir {
-            sql.replace("__TEST_DIR__", testdir.path().to_str().unwrap())
+    /// Substitute the input SQL or command with environment variables and `__TEST_DIR__`, if
+    /// enabled with `control`.
+    fn may_substitute(&self, input: String) -> String {
+        if let Some(substitution) = &self.substitution {
+            subst::substitute(&input, substitution).expect("invalid substitution")
         } else {
-            sql
+            input
         }
     }
 
