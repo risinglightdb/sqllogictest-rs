@@ -789,6 +789,11 @@ mod tests {
     }
 
     #[test]
+    fn test_substitution() {
+        parse_roundtrip::<DefaultColumnType>("../tests/substitution/basic.slt")
+    }
+
+    #[test]
     fn test_test_dir_escape() {
         parse_roundtrip::<DefaultColumnType>("../tests/test_dir_escape/test_dir_escape.slt")
     }
