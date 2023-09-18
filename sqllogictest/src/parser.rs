@@ -294,6 +294,7 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
     }
 }
 
+/// Whether to enable or disable a feature. Used in `control` statements.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum OnOff {
     On,

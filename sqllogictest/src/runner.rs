@@ -21,6 +21,7 @@ use crate::parser::*;
 use crate::substitution::Substitution;
 use crate::{ColumnType, Connections, MakeConnection};
 
+/// Type-erased error type.
 type AnyError = Arc<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug, Clone)]
@@ -1067,8 +1068,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         block_on(self.run_parallel_async(glob, hosts, conn_builder, jobs))
     }
 
-    /// Substitute the input SQL or command with environment variables and `__TEST_DIR__`, if
-    /// enabled with `control`.
+    /// Substitute the input SQL or command with [`Substitution`], if enabled by `control
+    /// substitution`.
     fn may_substitute(&self, input: String) -> Result<String, AnyError> {
         if let Some(substitution) = &self.substitution {
             subst::substitute(&input, substitution).map_err(|e| Arc::new(e) as AnyError)

@@ -3,8 +3,11 @@ use std::sync::OnceLock;
 use subst::Env;
 use tempfile::{tempdir, TempDir};
 
+/// Substitute environment variables and special variables like `__TEST_DIR__` in SQL.
 #[derive(Default)]
 pub(crate) struct Substitution {
+    /// The temporary directory for `__TEST_DIR__`.
+    /// Lazily initialized and cleaned up when dropped.
     test_dir: OnceLock<TempDir>,
 }
 
