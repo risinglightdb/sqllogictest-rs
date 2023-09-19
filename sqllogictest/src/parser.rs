@@ -294,37 +294,39 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
     }
 }
 
-/// Whether to enable or disable a feature. Used in `control` statements.
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum OnOff {
-    On,
-    Off,
-}
-
-impl OnOff {
-    pub fn try_from_str(s: &str) -> Result<Self, ParseErrorKind> {
-        match s {
-            "on" => Ok(Self::On),
-            "off" => Ok(Self::Off),
-            _ => Err(ParseErrorKind::InvalidControl(s.to_string())),
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::On => "on",
-            Self::Off => "off",
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[non_exhaustive]
 pub enum Control {
     /// Control sort mode.
     SortMode(SortMode),
     /// Control whether or not to substitute variables in the SQL.
-    Substitution(OnOff),
+    Substitution(bool),
+}
+
+trait ControlItem: Sized {
+    /// Try to parse from string.
+    fn try_from_str(s: &str) -> Result<Self, ParseErrorKind>;
+
+    /// Convert to string.
+    fn as_str(&self) -> &'static str;
+}
+
+impl ControlItem for bool {
+    fn try_from_str(s: &str) -> Result<Self, ParseErrorKind> {
+        match s {
+            "on" => Ok(true),
+            "off" => Ok(false),
+            _ => Err(ParseErrorKind::InvalidControl(s.to_string())),
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        if *self {
+            "on"
+        } else {
+            "off"
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -388,8 +390,8 @@ pub enum SortMode {
     ValueSort,
 }
 
-impl SortMode {
-    pub fn try_from_str(s: &str) -> Result<Self, ParseErrorKind> {
+impl ControlItem for SortMode {
+    fn try_from_str(s: &str) -> Result<Self, ParseErrorKind> {
         match s {
             "nosort" => Ok(Self::NoSort),
             "rowsort" => Ok(Self::RowSort),
@@ -398,7 +400,7 @@ impl SortMode {
         }
     }
 
-    pub fn as_str(&self) -> &'static str {
+    fn as_str(&self) -> &'static str {
         match self {
             Self::NoSort => "nosort",
             Self::RowSort => "rowsort",
@@ -679,7 +681,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     Ok(sort_mode) => records.push(Record::Control(Control::SortMode(sort_mode))),
                     Err(k) => return Err(k.at(loc)),
                 },
-                ["substitution", on_off] => match OnOff::try_from_str(on_off) {
+                ["substitution", on_off] => match bool::try_from_str(on_off) {
                     Ok(on_off) => records.push(Record::Control(Control::Substitution(on_off))),
                     Err(k) => return Err(k.at(loc)),
                 },

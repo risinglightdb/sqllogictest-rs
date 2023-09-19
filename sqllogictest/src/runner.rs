@@ -723,8 +723,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         self.sort_mode = Some(sort_mode);
                     }
                     Control::Substitution(on_off) => match (&mut self.substitution, on_off) {
-                        (s @ None, OnOff::On) => *s = Some(Substitution::default()),
-                        (s @ Some(_), OnOff::Off) => *s = None,
+                        (s @ None, true) => *s = Some(Substitution::default()),
+                        (s @ Some(_), false) => *s = None,
                         _ => {}
                     },
                 }
