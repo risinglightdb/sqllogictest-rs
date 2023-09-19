@@ -319,6 +319,7 @@ impl OnOff {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+#[non_exhaustive]
 pub enum Control {
     /// Control sort mode.
     SortMode(SortMode),

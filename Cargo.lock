@@ -1451,7 +1451,7 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "async-trait",
  "educe",
@@ -1474,7 +1474,7 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest-bin"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1495,7 +1495,7 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest-engines"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "async-trait",
  "bytes",
