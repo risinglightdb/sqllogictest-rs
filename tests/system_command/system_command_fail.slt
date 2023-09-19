@@ -1,2 +1,4 @@
+control substitution on
+
 system ok
-__TEST_DIR__/something_than_not_exist
+${__TEST_DIR__}/something_than_not_exist

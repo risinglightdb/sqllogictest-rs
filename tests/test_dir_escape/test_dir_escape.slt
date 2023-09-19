@@ -1,2 +1,4 @@
+control substitution on
+
 statement ok
-copy test to '__TEST_DIR__/test.csv';
+copy test to '${__TEST_DIR__}/test.csv';

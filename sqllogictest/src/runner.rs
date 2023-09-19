@@ -16,10 +16,13 @@ use md5::Digest;
 use owo_colors::OwoColorize;
 use regex::Regex;
 use similar::{Change, ChangeTag, TextDiff};
-use tempfile::{tempdir, TempDir};
 
 use crate::parser::*;
+use crate::substitution::Substitution;
 use crate::{ColumnType, Connections, MakeConnection};
+
+/// Type-erased error type.
+type AnyError = Arc<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -28,14 +31,14 @@ pub enum RecordOutput<T: ColumnType> {
     Query {
         types: Vec<T>,
         rows: Vec<Vec<String>>,
-        error: Option<Arc<dyn std::error::Error + Send + Sync>>,
+        error: Option<AnyError>,
     },
     Statement {
         count: u64,
-        error: Option<Arc<dyn std::error::Error + Send + Sync>>,
+        error: Option<AnyError>,
     },
     System {
-        error: Option<Arc<dyn std::error::Error + Send + Sync>>,
+        error: Option<AnyError>,
     },
 }
 
@@ -248,19 +251,16 @@ pub enum TestErrorKind {
     #[error("{kind} failed: {err}\n[SQL] {sql}")]
     Fail {
         sql: String,
-        err: Arc<dyn std::error::Error + Send + Sync>,
+        err: AnyError,
         kind: RecordKind,
     },
     #[error("system command failed: {err}\n[CMD] {command}")]
-    SystemFail {
-        command: String,
-        err: Arc<dyn std::error::Error + Send + Sync>,
-    },
+    SystemFail { command: String, err: AnyError },
     // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
     #[error("{kind} is expected to fail with error:\n\t{expected_err}\nbut got error:\n\t{err}\n[SQL] {sql}")]
     ErrorMismatch {
         sql: String,
-        err: Arc<dyn std::error::Error + Send + Sync>,
+        err: AnyError,
         expected_err: String,
         kind: RecordKind,
     },
@@ -476,7 +476,7 @@ pub struct Runner<D: AsyncDB, M: MakeConnection> {
     // validator is used for validate if the result of query equals to expected.
     validator: Validator,
     column_type_validator: ColumnTypeValidator<D::ColumnType>,
-    testdir: Option<TempDir>,
+    substitution: Option<Substitution>,
     sort_mode: Option<SortMode>,
     /// 0 means never hashing
     hash_threshold: usize,
@@ -492,7 +492,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         Runner {
             validator: default_validator,
             column_type_validator: default_column_validator,
-            testdir: None,
+            substitution: None,
             sort_mode: None,
             hash_threshold: 0,
             labels: HashSet::new(),
@@ -503,14 +503,6 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Add a label for condition `skipif` and `onlyif`.
     pub fn add_label(&mut self, label: &str) {
         self.labels.insert(label.to_string());
-    }
-
-    /// Replace the pattern `__TEST_DIR__` in SQL with a temporary directory path.
-    ///
-    /// This feature is useful in those tests where data will be written to local
-    /// files, e.g. `COPY`.
-    pub fn enable_testdir(&mut self) {
-        self.testdir = Some(tempdir().expect("failed to create testdir"));
     }
 
     pub fn with_validator(&mut self, validator: Validator) {
@@ -557,7 +549,15 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 expected_count: _,
                 loc: _,
             } => {
-                let sql = self.replace_keywords(sql);
+                let sql = match self.may_substitute(sql) {
+                    Ok(sql) => sql,
+                    Err(error) => {
+                        return RecordOutput::Statement {
+                            count: 0,
+                            error: Some(error),
+                        }
+                    }
+                };
 
                 let conn = match self.conn.get(connection).await {
                     Ok(conn) => conn,
@@ -595,7 +595,10 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 command,
                 loc: _,
             } => {
-                let command = self.replace_keywords(command);
+                let command = match self.may_substitute(command) {
+                    Ok(command) => command,
+                    Err(error) => return RecordOutput::System { error: Some(error) },
+                };
 
                 if should_skip(&self.labels, "", &conditions) {
                     return RecordOutput::Nothing;
@@ -616,7 +619,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 #[error("process exited unsuccessfully: {0}")] // message from unstable `ExitStatusError`
                 struct SystemError(ExitStatus);
 
-                let error: Option<Arc<dyn std::error::Error + Send + Sync>> = match result {
+                let error: Option<AnyError> = match result {
                     Ok(status) if status.success() => None,
                     Ok(status) => Some(Arc::new(SystemError(status))),
                     Err(e) => Some(Arc::new(e)),
@@ -639,7 +642,16 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 // not handle yet,
                 label: _,
             } => {
-                let sql = self.replace_keywords(sql);
+                let sql = match self.may_substitute(sql) {
+                    Ok(sql) => sql,
+                    Err(error) => {
+                        return RecordOutput::Query {
+                            error: Some(error),
+                            types: vec![],
+                            rows: vec![],
+                        }
+                    }
+                };
 
                 let conn = match self.conn.get(connection).await {
                     Ok(conn) => conn,
@@ -705,12 +717,20 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 D::sleep(duration).await;
                 RecordOutput::Nothing
             }
-            Record::Control(control) => match control {
-                Control::SortMode(sort_mode) => {
-                    self.sort_mode = Some(sort_mode);
-                    RecordOutput::Nothing
+            Record::Control(control) => {
+                match control {
+                    Control::SortMode(sort_mode) => {
+                        self.sort_mode = Some(sort_mode);
+                    }
+                    Control::Substitution(on_off) => match (&mut self.substitution, on_off) {
+                        (s @ None, true) => *s = Some(Substitution::default()),
+                        (s @ Some(_), false) => *s = None,
+                        _ => {}
+                    },
                 }
-            },
+
+                RecordOutput::Nothing
+            }
             Record::HashThreshold { loc: _, threshold } => {
                 self.hash_threshold = threshold as usize;
                 RecordOutput::Nothing
@@ -1048,12 +1068,13 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         block_on(self.run_parallel_async(glob, hosts, conn_builder, jobs))
     }
 
-    /// Replace all keywords in the SQL.
-    fn replace_keywords(&self, sql: String) -> String {
-        if let Some(testdir) = &self.testdir {
-            sql.replace("__TEST_DIR__", testdir.path().to_str().unwrap())
+    /// Substitute the input SQL or command with [`Substitution`], if enabled by `control
+    /// substitution`.
+    fn may_substitute(&self, input: String) -> Result<String, AnyError> {
+        if let Some(substitution) = &self.substitution {
+            subst::substitute(&input, substitution).map_err(|e| Arc::new(e) as AnyError)
         } else {
-            sql
+            Ok(input)
         }
     }
 

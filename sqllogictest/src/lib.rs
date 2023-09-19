@@ -36,6 +36,7 @@
 
 pub mod column_type;
 pub mod connection;
+pub mod harness;
 pub mod parser;
 pub mod runner;
 
@@ -44,4 +45,4 @@ pub use self::connection::*;
 pub use self::parser::*;
 pub use self::runner::*;
 
-pub mod harness;
+mod substitution;

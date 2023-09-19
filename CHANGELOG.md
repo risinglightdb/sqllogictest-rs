@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.17.0] - 2023-09-19
+
+* Support environment variables substituion for SQL and system commands.
+  For compatibility, this feature is by default disabled, and can be enabled by adding `control substitution on` to the test file.
+  ```
+  control substitution on
+
+  query TTTT
+  SELECT
+      '$foo'                -- short
+    , '${foo}'              -- long
+    , '${bar:default}'      -- default value
+    , '${bar:$foo-default}' -- recursive default value
+  FROM baz;
+  ----
+  ...
+  ```
+
+  Besides, there's a special variable `$__TEST_DIR__` which is the path to a temporary directory specific to the current test case.
+  This can be helpful if you need to manipulate some external resources during the test.
+  ```
+  control substitution on
+
+  statement ok
+  COPY (SELECT * FROM foo) TO '$__TEST_DIR__/foo.txt';
+
+  system ok
+  echo "foo" > "$__TEST_DIR__/foo.txt"
+  ```
+
+  Changes:
+  - (parser) **Breaking change**: Add `Control::Substitution`. Mark `Control` as `#[non_exhaustive]`.
+  - (runner) **Breaking change**: Remove `enable_testdir`. For migration, one should now enable general substitution by the `control` statement and use a dollar-prefixed `$__TEST_DIR__`.
+
 ## [0.16.0] - 2023-09-15
 
 * Support running external system commands with the syntax below. This is useful for manipulating some external resources during the test.

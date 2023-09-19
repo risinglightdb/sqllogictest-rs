@@ -265,6 +265,7 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
             }
             Record::Control(c) => match c {
                 Control::SortMode(m) => write!(f, "control sortmode {}", m.as_str()),
+                Control::Substitution(s) => write!(f, "control substitution {}", s.as_str()),
             },
             Record::Condition(cond) => match cond {
                 Condition::OnlyIf { label } => write!(f, "onlyif {label}"),
@@ -294,9 +295,38 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+#[non_exhaustive]
 pub enum Control {
     /// Control sort mode.
     SortMode(SortMode),
+    /// Control whether or not to substitute variables in the SQL.
+    Substitution(bool),
+}
+
+trait ControlItem: Sized {
+    /// Try to parse from string.
+    fn try_from_str(s: &str) -> Result<Self, ParseErrorKind>;
+
+    /// Convert to string.
+    fn as_str(&self) -> &'static str;
+}
+
+impl ControlItem for bool {
+    fn try_from_str(s: &str) -> Result<Self, ParseErrorKind> {
+        match s {
+            "on" => Ok(true),
+            "off" => Ok(false),
+            _ => Err(ParseErrorKind::InvalidControl(s.to_string())),
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        if *self {
+            "on"
+        } else {
+            "off"
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -360,8 +390,8 @@ pub enum SortMode {
     ValueSort,
 }
 
-impl SortMode {
-    pub fn try_from_str(s: &str) -> Result<Self, ParseErrorKind> {
+impl ControlItem for SortMode {
+    fn try_from_str(s: &str) -> Result<Self, ParseErrorKind> {
         match s {
             "nosort" => Ok(Self::NoSort),
             "rowsort" => Ok(Self::RowSort),
@@ -370,7 +400,7 @@ impl SortMode {
         }
     }
 
-    pub fn as_str(&self) -> &'static str {
+    fn as_str(&self) -> &'static str {
         match self {
             Self::NoSort => "nosort",
             Self::RowSort => "rowsort",
@@ -651,6 +681,10 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     Ok(sort_mode) => records.push(Record::Control(Control::SortMode(sort_mode))),
                     Err(k) => return Err(k.at(loc)),
                 },
+                ["substitution", on_off] => match bool::try_from_str(on_off) {
+                    Ok(on_off) => records.push(Record::Control(Control::Substitution(on_off))),
+                    Err(k) => return Err(k.at(loc)),
+                },
                 _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
             },
             ["hash-threshold", threshold] => {
@@ -756,6 +790,11 @@ mod tests {
     #[test]
     fn test_rowsort() {
         parse_roundtrip::<DefaultColumnType>("../tests/slt/rowsort.slt")
+    }
+
+    #[test]
+    fn test_substitution() {
+        parse_roundtrip::<DefaultColumnType>("../tests/substitution/basic.slt")
     }
 
     #[test]

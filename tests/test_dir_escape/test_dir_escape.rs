@@ -28,8 +28,6 @@ impl sqllogictest::DB for FakeDB {
 #[test]
 fn test() {
     let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
-    // enable `__TEST_DIR__` override
-    tester.enable_testdir();
 
     tester
         .run_file("./test_dir_escape/test_dir_escape.slt")
