@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.17.1] - 2023-09-20
+
+* bin: support envvars `SLT_HOST/PORT/DB/USER/PASSWORD`
+
 ## [0.17.0] - 2023-09-19
 
 * Support environment variables substituion for SQL and system commands.
