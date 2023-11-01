@@ -1022,12 +1022,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         for (idx, file) in files.enumerate() {
             // for every slt file, we create a database against table conflict
             let file = file.unwrap();
-            let db_name = file
-                .file_name()
-                .expect("not a valid filename")
-                .to_str()
-                .expect("not a UTF-8 filename");
-            let db_name = db_name.replace([' ', '.', '-'], "_");
+            let db_name = file.to_str().expect("not a UTF-8 filename");
+            let db_name = db_name.replace([' ', '.', '-', '/'], "_");
 
             self.conn
                 .run_default(&format!("CREATE DATABASE {db_name};"))
