@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.17.2] - 2023-11-01
+
+* fix(runner): fix parallel testing db name duplication. Now we use full file path instead of filename as the temporary db name in `run_parallel_async`.
+
 ## [0.17.1] - 2023-09-20
 
 * bin: support envvars `SLT_HOST/PORT/DB/USER/PASSWORD`
