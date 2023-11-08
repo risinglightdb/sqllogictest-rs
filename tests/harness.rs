@@ -17,7 +17,7 @@ pub struct FakeDBError(String);
 
 impl std::fmt::Display for FakeDBError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:?}")
+        write!(f, "{}", self.0)
     }
 }
 
@@ -73,6 +73,11 @@ impl sqllogictest::DB for FakeDB {
         if sql.starts_with("desc") {
             return Err(FakeDBError(
                 "The operation (describe) is not supported. Did you mean [describe]?".to_string(),
+            ));
+        }
+        if sql.contains("multiline error") {
+            return Err(FakeDBError(
+                "Hey!\n\nYou got:\n  Multiline FakeDBError!".to_string(),
             ));
         }
         Err(FakeDBError("Hey you got FakeDBError!".to_string()))

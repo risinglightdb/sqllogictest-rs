@@ -1497,6 +1497,30 @@ mod tests {
     }
 
     #[test]
+    fn test_query_replacement_error_multiline() {
+        TestCase {
+            // input has no query results
+            input: "query III\n\
+                    select * from foo;\n\
+                    ----",
+
+            // Model a run that produced a "MyAwesomeDB Error"
+            record_output: query_output_error("MyAwesomeDB Error\n\nCaused by:\n  Inner Error"),
+
+            expected: Some(
+                "query error
+select * from foo;
+----
+TestError: MyAwesomeDB Error
+
+Caused by:
+  Inner Error",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
     fn test_statement_query_output() {
         TestCase {
             // input has no query results
@@ -1616,6 +1640,30 @@ mod tests {
     }
 
     #[test]
+    fn test_statement_error_new_error_multiline() {
+        TestCase {
+            // statement expected error
+            input: "statement error bar\n\
+                    insert into foo values(2);",
+
+            // Model a run that produced an error message
+            record_output: statement_output_error("foo\n\nCaused by:\n  Inner Error"),
+
+            // expect the output includes foo
+            expected: Some(
+                "statement error
+insert into foo values(2);
+----
+TestError: foo
+
+Caused by:
+  Inner Error",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
     fn test_statement_error_ok_to_error() {
         TestCase {
             // statement was ok
@@ -1629,6 +1677,30 @@ mod tests {
             expected: Some(
                 "statement error TestError: foo\n\
                  insert into foo values(2);",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
+    fn test_statement_error_ok_to_error_multiline() {
+        TestCase {
+            // statement was ok
+            input: "statement ok\n\
+                    insert into foo values(2);",
+
+            // Model a run that produced an error message
+            record_output: statement_output_error("foo\n\nCaused by:\n  Inner Error"),
+
+            // expect the output includes foo
+            expected: Some(
+                "statement error
+insert into foo values(2);
+----
+TestError: foo
+
+Caused by:
+  Inner Error",
             ),
         }
         .run()
@@ -1715,13 +1787,13 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct TestCase {
-        input: &'static str,
+    struct TestCase<'a> {
+        input: &'a str,
         record_output: RecordOutput<DefaultColumnType>,
-        expected: Option<&'static str>,
+        expected: Option<&'a str>,
     }
 
-    impl TestCase {
+    impl TestCase<'_> {
         fn run(self) {
             let Self {
                 input,
