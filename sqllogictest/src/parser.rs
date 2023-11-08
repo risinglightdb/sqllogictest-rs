@@ -515,6 +515,7 @@ impl ParseError {
 
 /// The error kind for parsing sqllogictest.
 #[derive(thiserror::Error, Debug, Eq, PartialEq, Clone)]
+#[non_exhaustive]
 pub enum ParseErrorKind {
     #[error("unexpected token: {0:?}")]
     UnexpectedToken(String),

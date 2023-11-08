@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.18.0] - 2023-11-08
+
+* Support matching multiline error message under `----` for both `statement error` and `query error`.
+  ```
+  query error
+  SELECT 1/0;
+  ----
+  db error: ERROR: Failed to execute query
+
+  Caused by these errors:
+    1: Failed to evaluate expression: 1/0
+    2: Division by zero
+  ```
+
+  The output error message must be the exact match of the expected one to pass the test, except for the leading and trailing whitespaces. Users may use `--override` to let the runner update the test files with the actual output.
+
+  Empty lines are allowed in the expected error message. As a result, the message must end with two consecutive empty lines.
+
+  Breaking changes in the parser:
+  - Add new variants to `ParseErrorKind`. Mark it as `#[non_exhaustive]`.
+  - Change the type of `expected_error` from `Regex` to `ExpectedError`, which is either a inline `Regex` or multiline `String`.
+
 ## [0.17.2] - 2023-11-01
 
 * fix(runner): fix parallel testing db name duplication. Now we use full file path instead of filename as the temporary db name in `run_parallel_async`.
