@@ -279,13 +279,22 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
     }
 }
 
+/// Expected error message after `error` or under `----`.
 #[derive(Debug, Clone)]
 pub enum ExpectedError {
+    /// An inline regular expression after `error`.
+    ///
+    /// The actual error message that matches the regex is considered as a match.
     Inline(Regex),
+    /// A multiline error message under `----`, ends with 2 consecutive empty lines.
+    ///
+    /// The actual error message that's exactly the same as the expected one is considered as a
+    /// match.
     Multiline(String),
 }
 
 impl ExpectedError {
+    /// Parses an inline regex variant from tokens.
     fn from_inline_tokens(tokens: &[&str]) -> Result<Self, ParseErrorKind> {
         let err_str = tokens.join(" ");
         let regex =
@@ -293,6 +302,7 @@ impl ExpectedError {
         Ok(Self::Inline(regex))
     }
 
+    /// Returns whether it's an empty inline regex.
     fn is_empty_inline(&self) -> bool {
         match self {
             ExpectedError::Inline(regex) => regex.as_str().is_empty(),
@@ -300,6 +310,7 @@ impl ExpectedError {
         }
     }
 
+    /// Unparses the expected message after `error`, if it's inline.
     fn fmt_inline(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "error")?;
         if let Self::Inline(regex) = self {
@@ -310,6 +321,7 @@ impl ExpectedError {
         Ok(())
     }
 
+    /// Unparses the expected message under `----`, if it's multiline.
     fn fmt_multiline(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Self::Multiline(results) = self {
             writeln!(f, "----")?;
@@ -319,6 +331,7 @@ impl ExpectedError {
         Ok(())
     }
 
+    /// Returns whether the given error message matches the expected one.
     pub fn is_match(&self, err: &str) -> bool {
         match self {
             Self::Inline(regex) => regex.is_match(err),
@@ -326,6 +339,7 @@ impl ExpectedError {
         }
     }
 
+    /// Creates an expected error message from a reference and an expected error message.
     pub fn from_reference(reference: Option<&Self>, err: &str) -> Self {
         let trimmed_err = err.trim();
         let err_is_multiline = trimmed_err.lines().next_tuple::<(_, _)>().is_some();
