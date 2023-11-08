@@ -14,7 +14,6 @@ use futures::{stream, Future, FutureExt, StreamExt};
 use itertools::Itertools;
 use md5::Digest;
 use owo_colors::OwoColorize;
-use regex::Regex;
 use similar::{Change, ChangeTag, TextDiff};
 use tempfile::{tempdir, TempDir};
 
@@ -1295,9 +1294,9 @@ pub fn update_record_with_output<T: ColumnType>(
                 })
             }
             // Error mismatch, update expected error
-            (Some(e), _) => Some(Record::Statement {
+            (Some(e), r) => Some(Record::Statement {
                 sql,
-                expected_error: Some(Regex::new(&regex::escape(&e.to_string())).unwrap()),
+                expected_error: Some(ExpectedError::from_reference(r.as_ref(), &e.to_string())),
                 loc,
                 conditions,
                 connection,
@@ -1336,10 +1335,13 @@ pub fn update_record_with_output<T: ColumnType>(
                     });
                 }
                 // Error mismatch
-                (Some(e), _) => {
+                (Some(e), r) => {
                     return Some(Record::Query {
                         sql,
-                        expected_error: Some(Regex::new(&regex::escape(&e.to_string())).unwrap()),
+                        expected_error: Some(ExpectedError::from_reference(
+                            r.as_ref(),
+                            &e.to_string(),
+                        )),
                         loc,
                         conditions,
                         connection,

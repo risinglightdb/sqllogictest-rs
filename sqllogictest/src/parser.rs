@@ -84,8 +84,7 @@ pub enum Record<T: ColumnType> {
         connection: Connection,
         /// The SQL command is expected to fail with an error messages that matches the given
         /// regex. If the regex is an empty string, any error message is accepted.
-        #[educe(PartialEq(method = "cmp_regex"))]
-        expected_error: Option<Regex>,
+        expected_error: Option<ExpectedError>,
         /// The SQL command.
         sql: String,
         /// Expected rows affected.
@@ -102,8 +101,7 @@ pub enum Record<T: ColumnType> {
         label: Option<String>,
         /// The SQL command is expected to fail with an error messages that matches the given
         /// regex. If the regex is an empty string, any error message is accepted.
-        #[educe(PartialEq(method = "cmp_regex"))]
-        expected_error: Option<Regex>,
+        expected_error: Option<ExpectedError>,
         /// The SQL command.
         sql: String,
         /// The expected results.
@@ -154,17 +152,6 @@ pub enum Record<T: ColumnType> {
     Injected(Injected),
 }
 
-/// Use string representation to determine if two regular
-/// expressions came from the same text (rather than something
-/// more deeply meaningful)
-fn cmp_regex(l: &Option<Regex>, r: &Option<Regex>) -> bool {
-    match (l, r) {
-        (Some(l), Some(r)) => l.as_str().eq(r.as_str()),
-        (None, None) => true,
-        _ => false,
-    }
-}
-
 impl<T: ColumnType> Record<T> {
     /// Unparses the record to its string representation in the test file.
     ///
@@ -195,19 +182,18 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 write!(f, "statement ")?;
                 match (expected_count, expected_error) {
                     (None, None) => write!(f, "ok")?,
-                    (None, Some(err)) => {
-                        if err.as_str().is_empty() {
-                            write!(f, "error")?;
-                        } else {
-                            write!(f, "error {err}")?;
-                        }
-                    }
+                    (None, Some(err)) => err.fmt_inline(f)?,
                     (Some(cnt), None) => write!(f, "count {cnt}")?,
                     (Some(_), Some(_)) => unreachable!(),
                 }
                 writeln!(f)?;
                 // statement always end with a blank line
-                writeln!(f, "{sql}")
+                writeln!(f, "{sql}")?;
+
+                if let Some(err) = expected_error {
+                    err.fmt_multiline(f)?;
+                }
+                Ok(())
             }
             Record::Query {
                 loc: _,
@@ -220,32 +206,32 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 sql,
                 expected_results,
             } => {
-                write!(f, "query")?;
+                write!(f, "query ")?;
                 if let Some(err) = expected_error {
-                    writeln!(f, " error {err}")?;
-                    return writeln!(f, "{sql}");
-                }
-
-                write!(
-                    f,
-                    " {}",
-                    expected_types.iter().map(|c| c.to_char()).join("")
-                )?;
-                if let Some(sort_mode) = sort_mode {
-                    write!(f, " {}", sort_mode.as_str())?;
-                }
-                if let Some(label) = label {
-                    write!(f, " {label}")?;
+                    err.fmt_inline(f)?;
+                } else {
+                    write!(f, "{}", expected_types.iter().map(|c| c.to_char()).join(""))?;
+                    if let Some(sort_mode) = sort_mode {
+                        write!(f, " {}", sort_mode.as_str())?;
+                    }
+                    if let Some(label) = label {
+                        write!(f, " {label}")?;
+                    }
                 }
                 writeln!(f)?;
                 writeln!(f, "{sql}")?;
 
-                write!(f, "----")?;
-                for result in expected_results {
-                    write!(f, "\n{result}")?;
+                if let Some(err) = expected_error {
+                    err.fmt_multiline(f)
+                } else {
+                    write!(f, "----")?;
+
+                    for result in expected_results {
+                        write!(f, "\n{result}")?;
+                    }
+                    // query always ends with a blank line
+                    writeln!(f)
                 }
-                // query always ends with a blank line
-                writeln!(f)
             }
             Record::System {
                 loc: _,
@@ -289,6 +275,86 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
             }
             Record::Newline => Ok(()), // Display doesn't end with newline
             Record::Injected(p) => panic!("unexpected injected record: {p:?}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ExpectedError {
+    Inline(Regex),
+    Multiline(String),
+}
+
+impl ExpectedError {
+    fn from_inline_tokens(tokens: &[&str]) -> Result<Self, ParseErrorKind> {
+        let err_str = tokens.join(" ");
+        let regex =
+            Regex::new(&err_str).map_err(|_| ParseErrorKind::InvalidErrorMessage(err_str))?;
+        Ok(Self::Inline(regex))
+    }
+
+    fn is_empty_inline(&self) -> bool {
+        match self {
+            ExpectedError::Inline(regex) => regex.as_str().is_empty(),
+            ExpectedError::Multiline(_) => false,
+        }
+    }
+
+    fn fmt_inline(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "error")?;
+        if let Self::Inline(regex) = self {
+            if !regex.as_str().is_empty() {
+                write!(f, " {regex}")?;
+            }
+        }
+        Ok(())
+    }
+
+    fn fmt_multiline(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Self::Multiline(results) = self {
+            writeln!(f, "----")?;
+            writeln!(f, "{}", results.trim())?;
+        }
+        Ok(())
+    }
+
+    pub fn is_match(&self, err: &str) -> bool {
+        match self {
+            Self::Inline(regex) => regex.is_match(err),
+            Self::Multiline(results) => results.trim() == err.trim(),
+        }
+    }
+
+    pub fn from_reference(reference: Option<&Self>, err: &str) -> Self {
+        let multiline = match reference {
+            Some(Self::Inline(_)) => false,
+            Some(Self::Multiline(_)) => true,
+            None => err.trim().lines().next_tuple::<(_, _)>().is_some(),
+        };
+
+        if multiline {
+            Self::Multiline(err.trim().to_string())
+        } else {
+            Self::Inline(Regex::new(&regex::escape(err)).unwrap())
+        }
+    }
+}
+
+impl std::fmt::Display for ExpectedError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExpectedError::Inline(regex) => regex.fmt(f),
+            ExpectedError::Multiline(results) => write!(f, "{}", results.trim()),
+        }
+    }
+}
+
+impl PartialEq for ExpectedError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Inline(l0), Self::Inline(r0)) => l0.as_str() == r0.as_str(),
+            (Self::Multiline(l0), Self::Multiline(r0)) => l0 == r0,
+            _ => false,
         }
     }
 }
@@ -416,6 +482,10 @@ pub enum ParseErrorKind {
     InvalidNumber(String),
     #[error("invalid error message: {0:?}")]
     InvalidErrorMessage(String),
+    #[error("duplicated error messages after error` and under `----`")]
+    DuplicatedErrorMessage,
+    #[error("statement should have no result, use `query` instead")]
+    StatementHasResults,
     #[error("invalid duration: {0:?}")]
     InvalidDuration(String),
     #[error("invalid control: {0:?}")]
@@ -524,11 +594,11 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 let mut expected_error = None;
                 match res {
                     ["ok"] => {}
-                    ["error", err_str @ ..] => {
-                        let err_str = err_str.join(" ");
-                        expected_error = Some(Regex::new(&err_str).map_err(|_| {
-                            ParseErrorKind::InvalidErrorMessage(err_str).at(loc.clone())
-                        })?);
+                    ["error", tokens @ ..] => {
+                        expected_error = Some(
+                            ExpectedError::from_inline_tokens(tokens)
+                                .map_err(|e| e.at(loc.clone()))?,
+                        );
                     }
                     ["count", count_str] => {
                         expected_count = Some(count_str.parse::<u64>().map_err(|_| {
@@ -541,13 +611,44 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     Some((_, line)) => line.into(),
                     None => return Err(ParseErrorKind::UnexpectedEOF.at(loc.next_line())),
                 };
+                let mut has_multiline_error = false;
                 for (_, line) in &mut lines {
                     if line.is_empty() {
+                        break;
+                    }
+                    if line == "----" {
+                        has_multiline_error = true;
                         break;
                     }
                     sql += "\n";
                     sql += line;
                 }
+                if has_multiline_error {
+                    if let Some(e) = &expected_error {
+                        if e.is_empty_inline() {
+                            let mut results = String::new();
+
+                            while let Some((_, line)) = lines.next() {
+                                // 2 consecutive empty lines
+                                if line.is_empty()
+                                    && lines.peek().map(|(_, l)| l.is_empty()).unwrap_or(true)
+                                {
+                                    lines.next();
+                                    break;
+                                }
+                                results += line;
+                                results.push('\n');
+                            }
+                            expected_error =
+                                Some(ExpectedError::Multiline(results.trim().to_string()));
+                        } else {
+                            return Err(ParseErrorKind::DuplicatedErrorMessage.at(loc.clone()));
+                        }
+                    } else {
+                        return Err(ParseErrorKind::StatementHasResults.at(loc.clone()));
+                    }
+                }
+
                 records.push(Record::Statement {
                     loc,
                     conditions: std::mem::take(&mut conditions),
@@ -563,11 +664,11 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 let mut label = None;
                 let mut expected_error = None;
                 match res {
-                    ["error", err_str @ ..] => {
-                        let err_str = err_str.join(" ");
-                        expected_error = Some(Regex::new(&err_str).map_err(|_| {
-                            ParseErrorKind::InvalidErrorMessage(err_str).at(loc.clone())
-                        })?);
+                    ["error", tokens @ ..] => {
+                        expected_error = Some(
+                            ExpectedError::from_inline_tokens(tokens)
+                                .map_err(|e| e.at(loc.clone()))?,
+                        );
                     }
                     [type_str, res @ ..] => {
                         expected_types = type_str
@@ -608,11 +709,32 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 // Lines following the "----" are expected results of the query, one value per line.
                 let mut expected_results = vec![];
                 if has_result {
-                    for (_, line) in &mut lines {
-                        if line.is_empty() {
-                            break;
+                    if let Some(e) = &expected_error {
+                        if e.is_empty_inline() {
+                            let mut results = String::new();
+                            while let Some((_, line)) = lines.next() {
+                                // 2 consecutive empty lines
+                                if line.is_empty()
+                                    && lines.peek().map(|(_, l)| l.is_empty()).unwrap_or(true)
+                                {
+                                    lines.next();
+                                    break;
+                                }
+                                results += line;
+                                results.push('\n');
+                            }
+                            expected_error =
+                                Some(ExpectedError::Multiline(results.trim().to_string()));
+                        } else {
+                            return Err(ParseErrorKind::DuplicatedErrorMessage.at(loc.clone()));
                         }
-                        expected_results.push(line.to_string());
+                    } else {
+                        for (_, line) in &mut lines {
+                            if line.is_empty() {
+                                break;
+                            }
+                            expected_results.push(line.to_string());
+                        }
                     }
                 }
                 records.push(Record::Query {
