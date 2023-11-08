@@ -314,6 +314,7 @@ impl ExpectedError {
         if let Self::Multiline(results) = self {
             writeln!(f, "----")?;
             writeln!(f, "{}", results.trim())?;
+            writeln!(f)?; // another empty line to indicate the end of multiline message
         }
         Ok(())
     }
@@ -326,14 +327,17 @@ impl ExpectedError {
     }
 
     pub fn from_reference(reference: Option<&Self>, err: &str) -> Self {
+        let trimmed_err = err.trim();
+        let err_is_multiline = trimmed_err.lines().next_tuple::<(_, _)>().is_some();
+
         let multiline = match reference {
-            Some(Self::Inline(_)) => false,
-            Some(Self::Multiline(_)) => true,
-            None => err.trim().lines().next_tuple::<(_, _)>().is_some(),
+            Some(Self::Inline(_)) | None => err_is_multiline, // prefer inline as long as it fits
+            Some(Self::Multiline(_)) => true,                 /* always multiline if the ref is
+                                                                * multiline */
         };
 
         if multiline {
-            Self::Multiline(err.trim().to_string())
+            Self::Multiline(trimmed_err.to_string())
         } else {
             Self::Inline(Regex::new(&regex::escape(err)).unwrap())
         }
