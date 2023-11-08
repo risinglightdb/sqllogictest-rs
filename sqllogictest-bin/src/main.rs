@@ -68,20 +68,20 @@ struct Opt {
 
     /// The database server host.
     /// If multiple addresses are specified, one will be chosen randomly per session.
-    #[clap(short, long, default_value = "localhost")]
+    #[clap(short, long, default_value = "localhost", env = "SLT_HOST")]
     host: Vec<String>,
     /// The database server port.
     /// If multiple addresses are specified, one will be chosen randomly per session.
-    #[clap(short, long, default_value = "5432")]
+    #[clap(short, long, default_value = "5432", env = "SLT_PORT")]
     port: Vec<u16>,
     /// The database name to connect.
-    #[clap(short, long, default_value = "postgres")]
+    #[clap(short, long, default_value = "postgres", env = "SLT_DB")]
     db: String,
     /// The database username.
-    #[clap(short, long, default_value = "postgres")]
+    #[clap(short, long, default_value = "postgres", env = "SLT_USER")]
     user: String,
     /// The database password.
-    #[clap(short = 'w', long, default_value = "postgres")]
+    #[clap(short = 'w', long, default_value = "postgres", env = "SLT_PASSWORD")]
     pass: String,
     /// The database options.
     #[clap(long)]

@@ -25,6 +25,8 @@ impl sqllogictest::DB for FakeDB {
             .ok_or(FakeDBError)?
             .as_str();
 
+        println!("{path}");
+
         let content = std::fs::read_to_string(path)
             .map_err(|_| FakeDBError)?
             .trim()
@@ -40,8 +42,6 @@ impl sqllogictest::DB for FakeDB {
 #[test]
 fn test() {
     let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
-    // enable `__TEST_DIR__` override
-    tester.enable_testdir();
 
     tester
         .run_file("./system_command/system_command.slt")
@@ -51,8 +51,6 @@ fn test() {
 #[test]
 fn test_fail() {
     let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
-    // enable `__TEST_DIR__` override
-    tester.enable_testdir();
 
     let err = tester
         .run_file("./system_command/system_command_fail.slt")
