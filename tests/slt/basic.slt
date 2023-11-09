@@ -29,6 +29,18 @@ give me an error
 statement error Hey you
 give me an error
 
+statement error
+give me a multiline error
+----
+Hey!
+
+You got:
+  Multiline FakeDBError!
+
+
+statement error Multiline
+give me a multiline error
+
 # statement is expected to fail with error: "Hey we", but got error: "Hey you got FakeDBError!"
 # statement error Hey we
 # give me an error

@@ -14,7 +14,6 @@ use futures::{stream, Future, FutureExt, StreamExt};
 use itertools::Itertools;
 use md5::Digest;
 use owo_colors::OwoColorize;
-use regex::Regex;
 use similar::{Change, ChangeTag, TextDiff};
 
 use crate::parser::*;
@@ -1312,9 +1311,9 @@ pub fn update_record_with_output<T: ColumnType>(
                 })
             }
             // Error mismatch, update expected error
-            (Some(e), _) => Some(Record::Statement {
+            (Some(e), r) => Some(Record::Statement {
                 sql,
-                expected_error: Some(Regex::new(&regex::escape(&e.to_string())).unwrap()),
+                expected_error: Some(ExpectedError::from_actual_error(r.as_ref(), &e.to_string())),
                 loc,
                 conditions,
                 connection,
@@ -1353,10 +1352,13 @@ pub fn update_record_with_output<T: ColumnType>(
                     });
                 }
                 // Error mismatch
-                (Some(e), _) => {
+                (Some(e), r) => {
                     return Some(Record::Query {
                         sql,
-                        expected_error: Some(Regex::new(&regex::escape(&e.to_string())).unwrap()),
+                        expected_error: Some(ExpectedError::from_actual_error(
+                            r.as_ref(),
+                            &e.to_string(),
+                        )),
                         loc,
                         conditions,
                         connection,
@@ -1512,6 +1514,30 @@ mod tests {
     }
 
     #[test]
+    fn test_query_replacement_error_multiline() {
+        TestCase {
+            // input has no query results
+            input: "query III\n\
+                    select * from foo;\n\
+                    ----",
+
+            // Model a run that produced a "MyAwesomeDB Error"
+            record_output: query_output_error("MyAwesomeDB Error\n\nCaused by:\n  Inner Error"),
+
+            expected: Some(
+                "query error
+select * from foo;
+----
+TestError: MyAwesomeDB Error
+
+Caused by:
+  Inner Error",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
     fn test_statement_query_output() {
         TestCase {
             // input has no query results
@@ -1631,6 +1657,30 @@ mod tests {
     }
 
     #[test]
+    fn test_statement_error_new_error_multiline() {
+        TestCase {
+            // statement expected error
+            input: "statement error bar\n\
+                    insert into foo values(2);",
+
+            // Model a run that produced an error message
+            record_output: statement_output_error("foo\n\nCaused by:\n  Inner Error"),
+
+            // expect the output includes foo
+            expected: Some(
+                "statement error
+insert into foo values(2);
+----
+TestError: foo
+
+Caused by:
+  Inner Error",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
     fn test_statement_error_ok_to_error() {
         TestCase {
             // statement was ok
@@ -1644,6 +1694,30 @@ mod tests {
             expected: Some(
                 "statement error TestError: foo\n\
                  insert into foo values(2);",
+            ),
+        }
+        .run()
+    }
+
+    #[test]
+    fn test_statement_error_ok_to_error_multiline() {
+        TestCase {
+            // statement was ok
+            input: "statement ok\n\
+                    insert into foo values(2);",
+
+            // Model a run that produced an error message
+            record_output: statement_output_error("foo\n\nCaused by:\n  Inner Error"),
+
+            // expect the output includes foo
+            expected: Some(
+                "statement error
+insert into foo values(2);
+----
+TestError: foo
+
+Caused by:
+  Inner Error",
             ),
         }
         .run()
@@ -1730,13 +1804,13 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct TestCase {
-        input: &'static str,
+    struct TestCase<'a> {
+        input: &'a str,
         record_output: RecordOutput<DefaultColumnType>,
-        expected: Option<&'static str>,
+        expected: Option<&'a str>,
     }
 
-    impl TestCase {
+    impl TestCase<'_> {
         fn run(self) {
             let Self {
                 input,
