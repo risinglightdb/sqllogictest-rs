@@ -1,6 +1,7 @@
 //! Sqllogictest parser.
 
 use std::fmt;
+use std::iter::Peekable;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,6 +12,8 @@ use regex::Regex;
 
 use crate::ColumnType;
 use crate::ParseErrorKind::InvalidIncludeFile;
+
+const RESULTS_DELIMITER: &str = "----";
 
 /// The location in source file.
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -224,7 +227,7 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 if let Some(err) = expected_error {
                     err.fmt_multiline(f)
                 } else {
-                    write!(f, "----")?;
+                    write!(f, "{}", RESULTS_DELIMITER)?;
 
                     for result in expected_results {
                         write!(f, "\n{result}")?;
@@ -334,7 +337,7 @@ impl ExpectedError {
     /// Unparses the expected message with `----`, if it's multiline.
     fn fmt_multiline(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Self::Multiline(results) = self {
-            writeln!(f, "----")?;
+            writeln!(f, "{}", RESULTS_DELIMITER)?;
             writeln!(f, "{}", results.trim())?;
             writeln!(f)?; // another empty line to indicate the end of multiline message
         }
@@ -592,12 +595,12 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
         if let Some(text) = line.strip_prefix('#') {
             comments.push(text.to_string());
             if lines.peek().is_none() {
+                // Special handling for the case where the last line is a comment.
                 records.push(Record::Comment(comments));
-                comments = vec![];
+                break;
             }
             continue;
         }
-
         if !comments.is_empty() {
             records.push(Record::Comment(comments));
             comments = vec![];
@@ -672,41 +675,12 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     }
                     _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
                 };
-                let mut sql = match lines.next() {
-                    Some((_, line)) => line.into(),
-                    None => return Err(ParseErrorKind::UnexpectedEOF.at(loc.next_line())),
-                };
-                let mut has_multiline_error = false;
-                for (_, line) in &mut lines {
-                    if line.is_empty() {
-                        break;
-                    }
-                    if line == "----" {
-                        has_multiline_error = true;
-                        break;
-                    }
-                    sql += "\n";
-                    sql += line;
-                }
-                if has_multiline_error {
+                let (sql, has_results) = parse_lines(&mut lines, &loc, Some(RESULTS_DELIMITER))?;
+                if has_results {
                     if let Some(e) = &expected_error {
                         // If no inline error message is specified, it might be a multiline error.
                         if e.is_empty() {
-                            let mut results = String::new();
-
-                            while let Some((_, line)) = lines.next() {
-                                // 2 consecutive empty lines
-                                if line.is_empty()
-                                    && lines.peek().map(|(_, l)| l.is_empty()).unwrap_or(true)
-                                {
-                                    lines.next();
-                                    break;
-                                }
-                                results += line;
-                                results.push('\n');
-                            }
-                            expected_error =
-                                Some(ExpectedError::Multiline(results.trim().to_string()));
+                            expected_error = Some(parse_multiline_error(&mut lines));
                         } else {
                             return Err(ParseErrorKind::DuplicatedErrorMessage.at(loc.clone()));
                         }
@@ -756,42 +730,14 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
 
                 // The SQL for the query is found on second an subsequent lines of the record
                 // up to first line of the form "----" or until the end of the record.
-                let mut sql = match lines.next() {
-                    Some((_, line)) => line.into(),
-                    None => return Err(ParseErrorKind::UnexpectedEOF.at(loc.next_line())),
-                };
-                let mut has_result = false;
-                for (_, line) in &mut lines {
-                    if line.is_empty() {
-                        break;
-                    }
-                    if line == "----" {
-                        has_result = true;
-                        break;
-                    }
-                    sql += "\n";
-                    sql += line;
-                }
+                let (sql, has_result) = parse_lines(&mut lines, &loc, Some(RESULTS_DELIMITER))?;
                 // Lines following the "----" are expected results of the query, one value per line.
                 let mut expected_results = vec![];
                 if has_result {
                     if let Some(e) = &expected_error {
                         // If no inline error message is specified, it might be a multiline error.
                         if e.is_empty() {
-                            let mut results = String::new();
-                            while let Some((_, line)) = lines.next() {
-                                // 2 consecutive empty lines
-                                if line.is_empty()
-                                    && lines.peek().map(|(_, l)| l.is_empty()).unwrap_or(true)
-                                {
-                                    lines.next();
-                                    break;
-                                }
-                                results += line;
-                                results.push('\n');
-                            }
-                            expected_error =
-                                Some(ExpectedError::Multiline(results.trim().to_string()));
+                            expected_error = Some(parse_multiline_error(&mut lines));
                         } else {
                             return Err(ParseErrorKind::DuplicatedErrorMessage.at(loc.clone()));
                         }
@@ -818,17 +764,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
             }
             ["system", "ok"] => {
                 // TODO: we don't support asserting error message for system command
-                let mut command = match lines.next() {
-                    Some((_, line)) => line.into(),
-                    None => return Err(ParseErrorKind::UnexpectedEOF.at(loc.next_line())),
-                };
-                for (_, line) in &mut lines {
-                    if line.is_empty() {
-                        break;
-                    }
-                    command += "\n";
-                    command += line;
-                }
+                let (command, _) = parse_lines(&mut lines, &loc, None)?;
                 records.push(Record::System {
                     loc,
                     conditions: std::mem::take(&mut conditions),
@@ -899,6 +835,54 @@ fn parse_file_inner<T: ColumnType>(loc: Location) -> Result<Vec<Record<T>>, Pars
         }
     }
     Ok(records)
+}
+
+/// Parse one or more lines until empty line or a delimiter.
+fn parse_lines<'a>(
+    lines: &mut impl Iterator<Item = (usize, &'a str)>,
+    loc: &Location,
+    delimiter: Option<&str>,
+) -> Result<(String, bool), ParseError> {
+    let mut found_delimiter = false;
+    let mut out = match lines.next() {
+        Some((_, line)) => Ok(line.into()),
+        None => Err(ParseErrorKind::UnexpectedEOF.at(loc.clone().next_line())),
+    }?;
+
+    for (_, line) in lines {
+        if line.is_empty() {
+            break;
+        }
+        if let Some(delimiter) = delimiter {
+            if line == delimiter {
+                found_delimiter = true;
+                break;
+            }
+        }
+        out += "\n";
+        out += line;
+    }
+
+    Ok((out, found_delimiter))
+}
+
+/// Parse multiline error message under `----`.
+fn parse_multiline_error<'a>(
+    lines: &mut Peekable<impl Iterator<Item = (usize, &'a str)>>,
+) -> ExpectedError {
+    let mut results = String::new();
+
+    while let Some((_, line)) = lines.next() {
+        // 2 consecutive empty lines
+        if line.is_empty() && lines.peek().map(|(_, l)| l.is_empty()).unwrap_or(true) {
+            lines.next();
+            break;
+        }
+        results += line;
+        results.push('\n');
+    }
+
+    ExpectedError::Multiline(results.trim().to_string())
 }
 
 #[cfg(test)]
