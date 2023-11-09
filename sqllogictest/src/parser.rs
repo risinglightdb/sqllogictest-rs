@@ -68,27 +68,34 @@ impl Location {
     }
 }
 
+/// Expectation for a statement.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StatementExpect {
-    None,
+    /// Statement should succeed.
+    Ok,
+    /// Statement should succeed and return the given number of rows.
     Count(u64),
+    /// Statement should fail with the given error message.
     Error(ExpectedError),
 }
 
+/// Expectation for a query.
 #[derive(Debug, Clone, PartialEq)]
 pub enum QueryExpect<T: ColumnType> {
+    /// Query should succeed and return the given results.
     Results {
         types: Vec<T>,
         sort_mode: Option<SortMode>,
         label: Option<String>,
         results: Vec<String>,
     },
+    /// Query should fail with the given error message.
     Error(ExpectedError),
 }
 
 #[cfg(test)]
 impl<T: ColumnType> QueryExpect<T> {
-    fn default_results() -> Self {
+    fn empty_results() -> Self {
         Self::Results {
             types: Vec::new(),
             sort_mode: None,
@@ -200,7 +207,7 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
             } => {
                 write!(f, "statement ")?;
                 match expected {
-                    StatementExpect::None => write!(f, "ok")?,
+                    StatementExpect::Ok => write!(f, "ok")?,
                     StatementExpect::Count(cnt) => write!(f, "count {cnt}")?,
                     StatementExpect::Error(err) => err.fmt_inline(f)?,
                 }
@@ -677,7 +684,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 records.push(Record::Connection(conn));
             }
             ["statement", res @ ..] => {
-                let mut expected = StatementExpect::None;
+                let mut expected = StatementExpect::Ok;
                 match res {
                     ["ok"] => {}
                     ["error", tokens @ ..] => {
@@ -1011,7 +1018,7 @@ select * from foo;
                 conditions: vec![],
                 connection: Connection::Default,
                 sql: "select * from foo;".to_string(),
-                expected: QueryExpect::default_results(),
+                expected: QueryExpect::empty_results(),
             }]
         );
     }

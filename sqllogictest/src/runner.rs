@@ -814,7 +814,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         .at(loc));
                     }
                 }
-                (None, StatementExpect::None) => {}
+                (None, StatementExpect::Ok) => {}
                 (Some(e), StatementExpect::Error(expected_error)) => {
                     if !expected_error.is_match(&e.to_string()) {
                         return Err(TestErrorKind::ErrorMismatch {
@@ -826,7 +826,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         .at(loc));
                     }
                 }
-                (Some(e), StatementExpect::Count(_) | StatementExpect::None) => {
+                (Some(e), StatementExpect::Count(_) | StatementExpect::Ok) => {
                     return Err(TestErrorKind::Fail {
                         sql,
                         err: Arc::new(e),
@@ -1231,7 +1231,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 loc,
                 conditions,
                 connection,
-                expected: expected @ (StatementExpect::None | StatementExpect::Count(_)),
+                expected: expected @ (StatementExpect::Ok | StatementExpect::Count(_)),
             },
             RecordOutput::Query { error: None, .. },
         ) => {
@@ -1265,7 +1265,7 @@ pub fn update_record_with_output<T: ColumnType>(
             loc,
             conditions,
             connection,
-            expected: StatementExpect::None,
+            expected: StatementExpect::Ok,
         }),
         // statement, statement
         (
@@ -1286,7 +1286,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 connection,
                 expected: match expected {
                     StatementExpect::Count(_) => StatementExpect::Count(*count),
-                    StatementExpect::Error(_) | StatementExpect::None => StatementExpect::None,
+                    StatementExpect::Error(_) | StatementExpect::Ok => StatementExpect::Ok,
                 },
             }),
             // Error match
@@ -1299,7 +1299,7 @@ pub fn update_record_with_output<T: ColumnType>(
             (Some(e), r) => {
                 let reference = match &r {
                     StatementExpect::Error(e) => Some(e),
-                    StatementExpect::Count(_) | StatementExpect::None => None,
+                    StatementExpect::Count(_) | StatementExpect::Ok => None,
                 };
                 Some(Record::Statement {
                     sql,
