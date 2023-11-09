@@ -1313,7 +1313,7 @@ pub fn update_record_with_output<T: ColumnType>(
             // Error mismatch, update expected error
             (Some(e), r) => Some(Record::Statement {
                 sql,
-                expected_error: Some(ExpectedError::from_reference(r.as_ref(), &e.to_string())),
+                expected_error: Some(ExpectedError::from_actual_error(r.as_ref(), &e.to_string())),
                 loc,
                 conditions,
                 connection,
@@ -1355,7 +1355,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 (Some(e), r) => {
                     return Some(Record::Query {
                         sql,
-                        expected_error: Some(ExpectedError::from_reference(
+                        expected_error: Some(ExpectedError::from_actual_error(
                             r.as_ref(),
                             &e.to_string(),
                         )),

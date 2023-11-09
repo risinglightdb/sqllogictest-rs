@@ -283,6 +283,10 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
 /// Expected error message after `error` or under `----`.
 #[derive(Debug, Clone)]
 pub enum ExpectedError {
+    /// No expected error message.
+    ///
+    /// Any error message is considered as a match.
+    Empty,
     /// An inline regular expression after `error`.
     ///
     /// The actual error message that matches the regex is considered as a match.
@@ -296,33 +300,38 @@ pub enum ExpectedError {
 
 impl ExpectedError {
     /// Parses an inline regex variant from tokens.
-    fn from_inline_tokens(tokens: &[&str]) -> Result<Self, ParseErrorKind> {
-        let err_str = tokens.join(" ");
-        let regex =
-            Regex::new(&err_str).map_err(|_| ParseErrorKind::InvalidErrorMessage(err_str))?;
-        Ok(Self::Inline(regex))
+    fn parse_inline_tokens(tokens: &[&str]) -> Result<Self, ParseErrorKind> {
+        Self::new_inline(tokens.join(" "))
     }
 
-    /// Returns whether it's an empty inline regex.
-    fn is_empty_inline(&self) -> bool {
-        match self {
-            ExpectedError::Inline(regex) => regex.as_str().is_empty(),
-            ExpectedError::Multiline(_) => false,
+    /// Creates an inline expected error message from a regex string.
+    ///
+    /// If the regex is empty, it's considered as [`ExpectedError::Empty`].
+    fn new_inline(regex: String) -> Result<Self, ParseErrorKind> {
+        if regex.is_empty() {
+            Ok(Self::Empty)
+        } else {
+            let regex =
+                Regex::new(&regex).map_err(|_| ParseErrorKind::InvalidErrorMessage(regex))?;
+            Ok(Self::Inline(regex))
         }
     }
 
-    /// Unparses the expected message after `error`, if it's inline.
+    /// Returns whether it's an empty match.
+    fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+
+    /// Unparses the expected message after `statement`.
     fn fmt_inline(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "error")?;
         if let Self::Inline(regex) = self {
-            if !regex.as_str().is_empty() {
-                write!(f, " {regex}")?;
-            }
+            write!(f, " {regex}")?;
         }
         Ok(())
     }
 
-    /// Unparses the expected message under `----`, if it's multiline.
+    /// Unparses the expected message with `----`, if it's multiline.
     fn fmt_multiline(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Self::Multiline(results) = self {
             writeln!(f, "----")?;
@@ -335,26 +344,31 @@ impl ExpectedError {
     /// Returns whether the given error message matches the expected one.
     pub fn is_match(&self, err: &str) -> bool {
         match self {
+            Self::Empty => true,
             Self::Inline(regex) => regex.is_match(err),
             Self::Multiline(results) => results.trim() == err.trim(),
         }
     }
 
-    /// Creates an expected error message from a reference and an expected error message.
-    pub fn from_reference(reference: Option<&Self>, err: &str) -> Self {
-        let trimmed_err = err.trim();
+    /// Creates an expected error message from the actual error message. Used by the runner
+    /// to update the test cases with `--override`.
+    ///
+    /// A reference might be provided to help decide whether to use inline or multiline.
+    pub fn from_actual_error(reference: Option<&Self>, actual_err: &str) -> Self {
+        let trimmed_err = actual_err.trim();
         let err_is_multiline = trimmed_err.lines().next_tuple::<(_, _)>().is_some();
 
         let multiline = match reference {
-            Some(Self::Inline(_)) | None => err_is_multiline, // prefer inline as long as it fits
-            Some(Self::Multiline(_)) => true,                 /* always multiline if the ref is
-                                                                * multiline */
+            Some(Self::Multiline(_)) => true, // always multiline if the ref is multiline
+            _ => err_is_multiline,            // prefer inline as long as it fits
         };
 
         if multiline {
+            // Even if the actual error is empty, we still use `Multiline` to indicate that
+            // an exact empty error is expected, instead of any error by `Empty`.
             Self::Multiline(trimmed_err.to_string())
         } else {
-            Self::Inline(Regex::new(&regex::escape(err)).unwrap())
+            Self::new_inline(regex::escape(actual_err)).expect("escaped regex should be valid")
         }
     }
 }
@@ -362,6 +376,7 @@ impl ExpectedError {
 impl std::fmt::Display for ExpectedError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            ExpectedError::Empty => Ok(()),
             ExpectedError::Inline(regex) => regex.fmt(f),
             ExpectedError::Multiline(results) => write!(f, "{}", results.trim()),
         }
@@ -371,6 +386,7 @@ impl std::fmt::Display for ExpectedError {
 impl PartialEq for ExpectedError {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            (Self::Empty, Self::Empty) => true,
             (Self::Inline(l0), Self::Inline(r0)) => l0.as_str() == r0.as_str(),
             (Self::Multiline(l0), Self::Multiline(r0)) => l0 == r0,
             _ => false,
@@ -645,7 +661,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     ["ok"] => {}
                     ["error", tokens @ ..] => {
                         expected_error = Some(
-                            ExpectedError::from_inline_tokens(tokens)
+                            ExpectedError::parse_inline_tokens(tokens)
                                 .map_err(|e| e.at(loc.clone()))?,
                         );
                     }
@@ -674,7 +690,8 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 }
                 if has_multiline_error {
                     if let Some(e) = &expected_error {
-                        if e.is_empty_inline() {
+                        // If no inline error message is specified, it might be a multiline error.
+                        if e.is_empty() {
                             let mut results = String::new();
 
                             while let Some((_, line)) = lines.next() {
@@ -715,7 +732,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 match res {
                     ["error", tokens @ ..] => {
                         expected_error = Some(
-                            ExpectedError::from_inline_tokens(tokens)
+                            ExpectedError::parse_inline_tokens(tokens)
                                 .map_err(|e| e.at(loc.clone()))?,
                         );
                     }
@@ -759,7 +776,8 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 let mut expected_results = vec![];
                 if has_result {
                     if let Some(e) = &expected_error {
-                        if e.is_empty_inline() {
+                        // If no inline error message is specified, it might be a multiline error.
+                        if e.is_empty() {
                             let mut results = String::new();
                             while let Some((_, line)) = lines.next() {
                                 // 2 consecutive empty lines
