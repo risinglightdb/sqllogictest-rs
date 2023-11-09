@@ -93,8 +93,8 @@ pub enum QueryExpect<T: ColumnType> {
     Error(ExpectedError),
 }
 
-#[cfg(test)]
 impl<T: ColumnType> QueryExpect<T> {
+    /// Creates a new [`QueryExpect`] with empty results.
     fn empty_results() -> Self {
         Self::Results {
             types: Vec::new(),
@@ -749,12 +749,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                             results: Vec::new(),
                         }
                     }
-                    [] => QueryExpect::Results {
-                        types: Vec::new(),
-                        sort_mode: None,
-                        label: None,
-                        results: Vec::new(),
-                    },
+                    [] => QueryExpect::empty_results(),
                 };
 
                 // The SQL for the query is found on second an subsequent lines of the record
