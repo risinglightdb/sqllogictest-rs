@@ -376,9 +376,9 @@ impl ExpectedError {
 impl std::fmt::Display for ExpectedError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ExpectedError::Empty => Ok(()),
-            ExpectedError::Inline(regex) => regex.fmt(f),
-            ExpectedError::Multiline(results) => write!(f, "{}", results.trim()),
+            ExpectedError::Empty => write!(f, "(any)"),
+            ExpectedError::Inline(regex) => write!(f, "(regex) {}", regex),
+            ExpectedError::Multiline(results) => write!(f, "(multiline) {}", results.trim()),
         }
     }
 }
