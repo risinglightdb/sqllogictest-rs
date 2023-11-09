@@ -73,7 +73,7 @@ impl Location {
 pub enum StatementExpect {
     /// Statement should succeed.
     Ok,
-    /// Statement should succeed and return the given number of rows.
+    /// Statement should succeed and affect the given number of rows.
     Count(u64),
     /// Statement should fail with the given error message.
     Error(ExpectedError),
@@ -684,19 +684,18 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 records.push(Record::Connection(conn));
             }
             ["statement", res @ ..] => {
-                let mut expected = StatementExpect::Ok;
-                match res {
-                    ["ok"] => {}
+                let mut expected = match res {
+                    ["ok"] => StatementExpect::Ok,
                     ["error", tokens @ ..] => {
                         let error = ExpectedError::parse_inline_tokens(tokens)
                             .map_err(|e| e.at(loc.clone()))?;
-                        expected = StatementExpect::Error(error);
+                        StatementExpect::Error(error)
                     }
                     ["count", count_str] => {
                         let count = count_str.parse::<u64>().map_err(|_| {
                             ParseErrorKind::InvalidNumber((*count_str).into()).at(loc.clone())
                         })?;
-                        expected = StatementExpect::Count(count);
+                        StatementExpect::Count(count)
                     }
                     _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
                 };
