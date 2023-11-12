@@ -544,8 +544,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 sql,
 
                 // compare result in run_async
-                expected_error: _,
-                expected_count: _,
+                expected: _,
                 loc: _,
             } => {
                 let sql = match self.may_substitute(sql) {
@@ -630,16 +629,10 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 conditions,
                 connection,
                 sql,
-                sort_mode,
 
                 // compare result in run_async
-                expected_types: _,
-                expected_error: _,
-                expected_results: _,
+                expected,
                 loc: _,
-
-                // not handle yet,
-                label: _,
             } => {
                 let sql = match self.may_substitute(sql) {
                     Ok(sql) => sql,
@@ -682,7 +675,12 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                 };
 
-                match sort_mode.as_ref().or(self.sort_mode.as_ref()) {
+                let sort_mode = match expected {
+                    QueryExpect::Results { sort_mode, .. } => sort_mode,
+                    QueryExpect::Error(_) => None,
+                }
+                .or(self.sort_mode);
+                match sort_mode {
                     None | Some(SortMode::NoSort) => {}
                     Some(SortMode::RowSort) => {
                         rows.sort_unstable();
@@ -754,14 +752,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             // Tolerate the mismatched return type...
             (
                 Record::Statement {
-                    sql,
-                    expected_error,
-                    loc,
-                    ..
+                    sql, expected, loc, ..
                 },
                 RecordOutput::Query { error: None, .. },
             ) => {
-                if expected_error.is_some() {
+                if let StatementExpect::Error(_) = expected {
                     return Err(TestErrorKind::Ok {
                         sql,
                         kind: RecordKind::Query,
@@ -771,61 +766,56 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             }
             (
                 Record::Query {
-                    expected_results,
-                    loc,
-                    sql,
-                    expected_error,
-                    ..
+                    loc, sql, expected, ..
                 },
                 RecordOutput::Statement { error: None, .. },
-            ) => {
-                if expected_error.is_some() {
+            ) => match expected {
+                QueryExpect::Error(_) => {
                     return Err(TestErrorKind::Ok {
                         sql,
                         kind: RecordKind::Query,
                     }
-                    .at(loc));
+                    .at(loc))
                 }
-                if !expected_results.is_empty() {
+                QueryExpect::Results { results, .. } if !results.is_empty() => {
                     return Err(TestErrorKind::QueryResultMismatch {
                         sql,
-                        expected: expected_results.join("\n"),
+                        expected: results.join("\n"),
                         actual: "".to_string(),
                     }
-                    .at(loc));
+                    .at(loc))
                 }
-            }
+                QueryExpect::Results { .. } => {}
+            },
             (
                 Record::Statement {
                     loc,
                     connection: _,
                     conditions: _,
-                    expected_error,
                     sql,
-                    expected_count,
+                    expected,
                 },
                 RecordOutput::Statement { count, error },
-            ) => match (error, expected_error) {
-                (None, Some(_)) => {
+            ) => match (error, expected) {
+                (None, StatementExpect::Error(_)) => {
                     return Err(TestErrorKind::Ok {
                         sql,
                         kind: RecordKind::Statement,
                     }
                     .at(loc))
                 }
-                (None, None) => {
-                    if let Some(expected_count) = expected_count {
-                        if expected_count != count {
-                            return Err(TestErrorKind::StatementResultMismatch {
-                                sql,
-                                expected: expected_count,
-                                actual: format!("affected {count} rows"),
-                            }
-                            .at(loc));
+                (None, StatementExpect::Count(expected_count)) => {
+                    if expected_count != count {
+                        return Err(TestErrorKind::StatementResultMismatch {
+                            sql,
+                            expected: expected_count,
+                            actual: format!("affected {count} rows"),
                         }
+                        .at(loc));
                     }
                 }
-                (Some(e), Some(expected_error)) => {
+                (None, StatementExpect::Ok) => {}
+                (Some(e), StatementExpect::Error(expected_error)) => {
                     if !expected_error.is_match(&e.to_string()) {
                         return Err(TestErrorKind::ErrorMismatch {
                             sql,
@@ -836,7 +826,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         .at(loc));
                     }
                 }
-                (Some(e), None) => {
+                (Some(e), StatementExpect::Count(_) | StatementExpect::Ok) => {
                     return Err(TestErrorKind::Fail {
                         sql,
                         err: Arc::new(e),
@@ -850,25 +840,20 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     loc,
                     conditions: _,
                     connection: _,
-                    expected_types,
-                    sort_mode: _,
-                    label: _,
-                    expected_error,
                     sql,
-                    expected_results,
+                    expected,
                 },
                 RecordOutput::Query { types, rows, error },
             ) => {
-                match (error, expected_error) {
-                    (None, Some(_)) => {
+                match (error, expected) {
+                    (None, QueryExpect::Error(_)) => {
                         return Err(TestErrorKind::Ok {
                             sql,
                             kind: RecordKind::Query,
                         }
                         .at(loc));
                     }
-                    (None, None) => {}
-                    (Some(e), Some(expected_error)) => {
+                    (Some(e), QueryExpect::Error(expected_error)) => {
                         if !expected_error.is_match(&e.to_string()) {
                             return Err(TestErrorKind::ErrorMismatch {
                                 sql,
@@ -878,9 +863,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             }
                             .at(loc));
                         }
-                        return Ok(());
                     }
-                    (Some(e), None) => {
+                    (Some(e), QueryExpect::Results { .. }) => {
                         return Err(TestErrorKind::Fail {
                             sql,
                             err: Arc::new(e),
@@ -888,29 +872,37 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         }
                         .at(loc));
                     }
+                    (
+                        None,
+                        QueryExpect::Results {
+                            types: expected_types,
+                            results: expected_results,
+                            ..
+                        },
+                    ) => {
+                        if !(self.column_type_validator)(&types, &expected_types) {
+                            return Err(TestErrorKind::QueryResultColumnsMismatch {
+                                sql,
+                                expected: expected_types.iter().map(|c| c.to_char()).join(""),
+                                actual: types.iter().map(|c| c.to_char()).join(""),
+                            }
+                            .at(loc));
+                        }
+
+                        if !(self.validator)(&rows, &expected_results) {
+                            let output_rows = rows
+                                .into_iter()
+                                .map(|strs| strs.iter().join(" "))
+                                .collect_vec();
+                            return Err(TestErrorKind::QueryResultMismatch {
+                                sql,
+                                expected: expected_results.join("\n"),
+                                actual: output_rows.join("\n"),
+                            }
+                            .at(loc));
+                        }
+                    }
                 };
-
-                if !(self.column_type_validator)(&types, &expected_types) {
-                    return Err(TestErrorKind::QueryResultColumnsMismatch {
-                        sql,
-                        expected: expected_types.iter().map(|c| c.to_char()).join(""),
-                        actual: types.iter().map(|c| c.to_char()).join(""),
-                    }
-                    .at(loc));
-                }
-
-                if !(self.validator)(&rows, &expected_results) {
-                    let output_rows = rows
-                        .into_iter()
-                        .map(|strs| strs.iter().join(" "))
-                        .collect_vec();
-                    return Err(TestErrorKind::QueryResultMismatch {
-                        sql,
-                        expected: expected_results.join("\n"),
-                        actual: output_rows.join("\n"),
-                    }
-                    .at(loc));
-                }
             }
             (
                 Record::System {
@@ -1222,7 +1214,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 /// Updates the specified [`Record`] with the [`QueryOutput`] produced
 /// by a Database, returning `Some(new_record)`.
 ///
-/// If an update is not supported, returns `None`
+/// If an update is not supported or not necessary, returns `None`
 pub fn update_record_with_output<T: ColumnType>(
     record: &Record<T>,
     record_output: &RecordOutput<T>,
@@ -1239,8 +1231,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 loc,
                 conditions,
                 connection,
-                expected_error: None,
-                expected_count,
+                expected: expected @ (StatementExpect::Ok | StatementExpect::Count(_)),
             },
             RecordOutput::Query { error: None, .. },
         ) => {
@@ -1253,11 +1244,10 @@ pub fn update_record_with_output<T: ColumnType>(
 
             Some(Record::Statement {
                 sql,
-                expected_error: None,
                 loc,
                 conditions,
                 connection,
-                expected_count,
+                expected,
             })
         }
         // query, statement
@@ -1267,16 +1257,15 @@ pub fn update_record_with_output<T: ColumnType>(
                 loc,
                 conditions,
                 connection,
-                ..
+                expected: _,
             },
             RecordOutput::Statement { error: None, .. },
         ) => Some(Record::Statement {
             sql,
-            expected_error: None,
             loc,
             conditions,
             connection,
-            expected_count: None,
+            expected: StatementExpect::Ok,
         }),
         // statement, statement
         (
@@ -1284,41 +1273,45 @@ pub fn update_record_with_output<T: ColumnType>(
                 loc,
                 conditions,
                 connection,
-                expected_error,
                 sql,
-                expected_count,
+                expected,
             },
             RecordOutput::Statement { count, error },
-        ) => match (error, expected_error) {
+        ) => match (error, expected) {
             // Ok
-            (None, _) => Some(Record::Statement {
+            (None, expected) => Some(Record::Statement {
                 sql,
-                expected_error: None,
                 loc,
                 conditions,
                 connection,
-                expected_count: expected_count.map(|_| *count),
+                expected: match expected {
+                    StatementExpect::Count(_) => StatementExpect::Count(*count),
+                    StatementExpect::Error(_) | StatementExpect::Ok => StatementExpect::Ok,
+                },
             }),
             // Error match
-            (Some(e), Some(expected_error)) if expected_error.is_match(&e.to_string()) => {
+            (Some(e), StatementExpect::Error(expected_error))
+                if expected_error.is_match(&e.to_string()) =>
+            {
+                None
+            }
+            // Error mismatch, update expected error
+            (Some(e), r) => {
+                let reference = match &r {
+                    StatementExpect::Error(e) => Some(e),
+                    StatementExpect::Count(_) | StatementExpect::Ok => None,
+                };
                 Some(Record::Statement {
                     sql,
-                    expected_error: Some(expected_error),
+                    expected: StatementExpect::Error(ExpectedError::from_actual_error(
+                        reference,
+                        &e.to_string(),
+                    )),
                     loc,
                     conditions,
                     connection,
-                    expected_count: None,
                 })
             }
-            // Error mismatch, update expected error
-            (Some(e), r) => Some(Record::Statement {
-                sql,
-                expected_error: Some(ExpectedError::from_actual_error(r.as_ref(), &e.to_string())),
-                loc,
-                conditions,
-                connection,
-                expected_count: None,
-            }),
         },
         // query, query
         (
@@ -1326,76 +1319,75 @@ pub fn update_record_with_output<T: ColumnType>(
                 loc,
                 conditions,
                 connection,
-                expected_types,
-                sort_mode,
-                label,
-                expected_error,
                 sql,
-                expected_results,
+                expected,
             },
             RecordOutput::Query { types, rows, error },
-        ) => {
-            match (error, expected_error) {
-                (None, _) => {}
-                // Error match
-                (Some(e), Some(expected_error)) if expected_error.is_match(&e.to_string()) => {
-                    return Some(Record::Query {
-                        sql,
-                        expected_error: Some(expected_error),
-                        loc,
-                        conditions,
-                        connection,
-                        expected_types: vec![],
-                        sort_mode,
-                        label,
-                        expected_results: vec![],
-                    });
-                }
-                // Error mismatch
-                (Some(e), r) => {
-                    return Some(Record::Query {
-                        sql,
-                        expected_error: Some(ExpectedError::from_actual_error(
-                            r.as_ref(),
-                            &e.to_string(),
-                        )),
-                        loc,
-                        conditions,
-                        connection,
-                        expected_types: vec![],
-                        sort_mode,
-                        label,
-                        expected_results: vec![],
-                    });
-                }
-            };
-
-            let results = if validator(rows, &expected_results) {
-                // If validation is successful, we respect the original file's expected results.
-                expected_results
-            } else {
-                rows.iter().map(|cols| cols.join(col_separator)).collect()
-            };
-
-            let types = if column_type_validator(types, &expected_types) {
-                // If validation is successful, we respect the original file's expected types.
-                expected_types
-            } else {
-                types.clone()
-            };
-
-            Some(Record::Query {
-                sql,
-                expected_error: None,
-                loc,
-                conditions,
-                connection,
-                expected_types: types,
-                sort_mode,
-                label,
-                expected_results: results,
-            })
-        }
+        ) => match (error, expected) {
+            // Error match
+            (Some(e), QueryExpect::Error(expected_error))
+                if expected_error.is_match(&e.to_string()) =>
+            {
+                None
+            }
+            // Error mismatch
+            (Some(e), r) => {
+                let reference = match &r {
+                    QueryExpect::Error(e) => Some(e),
+                    QueryExpect::Results { .. } => None,
+                };
+                Some(Record::Query {
+                    sql,
+                    expected: QueryExpect::Error(ExpectedError::from_actual_error(
+                        reference,
+                        &e.to_string(),
+                    )),
+                    loc,
+                    conditions,
+                    connection,
+                })
+            }
+            (None, expected) => {
+                let results = match &expected {
+                    // If validation is successful, we respect the original file's expected results.
+                    QueryExpect::Results {
+                        results: expected_results,
+                        ..
+                    } if validator(rows, expected_results) => expected_results.clone(),
+                    _ => rows.iter().map(|cols| cols.join(col_separator)).collect(),
+                };
+                let types = match &expected {
+                    // If validation is successful, we respect the original file's expected types.
+                    QueryExpect::Results {
+                        types: expected_types,
+                        ..
+                    } if column_type_validator(types, expected_types) => expected_types.clone(),
+                    _ => types.clone(),
+                };
+                Some(Record::Query {
+                    sql,
+                    loc,
+                    conditions,
+                    connection,
+                    expected: match expected {
+                        QueryExpect::Results {
+                            sort_mode, label, ..
+                        } => QueryExpect::Results {
+                            results,
+                            types,
+                            sort_mode,
+                            label,
+                        },
+                        QueryExpect::Error(_) => QueryExpect::Results {
+                            results,
+                            types,
+                            sort_mode: None,
+                            label: None,
+                        },
+                    },
+                })
+            }
+        },
 
         // No update possible, return the original record
         _ => None,
@@ -1628,11 +1620,9 @@ Caused by:
             // Model a run that produced an error message
             record_output: statement_output_error("foo"),
 
-            // Input didn't have an expected error, so output is not to expect the message
-            expected: Some(
-                "statement error\n\
-                 insert into foo values(2);",
-            ),
+            // Input didn't have an expected error, so output is not to expect the message, then no
+            // update
+            expected: None,
         }
         .run()
     }
@@ -1754,11 +1744,8 @@ Caused by:
                 "The operation (inser) is not supported. Did you mean [insert]?",
             ),
 
-            // expect the output includes foo
-            expected: Some(
-                "statement error TestError: The operation \\([a-z]+\\) is not supported.*\n\
-                 inser into foo values(2);",
-            ),
+            // no update expected
+            expected: None,
         }
         .run()
     }
@@ -1794,11 +1781,8 @@ Caused by:
                 "The operation (selec) is not supported. Did you mean [select]?",
             ),
 
-            // expect the output includes foo
-            expected: Some(
-                "query error TestError: The operation \\([a-z]+\\) is not supported.*\n\
-                 selec *;",
-            ),
+            // no update expected
+            expected: None,
         }
         .run()
     }

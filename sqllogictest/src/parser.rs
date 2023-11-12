@@ -6,7 +6,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use educe::Educe;
 use itertools::Itertools;
 use regex::Regex;
 
@@ -69,9 +68,45 @@ impl Location {
     }
 }
 
+/// Expectation for a statement.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StatementExpect {
+    /// Statement should succeed.
+    Ok,
+    /// Statement should succeed and affect the given number of rows.
+    Count(u64),
+    /// Statement should fail with the given error message.
+    Error(ExpectedError),
+}
+
+/// Expectation for a query.
+#[derive(Debug, Clone, PartialEq)]
+pub enum QueryExpect<T: ColumnType> {
+    /// Query should succeed and return the given results.
+    Results {
+        types: Vec<T>,
+        sort_mode: Option<SortMode>,
+        label: Option<String>,
+        results: Vec<String>,
+    },
+    /// Query should fail with the given error message.
+    Error(ExpectedError),
+}
+
+impl<T: ColumnType> QueryExpect<T> {
+    /// Creates a new [`QueryExpect`] with empty results.
+    fn empty_results() -> Self {
+        Self::Results {
+            types: Vec::new(),
+            sort_mode: None,
+            label: None,
+            results: Vec::new(),
+        }
+    }
+}
+
 /// A single directive in a sqllogictest file.
-#[derive(Debug, Clone, Educe)]
-#[educe(PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Record<T: ColumnType> {
     /// An include copies all records from another files.
@@ -85,13 +120,9 @@ pub enum Record<T: ColumnType> {
         loc: Location,
         conditions: Vec<Condition>,
         connection: Connection,
-        /// The SQL command is expected to fail with an error messages that matches the given
-        /// regex. If the regex is an empty string, any error message is accepted.
-        expected_error: Option<ExpectedError>,
         /// The SQL command.
         sql: String,
-        /// Expected rows affected.
-        expected_count: Option<u64>,
+        expected: StatementExpect,
     },
     /// A query is an SQL command from which we expect to receive results. The result set might be
     /// empty.
@@ -99,16 +130,9 @@ pub enum Record<T: ColumnType> {
         loc: Location,
         conditions: Vec<Condition>,
         connection: Connection,
-        expected_types: Vec<T>,
-        sort_mode: Option<SortMode>,
-        label: Option<String>,
-        /// The SQL command is expected to fail with an error messages that matches the given
-        /// regex. If the regex is an empty string, any error message is accepted.
-        expected_error: Option<ExpectedError>,
         /// The SQL command.
         sql: String,
-        /// The expected results.
-        expected_results: Vec<String>,
+        expected: QueryExpect<T>,
     },
     /// A system command is an external command that is to be executed by the shell. Currently it
     /// must succeed and the output is ignored.
@@ -178,22 +202,20 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 loc: _,
                 conditions: _,
                 connection: _,
-                expected_error,
                 sql,
-                expected_count,
+                expected,
             } => {
                 write!(f, "statement ")?;
-                match (expected_count, expected_error) {
-                    (None, None) => write!(f, "ok")?,
-                    (None, Some(err)) => err.fmt_inline(f)?,
-                    (Some(cnt), None) => write!(f, "count {cnt}")?,
-                    (Some(_), Some(_)) => unreachable!(),
+                match expected {
+                    StatementExpect::Ok => write!(f, "ok")?,
+                    StatementExpect::Count(cnt) => write!(f, "count {cnt}")?,
+                    StatementExpect::Error(err) => err.fmt_inline(f)?,
                 }
                 writeln!(f)?;
                 // statement always end with a blank line
                 writeln!(f, "{sql}")?;
 
-                if let Some(err) = expected_error {
+                if let StatementExpect::Error(err) = expected {
                     err.fmt_multiline(f)?;
                 }
                 Ok(())
@@ -202,39 +224,43 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 loc: _,
                 conditions: _,
                 connection: _,
-                expected_types,
-                sort_mode,
-                label,
-                expected_error,
                 sql,
-                expected_results,
+                expected,
             } => {
                 write!(f, "query ")?;
-                if let Some(err) = expected_error {
-                    err.fmt_inline(f)?;
-                } else {
-                    write!(f, "{}", expected_types.iter().map(|c| c.to_char()).join(""))?;
-                    if let Some(sort_mode) = sort_mode {
-                        write!(f, " {}", sort_mode.as_str())?;
+                match expected {
+                    QueryExpect::Results {
+                        types,
+                        sort_mode,
+                        label,
+                        ..
+                    } => {
+                        write!(f, "{}", types.iter().map(|c| c.to_char()).join(""))?;
+                        if let Some(sort_mode) = sort_mode {
+                            write!(f, " {}", sort_mode.as_str())?;
+                        }
+                        if let Some(label) = label {
+                            write!(f, " {label}")?;
+                        }
                     }
-                    if let Some(label) = label {
-                        write!(f, " {label}")?;
-                    }
+                    QueryExpect::Error(err) => err.fmt_inline(f)?,
                 }
                 writeln!(f)?;
                 writeln!(f, "{sql}")?;
 
-                if let Some(err) = expected_error {
-                    err.fmt_multiline(f)
-                } else {
-                    write!(f, "{}", RESULTS_DELIMITER)?;
+                match expected {
+                    QueryExpect::Results { results, .. } => {
+                        write!(f, "{}", RESULTS_DELIMITER)?;
 
-                    for result in expected_results {
-                        write!(f, "\n{result}")?;
+                        for result in results {
+                            write!(f, "\n{result}")?;
+                        }
+                        // query always ends with a blank line
+                        writeln!(f)?
                     }
-                    // query always ends with a blank line
-                    writeln!(f)
+                    QueryExpect::Error(err) => err.fmt_multiline(f)?,
                 }
+                Ok(())
             }
             Record::System {
                 loc: _,
@@ -481,7 +507,7 @@ impl Connection {
 }
 
 /// Whether to apply sorting before checking the results of a query.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum SortMode {
     /// The default option. The results appear in exactly the order in which they were received
     /// from the database engine.
@@ -658,29 +684,27 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 records.push(Record::Connection(conn));
             }
             ["statement", res @ ..] => {
-                let mut expected_count = None;
-                let mut expected_error = None;
-                match res {
-                    ["ok"] => {}
+                let mut expected = match res {
+                    ["ok"] => StatementExpect::Ok,
                     ["error", tokens @ ..] => {
-                        expected_error = Some(
-                            ExpectedError::parse_inline_tokens(tokens)
-                                .map_err(|e| e.at(loc.clone()))?,
-                        );
+                        let error = ExpectedError::parse_inline_tokens(tokens)
+                            .map_err(|e| e.at(loc.clone()))?;
+                        StatementExpect::Error(error)
                     }
                     ["count", count_str] => {
-                        expected_count = Some(count_str.parse::<u64>().map_err(|_| {
+                        let count = count_str.parse::<u64>().map_err(|_| {
                             ParseErrorKind::InvalidNumber((*count_str).into()).at(loc.clone())
-                        })?);
+                        })?;
+                        StatementExpect::Count(count)
                     }
                     _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
                 };
                 let (sql, has_results) = parse_lines(&mut lines, &loc, Some(RESULTS_DELIMITER))?;
                 if has_results {
-                    if let Some(e) = &expected_error {
+                    if let StatementExpect::Error(e) = &mut expected {
                         // If no inline error message is specified, it might be a multiline error.
                         if e.is_empty() {
-                            expected_error = Some(parse_multiline_error(&mut lines));
+                            *e = parse_multiline_error(&mut lines);
                         } else {
                             return Err(ParseErrorKind::DuplicatedErrorMessage.at(loc.clone()));
                         }
@@ -693,60 +717,63 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     loc,
                     conditions: std::mem::take(&mut conditions),
                     connection: std::mem::take(&mut connection),
-                    expected_error,
                     sql,
-                    expected_count,
+                    expected,
                 });
             }
             ["query", res @ ..] => {
-                let mut expected_types = vec![];
-                let mut sort_mode = None;
-                let mut label = None;
-                let mut expected_error = None;
-                match res {
+                let mut expected = match res {
                     ["error", tokens @ ..] => {
-                        expected_error = Some(
-                            ExpectedError::parse_inline_tokens(tokens)
-                                .map_err(|e| e.at(loc.clone()))?,
-                        );
+                        let error = ExpectedError::parse_inline_tokens(tokens)
+                            .map_err(|e| e.at(loc.clone()))?;
+                        QueryExpect::Error(error)
                     }
                     [type_str, res @ ..] => {
-                        expected_types = type_str
+                        let types = type_str
                             .chars()
                             .map(|ch| {
                                 T::from_char(ch)
                                     .ok_or_else(|| ParseErrorKind::InvalidType(ch).at(loc.clone()))
                             })
                             .try_collect()?;
-                        sort_mode = res
+                        let sort_mode = res
                             .first()
                             .map(|&s| SortMode::try_from_str(s))
                             .transpose()
                             .map_err(|e| e.at(loc.clone()))?;
-                        label = res.get(1).map(|s| s.to_string());
+                        let label = res.get(1).map(|s| s.to_string());
+                        QueryExpect::Results {
+                            types,
+                            sort_mode,
+                            label,
+                            results: Vec::new(),
+                        }
                     }
-                    [] => {}
-                }
+                    [] => QueryExpect::empty_results(),
+                };
 
                 // The SQL for the query is found on second an subsequent lines of the record
                 // up to first line of the form "----" or until the end of the record.
                 let (sql, has_result) = parse_lines(&mut lines, &loc, Some(RESULTS_DELIMITER))?;
-                // Lines following the "----" are expected results of the query, one value per line.
-                let mut expected_results = vec![];
                 if has_result {
-                    if let Some(e) = &expected_error {
-                        // If no inline error message is specified, it might be a multiline error.
-                        if e.is_empty() {
-                            expected_error = Some(parse_multiline_error(&mut lines));
-                        } else {
-                            return Err(ParseErrorKind::DuplicatedErrorMessage.at(loc.clone()));
-                        }
-                    } else {
-                        for (_, line) in &mut lines {
-                            if line.is_empty() {
-                                break;
+                    match &mut expected {
+                        // Lines following the "----" are expected results of the query, one value
+                        // per line.
+                        QueryExpect::Results { results, .. } => {
+                            for (_, line) in &mut lines {
+                                if line.is_empty() {
+                                    break;
+                                }
+                                results.push(line.to_string());
                             }
-                            expected_results.push(line.to_string());
+                        }
+                        // If no inline error message is specified, it might be a multiline error.
+                        QueryExpect::Error(e) => {
+                            if e.is_empty() {
+                                *e = parse_multiline_error(&mut lines);
+                            } else {
+                                return Err(ParseErrorKind::DuplicatedErrorMessage.at(loc.clone()));
+                            }
                         }
                     }
                 }
@@ -754,12 +781,8 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     loc,
                     conditions: std::mem::take(&mut conditions),
                     connection: std::mem::take(&mut connection),
-                    expected_types,
-                    sort_mode,
-                    label,
                     sql,
-                    expected_results,
-                    expected_error,
+                    expected,
                 });
             }
             ["system", "ok"] => {
@@ -988,12 +1011,8 @@ select * from foo;
                 loc: Location::new("<unknown>", 1),
                 conditions: vec![],
                 connection: Connection::Default,
-                expected_types: vec![],
-                sort_mode: None,
-                label: None,
-                expected_error: None,
                 sql: "select * from foo;".to_string(),
-                expected_results: vec![],
+                expected: QueryExpect::empty_results(),
             }]
         );
     }

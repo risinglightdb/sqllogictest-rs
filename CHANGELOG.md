@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.19.0] - 2023-11-11
+
+* parser: refactor `expect` field in sqllogictest parser to make it easier to work with.
+
 ## [0.18.0] - 2023-11-08
 
 * Support matching multiline error message under `----` for both `statement error` and `query error`.
