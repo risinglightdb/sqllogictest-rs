@@ -465,10 +465,9 @@ async fn run_test_file<T: std::io::Write, M: MakeConnection>(
     filename: impl AsRef<Path>,
 ) -> Result<Duration> {
     let filename = filename.as_ref();
-    let records = tokio::task::block_in_place(|| {
-        sqllogictest::parse_file(filename).map_err(|e| anyhow!("{:?}", e))
-    })
-    .context("failed to parse sqllogictest file")?;
+    let records =
+        tokio::task::block_in_place(|| sqllogictest::parse_file(filename).map_err(|e| anyhow!(e)))
+            .context("failed to parse sqllogictest file")?;
 
     let mut begin_times = vec![];
     let mut did_pop = false;
