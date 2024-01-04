@@ -853,7 +853,7 @@ fn parse_file_inner<T: ColumnType>(loc: Location) -> Result<Vec<Record<T>>, Pars
             }
             for included_file in iter {
                 let included_file = included_file.map_err(|e| {
-                    ParseErrorKind::InvalidIncludeFile(format!("{e:?}")).at(loc.clone())
+                    ParseErrorKind::InvalidIncludeFile(e.to_string()).at(loc.clone())
                 })?;
                 let included_file = included_file.as_os_str().to_string_lossy().to_string();
 
