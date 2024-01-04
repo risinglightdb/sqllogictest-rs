@@ -10,7 +10,6 @@ use itertools::Itertools;
 use regex::Regex;
 
 use crate::ColumnType;
-use crate::ParseErrorKind::InvalidIncludeFile;
 
 const RESULTS_DELIMITER: &str = "----";
 
@@ -112,6 +111,7 @@ pub enum Record<T: ColumnType> {
     /// An include copies all records from another files.
     Include {
         loc: Location,
+        /// A glob pattern
         filename: String,
     },
     /// A statement is an SQL command that is to be evaluated but from which we do not expect to
@@ -584,8 +584,10 @@ pub enum ParseErrorKind {
     InvalidDuration(String),
     #[error("invalid control: {0:?}")]
     InvalidControl(String),
-    #[error("invalid include file pattern: {0:?}")]
+    #[error("invalid include file pattern: {0}")]
     InvalidIncludeFile(String),
+    #[error("no files found for include file pattern: {0:?}")]
+    EmptyIncludeFile(String),
     #[error("no such file")]
     FileNotFound,
 }
@@ -843,10 +845,16 @@ fn parse_file_inner<T: ColumnType>(loc: Location) -> Result<Vec<Record<T>>, Pars
                 path_buf.as_os_str().to_string_lossy().to_string()
             };
 
-            for included_file in glob::glob(&complete_filename)
-                .map_err(|e| InvalidIncludeFile(format!("{e:?}")).at(loc.clone()))?
-                .filter_map(Result::ok)
-            {
+            let mut iter = glob::glob(&complete_filename)
+                .map_err(|e| ParseErrorKind::InvalidIncludeFile(e.to_string()).at(loc.clone()))?
+                .peekable();
+            if iter.peek().is_none() {
+                return Err(ParseErrorKind::EmptyIncludeFile(filename).at(loc.clone()));
+            }
+            for included_file in iter {
+                let included_file = included_file.map_err(|e| {
+                    ParseErrorKind::InvalidIncludeFile(format!("{e:?}")).at(loc.clone())
+                })?;
                 let included_file = included_file.as_os_str().to_string_lossy().to_string();
 
                 records.push(Record::Injected(Injected::BeginInclude(

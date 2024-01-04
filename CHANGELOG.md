@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.19.1] - 2024-01-04
+
+* parser: `include` now returns error if no file is matched. 
+
 ## [0.19.0] - 2023-11-11
 
 * parser: refactor `expect` field in sqllogictest parser to make it easier to work with.
