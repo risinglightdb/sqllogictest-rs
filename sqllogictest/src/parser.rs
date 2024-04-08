@@ -136,11 +136,13 @@ pub enum Record<T: ColumnType> {
     },
     /// A system command is an external command that is to be executed by the shell. Currently it
     /// must succeed and the output is ignored.
+    #[non_exhaustive]
     System {
         loc: Location,
         conditions: Vec<Condition>,
         /// The external command.
         command: String,
+        stdout: Option<String>,
     },
     /// A sleep period.
     Sleep {
@@ -266,8 +268,13 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 loc: _,
                 conditions: _,
                 command,
+                stdout,
             } => {
-                writeln!(f, "system ok\n{command}")
+                writeln!(f, "system ok\n{command}")?;
+                if let Some(stdout) = stdout {
+                    writeln!(f, "----\n{stdout}\n")?;
+                }
+                Ok(())
             }
             Record::Sleep { loc: _, duration } => {
                 write!(f, "sleep {}", humantime::format_duration(*duration))
@@ -754,7 +761,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     [] => QueryExpect::empty_results(),
                 };
 
-                // The SQL for the query is found on second an subsequent lines of the record
+                // The SQL for the query is found on second and subsequent lines of the record
                 // up to first line of the form "----" or until the end of the record.
                 let (sql, has_result) = parse_lines(&mut lines, &loc, Some(RESULTS_DELIMITER))?;
                 if has_result {
@@ -789,11 +796,19 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
             }
             ["system", "ok"] => {
                 // TODO: we don't support asserting error message for system command
-                let (command, _) = parse_lines(&mut lines, &loc, None)?;
+                // The command is found on second and subsequent lines of the record
+                // up to first line of the form "----" or until the end of the record.
+                let (command, has_result) = parse_lines(&mut lines, &loc, Some(RESULTS_DELIMITER))?;
+                let stdout = if has_result {
+                    Some(parse_multiple_result(&mut lines))
+                } else {
+                    None
+                };
                 records.push(Record::System {
                     loc,
                     conditions: std::mem::take(&mut conditions),
                     command,
+                    stdout,
                 });
             }
             ["control", res @ ..] => match res {
@@ -897,10 +912,10 @@ fn parse_lines<'a>(
     Ok((out, found_delimiter))
 }
 
-/// Parse multiline error message under `----`.
-fn parse_multiline_error<'a>(
+/// Parse multiline output under `----`.
+fn parse_multiple_result<'a>(
     lines: &mut Peekable<impl Iterator<Item = (usize, &'a str)>>,
-) -> ExpectedError {
+) -> String {
     let mut results = String::new();
 
     while let Some((_, line)) = lines.next() {
@@ -913,7 +928,14 @@ fn parse_multiline_error<'a>(
         results.push('\n');
     }
 
-    ExpectedError::Multiline(results.trim().to_string())
+    results.trim().to_string()
+}
+
+/// Parse multiline error message under `----`.
+fn parse_multiline_error<'a>(
+    lines: &mut Peekable<impl Iterator<Item = (usize, &'a str)>>,
+) -> ExpectedError {
+    ExpectedError::Multiline(parse_multiple_result(lines))
 }
 
 #[cfg(test)]

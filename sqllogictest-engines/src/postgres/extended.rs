@@ -1,5 +1,5 @@
 use std::fmt::Write;
-use std::process::{Command, ExitStatus};
+use std::process::Command;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -319,7 +319,7 @@ impl sqllogictest::AsyncDB for Postgres<Extended> {
         tokio::time::sleep(dur).await
     }
 
-    async fn run_command(command: Command) -> std::io::Result<ExitStatus> {
-        tokio::process::Command::from(command).status().await
+    async fn run_command(command: Command) -> std::io::Result<std::process::Output> {
+        tokio::process::Command::from(command).output().await
     }
 }

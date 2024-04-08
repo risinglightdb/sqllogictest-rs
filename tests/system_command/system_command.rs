@@ -43,9 +43,10 @@ impl sqllogictest::DB for FakeDB {
 fn test() {
     let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
 
-    tester
-        .run_file("./system_command/system_command.slt")
-        .unwrap();
+    if let Err(e) = tester.run_file("./system_command/system_command.slt") {
+        println!("{}", e.display(true));
+        panic!();
+    }
 }
 
 #[test]
@@ -57,4 +58,13 @@ fn test_fail() {
         .unwrap_err();
 
     assert!(err.to_string().contains("system command failed"), "{err}");
+
+    let err = tester
+        .run_file("./system_command/system_command_fail_2.slt")
+        .unwrap_err();
+
+    assert!(
+        err.to_string().contains("system command stdout mismatch"),
+        "{err}"
+    );
 }

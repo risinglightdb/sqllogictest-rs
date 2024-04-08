@@ -1,5 +1,4 @@
 use std::fmt::Display;
-use std::process::ExitStatus;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -130,7 +129,7 @@ impl AsyncDB for Engines {
         tokio::time::sleep(dur).await
     }
 
-    async fn run_command(command: std::process::Command) -> std::io::Result<ExitStatus> {
-        Command::from(command).status().await
+    async fn run_command(command: std::process::Command) -> std::io::Result<std::process::Output> {
+        Command::from(command).output().await
     }
 }

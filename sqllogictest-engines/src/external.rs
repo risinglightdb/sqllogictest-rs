@@ -1,6 +1,6 @@
 use std::io;
 use std::marker::PhantomData;
-use std::process::{ExitStatus, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -121,8 +121,8 @@ impl AsyncDB for ExternalDriver {
         tokio::time::sleep(dur).await
     }
 
-    async fn run_command(command: std::process::Command) -> std::io::Result<ExitStatus> {
-        Command::from(command).status().await
+    async fn run_command(command: std::process::Command) -> std::io::Result<std::process::Output> {
+        Command::from(command).output().await
     }
 }
 
