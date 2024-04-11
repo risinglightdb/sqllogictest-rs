@@ -646,7 +646,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 cmd.stderr(std::process::Stdio::piped());
                 let result = D::run_command(cmd).await;
                 #[derive(thiserror::Error, Debug)]
-                #[error("process exited unsuccessfully: {status}\nstdout: {stdout}\nstderr: {stderr}")]
+                #[error(
+                    "process exited unsuccessfully: {status}\nstdout: {stdout}\nstderr: {stderr}"
+                )]
                 struct SystemError {
                     status: ExitStatus,
                     stdout: String,
