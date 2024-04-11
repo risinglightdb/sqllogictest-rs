@@ -15,3 +15,32 @@ query T
 select read("${__TEST_DIR__}/test.txt")
 ----
 1919810
+
+# Note: it ends with 2 newlines
+system ok
+echo "114514"
+----
+114514
+
+
+# Note: when substitution is on, we need to escape the backslash
+# Note: 1 blank line in the middle is ok, but not 2
+system ok
+echo "114\\n\\n514"
+----
+114
+
+514
+
+
+system ok
+cat <<EOF
+OH MY GOD
+This is a cool "here-doc"
+But what on earth is a 'here-doc'?
+EOF
+----
+OH MY GOD
+This is a cool "here-doc"
+But what on earth is a 'here-doc'?
+

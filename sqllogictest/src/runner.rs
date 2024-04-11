@@ -36,7 +36,9 @@ pub enum RecordOutput<T: ColumnType> {
         count: u64,
         error: Option<AnyError>,
     },
+    #[non_exhaustive]
     System {
+        stdout: Option<String>,
         error: Option<AnyError>,
     },
 }
@@ -82,11 +84,11 @@ pub trait AsyncDB {
 
     /// [`Runner`] calls this function to run a system command.
     ///
-    /// The default implementation is `std::process::Command::status`, which is universial to any
+    /// The default implementation is `std::process::Command::output`, which is universial to any
     /// async runtime but would block the current thread. If you are running in tokio runtime, you
-    /// should override this by `tokio::process::Command::status`.
-    async fn run_command(mut command: Command) -> std::io::Result<ExitStatus> {
-        command.status()
+    /// should override this by `tokio::process::Command::output`.
+    async fn run_command(mut command: Command) -> std::io::Result<std::process::Output> {
+        command.output()
     }
 }
 
@@ -255,6 +257,15 @@ pub enum TestErrorKind {
     },
     #[error("system command failed: {err}\n[CMD] {command}")]
     SystemFail { command: String, err: AnyError },
+    #[error(
+        "system command stdout mismatch:\n[command] {command}\n[Diff] (-expected|+actual)\n{}",
+        TextDiff::from_lines(.expected_stdout, .actual_stdout).iter_all_changes().format_with("\n", |diff, f| format_diff(&diff, f, false))
+    )]
+    SystemStdoutMismatch {
+        command: String,
+        expected_stdout: String,
+        actual_stdout: String,
+    },
     // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
     #[error("{kind} is expected to fail with error:\n\t{expected_err}\nbut got error:\n\t{err}\n[SQL] {sql}")]
     ErrorMismatch {
@@ -359,6 +370,19 @@ impl<'a> Display for TestErrorKindDisplay<'a> {
                     format_column_diff(expected, actual, true)
                 )
             }
+            TestErrorKind::SystemStdoutMismatch {
+                command,
+                expected_stdout,
+                actual_stdout,
+            } => {
+                write!(
+                    f,
+                    "system command stdout mismatch:\n[command] {command}\n[Diff] (-expected|+actual)\n{}",
+                    TextDiff::from_lines(expected_stdout, actual_stdout)
+                        .iter_all_changes()
+                        .format_with("\n", |diff, f|{ format_diff(&diff, f, true)})
+                )
+            }
             _ => write!(f, "{}", self.error),
         }
     }
@@ -461,6 +485,7 @@ pub fn default_column_validator<T: ColumnType>(_: &Vec<T>, _: &Vec<T>) -> bool {
 /// The strict validator checks:
 /// - the number of columns is as expected
 /// - each column has the same type as expected
+#[allow(clippy::ptr_arg)]
 pub fn strict_column_validator<T: ColumnType>(actual: &Vec<T>, expected: &Vec<T>) -> bool {
     actual.len() == expected.len()
         && !actual
@@ -592,17 +617,23 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 conditions,
                 command,
                 loc: _,
+                stdout: expected_stdout,
             } => {
                 let command = match self.may_substitute(command) {
                     Ok(command) => command,
-                    Err(error) => return RecordOutput::System { error: Some(error) },
+                    Err(error) => {
+                        return RecordOutput::System {
+                            stdout: None,
+                            error: Some(error),
+                        }
+                    }
                 };
 
                 if should_skip(&self.labels, "", &conditions) {
                     return RecordOutput::Nothing;
                 }
 
-                let cmd = if cfg!(target_os = "windows") {
+                let mut cmd = if cfg!(target_os = "windows") {
                     let mut cmd = std::process::Command::new("cmd");
                     cmd.arg("/C").arg(command);
                     cmd
@@ -611,19 +642,39 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     cmd.arg("-c").arg(command);
                     cmd
                 };
+                cmd.stdout(std::process::Stdio::piped());
+                cmd.stderr(std::process::Stdio::piped());
                 let result = D::run_command(cmd).await;
-
                 #[derive(thiserror::Error, Debug)]
-                #[error("process exited unsuccessfully: {0}")] // message from unstable `ExitStatusError`
-                struct SystemError(ExitStatus);
+                #[error(
+                    "process exited unsuccessfully: {status}\nstdout: {stdout}\nstderr: {stderr}"
+                )]
+                struct SystemError {
+                    status: ExitStatus,
+                    stdout: String,
+                    stderr: String,
+                }
 
+                let mut stdout = None;
                 let error: Option<AnyError> = match result {
-                    Ok(status) if status.success() => None,
-                    Ok(status) => Some(Arc::new(SystemError(status))),
+                    Ok(output) => {
+                        if output.status.success() {
+                            if expected_stdout.is_some() {
+                                stdout = Some(String::from_utf8_lossy(&output.stdout).to_string());
+                            }
+                            None
+                        } else {
+                            Some(Arc::new(SystemError {
+                                status: output.status,
+                                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                            }))
+                        }
+                    }
                     Err(e) => Some(Arc::new(e)),
                 };
 
-                RecordOutput::System { error }
+                RecordOutput::System { error, stdout }
             }
             Record::Query {
                 conditions,
@@ -909,11 +960,30 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     loc,
                     conditions: _,
                     command,
+                    stdout: expected_stdout,
                 },
-                RecordOutput::System { error },
+                RecordOutput::System {
+                    error,
+                    stdout: actual_stdout,
+                },
             ) => {
                 if let Some(err) = error {
                     return Err(TestErrorKind::SystemFail { command, err }.at(loc));
+                }
+                match (expected_stdout, actual_stdout) {
+                    (None, _) => {}
+                    (Some(expected_stdout), actual_stdout) => {
+                        let actual_stdout = actual_stdout.unwrap_or_default();
+                        // TODO: support newlines contained in expected_stdout
+                        if expected_stdout != actual_stdout.trim() {
+                            return Err(TestErrorKind::SystemStdoutMismatch {
+                                command,
+                                expected_stdout,
+                                actual_stdout,
+                            }
+                            .at(loc));
+                        }
+                    }
                 }
             }
             _ => unreachable!(),
@@ -1058,8 +1128,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Substitute the input SQL or command with [`Substitution`], if enabled by `control
     /// substitution`.
     fn may_substitute(&self, input: String) -> Result<String, AnyError> {
+        #[derive(thiserror::Error, Debug)]
+        #[error("substitution failed: {0}")]
+        struct SubstError(subst::Error);
         if let Some(substitution) = &self.substitution {
-            subst::substitute(&input, substitution).map_err(|e| Arc::new(e) as AnyError)
+            subst::substitute(&input, substitution).map_err(|e| Arc::new(SubstError(e)) as AnyError)
         } else {
             Ok(input)
         }
@@ -1388,6 +1461,23 @@ pub fn update_record_with_output<T: ColumnType>(
                 })
             }
         },
+        (
+            Record::System {
+                loc,
+                conditions,
+                command,
+                stdout: _,
+            },
+            RecordOutput::System {
+                stdout: actual_stdout,
+                error: _,
+            },
+        ) => Some(Record::System {
+            loc,
+            conditions,
+            command,
+            stdout: actual_stdout.clone(),
+        }),
 
         // No update possible, return the original record
         _ => None,

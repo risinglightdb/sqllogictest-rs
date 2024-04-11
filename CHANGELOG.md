@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.0] - 2024-04-08
+
+* Show stdout, stderr when `system` command fails.
+* Support matching stdout for `system`
+  ```
+  system ok
+  echo "Hello, world!"
+  ----
+  Hello, world!
+  ```
+  Currently, only exact match is supported. Besides, the output cannot contain more than one blank lines in between. The record ends with two consecutive blank lines.
+
+  Some minor **Breaking changes**:
+  - Add field `stdout` to `parser::Record::System` and `runner::RecordOutput::System`, and mark them as `#[non_exhaustive]`.
+  - Change trait method `AsyncDB::run_command`'s return type from `std::process::ExitStatus` to `std::process::Output`.
+
+
 ## [0.19.1] - 2024-01-04
 
 * parser: `include` now returns error if no file is matched. 
