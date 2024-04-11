@@ -646,8 +646,12 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 cmd.stderr(std::process::Stdio::piped());
                 let result = D::run_command(cmd).await;
                 #[derive(thiserror::Error, Debug)]
-                #[error("process exited unsuccessfully: {0}\nstdout: {1}\nstderr: {2}")]
-                struct SystemError(ExitStatus, String, String);
+                #[error("process exited unsuccessfully: {status}\nstdout: {stdout}\nstderr: {stderr}")]
+                struct SystemError {
+                    status: ExitStatus,
+                    stdout: String,
+                    stderr: String,
+                }
 
                 let mut stdout = None;
                 let error: Option<AnyError> = match result {
@@ -658,11 +662,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             }
                             None
                         } else {
-                            Some(Arc::new(SystemError(
-                                output.status,
-                                String::from_utf8_lossy(&output.stdout).to_string(),
-                                String::from_utf8_lossy(&output.stderr).to_string(),
-                            )))
+                            Some(Arc::new(SystemError {
+                                status: output.status,
+                                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                            }))
                         }
                     }
                     Err(e) => Some(Arc::new(e)),
