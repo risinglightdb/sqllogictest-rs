@@ -272,7 +272,7 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
             } => {
                 writeln!(f, "system ok\n{command}")?;
                 if let Some(stdout) = stdout {
-                    writeln!(f, "----\n{stdout}\n")?;
+                    writeln!(f, "----\n{}\n", stdout.trim())?;
                 }
                 Ok(())
             }
