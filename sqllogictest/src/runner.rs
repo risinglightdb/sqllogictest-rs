@@ -633,12 +633,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                 };
 
-                let is_background = command
-                    .trim()
-                    .chars()
-                    .last()
-                    .expect("system command is emptry")
-                    == '&';
+                let is_background = command.trim().ends_with('&');
                 if is_background {
                     command = command.trim_end_matches('&').trim().to_string();
                 }
