@@ -619,7 +619,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 loc: _,
                 stdout: expected_stdout,
             } => {
-                let command = match self.may_substitute(command) {
+                if should_skip(&self.labels, "", &conditions) {
+                    return RecordOutput::Nothing;
+                }
+
+                let mut command = match self.may_substitute(command) {
                     Ok(command) => command,
                     Err(error) => {
                         return RecordOutput::System {
@@ -629,8 +633,14 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                 };
 
-                if should_skip(&self.labels, "", &conditions) {
-                    return RecordOutput::Nothing;
+                let is_background = command
+                    .trim()
+                    .chars()
+                    .last()
+                    .expect("system command is emptry")
+                    == '&';
+                if is_background {
+                    command = command.trim_end_matches('&').trim().to_string();
                 }
 
                 let mut cmd = if cfg!(target_os = "windows") {
@@ -642,8 +652,22 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     cmd.arg("-c").arg(command);
                     cmd
                 };
+
+                if is_background {
+                    // Spawn a new process, but don't wait for stdout, otherwise it will block until the process exits.
+                    let error: Option<AnyError> = match cmd.spawn() {
+                        Ok(_) => None,
+                        Err(e) => Some(Arc::new(e)),
+                    };
+                    return RecordOutput::System {
+                        error,
+                        stdout: None,
+                    };
+                }
+
                 cmd.stdout(std::process::Stdio::piped());
                 cmd.stderr(std::process::Stdio::piped());
+
                 let result = D::run_command(cmd).await;
                 #[derive(thiserror::Error, Debug)]
                 #[error(
