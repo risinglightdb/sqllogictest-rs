@@ -1,6 +1,6 @@
 mod engines;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{stdout, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -14,6 +14,7 @@ use fs_err::{File, OpenOptions};
 use futures::StreamExt;
 use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
+use rand::distributions::DistString;
 use rand::seq::SliceRandom;
 use sqllogictest::{
     default_validator, strict_column_validator, update_record_with_output, AsyncDB, Injected,
@@ -130,7 +131,7 @@ impl DBConfig {
 
 #[tokio::main]
 pub async fn main() -> Result<()> {
-    env_logger::init();
+    tracing_subscriber::fmt::init();
 
     let cli = Opt::command().disable_help_flag(true).arg(
         Arg::new("help")
@@ -265,15 +266,25 @@ async fn run_parallel(
     junit: Option<String>,
 ) -> Result<()> {
     let mut create_databases = BTreeMap::new();
+    let mut filenames = BTreeSet::new();
     for file in files {
-        let db_name = file
+        let filename = file
             .to_str()
             .ok_or_else(|| anyhow!("not a UTF-8 filename"))?;
-        let db_name = db_name.replace([' ', '.', '-', '/'], "_");
-        eprintln!("+ Discovered Test: {db_name}");
-        if create_databases.insert(db_name.to_string(), file).is_some() {
-            return Err(anyhow!("duplicated file name found: {}", db_name));
+        let normalized_filename = filename.replace([' ', '.', '-', '/'], "_");
+        eprintln!("+ Discovered Test: {normalized_filename}");
+        if !filenames.insert(normalized_filename.clone()) {
+            return Err(anyhow!(
+                "duplicated file name found: {}",
+                normalized_filename
+            ));
         }
+        let random_id: String = rand::distributions::Alphanumeric
+            .sample_string(&mut rand::thread_rng(), 8)
+            .to_lowercase();
+        let db_name = format!("{normalized_filename}_{random_id}");
+
+        create_databases.insert(db_name, file);
     }
 
     let mut db = engines::connect(engine, &config).await?;

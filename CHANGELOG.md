@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.1] - 2024-04-17
+
+* bin: When using `-j <jobs>` to run tests in parallel, add a random suffix to the temporary databases. This is useful if the test is manually canceled, but you want to rerun it freshly. Note that if the test failed, the database will be dropped. This is existing behavior and unchanged.
+* bin: replace `env_logger` with `tracing-subscriber`. You will be able to see the record being executed with `RUST_LOG=debug sqllogictest ...`.
+
 ## [0.20.0] - 2024-04-08
 
 * Show stdout, stderr when `system` command fails.
