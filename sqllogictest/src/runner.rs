@@ -802,11 +802,14 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 self.hash_threshold = threshold as usize;
                 RecordOutput::Nothing
             }
+            Record::Halt { loc: _ } => {
+                tracing::error!("halt record encountered. It's likely a bug of the runtime.");
+                RecordOutput::Nothing
+            }
             Record::Include { .. }
-            | Record::Comment(_)
             | Record::Newline
+            | Record::Comment(_)
             | Record::Subtest { .. }
-            | Record::Halt { .. }
             | Record::Injected(_)
             | Record::Condition(_)
             | Record::Connection(_) => RecordOutput::Nothing,
@@ -817,7 +820,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     pub async fn run_async(&mut self, record: Record<D::ColumnType>) -> Result<(), TestError> {
         tracing::debug!(?record, "testing");
 
-        match (record.clone(), self.apply_record(record).await) {
+        let result = self.apply_record(record.clone()).await;
+
+        match (record, result) {
             (_, RecordOutput::Nothing) => {}
             // Tolerate the mismatched return type...
             (
