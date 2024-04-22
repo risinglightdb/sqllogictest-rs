@@ -489,6 +489,9 @@ async fn run_test_file<T: std::io::Write, M: MakeConnection>(
     begin_times.push(Instant::now());
 
     for record in records {
+        if let Record::Halt { .. } = record {
+            break;
+        }
         match &record {
             Record::Injected(Injected::BeginInclude(file)) => {
                 begin_times.push(Instant::now());
