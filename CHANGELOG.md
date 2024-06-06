@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.4] - 2024-06-06
+
+* bump dependencies
+
 ## [0.20.3] - 2024-06-06
 
 * feat(bin): hide `INFO` level log by default
