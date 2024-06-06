@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.3] - 2024-06-06
+
+* feat(bin): hide `INFO` level log by default
+
 ## [0.20.2] - 2024-04-22
 
 * fix(bin): `halt` is not handled.
