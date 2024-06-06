@@ -20,7 +20,7 @@ clap = { version = "4", features = ["derive", "env"] }
 console = { version = "0.15" }
 futures = { version = "0.3", default-features = false }
 glob = "0.3"
-itertools = "0.12"
+itertools = "0.13"
 quick-junit = { version = "0.4" }
 rand = "0.8"
 sqllogictest = { path = "../sqllogictest", version = "0.20" }
