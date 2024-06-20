@@ -34,7 +34,6 @@ where
 }
 
 /// Connections established in a [`Runner`](crate::Runner).
-#[derive(Clone)]
 pub(crate) struct Connections<D, M> {
     make_conn: M,
     conns: HashMap<ConnectionName, D>,
