@@ -1,14 +1,14 @@
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use subst::Env;
 use tempfile::{tempdir, TempDir};
 
 /// Substitute environment variables and special variables like `__TEST_DIR__` in SQL.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct Substitution {
     /// The temporary directory for `__TEST_DIR__`.
     /// Lazily initialized and cleaned up when dropped.
-    test_dir: OnceLock<TempDir>,
+    test_dir: Arc<OnceLock<TempDir>>,
 }
 
 impl<'a> subst::VariableMap<'a> for Substitution {

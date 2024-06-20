@@ -649,7 +649,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 };
 
                 if is_background {
-                    // Spawn a new process, but don't wait for stdout, otherwise it will block until the process exits.
+                    // Spawn a new process, but don't wait for stdout, otherwise it will block until
+                    // the process exits.
                     let error: Option<AnyError> = match cmd.spawn() {
                         Ok(_) => None,
                         Err(e) => Some(Arc::new(e)),
@@ -1090,6 +1091,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
     /// accept the tasks, spawn jobs task to run slt test. the tasks are (AsyncDB, slt filename)
     /// pairs.
+    // TODO: This is not a good interface, as the `make_conn` passed to `new` is unused but we
+    // accept a new `conn_builder` here. May change `MakeConnection` to support specifying the
+    // database name in the future.
     pub async fn run_parallel_async<Fut>(
         &mut self,
         glob: &str,
@@ -1115,9 +1119,20 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 .await
                 .expect("create db failed");
             let target = hosts[idx % hosts.len()].clone();
+
+            let mut tester = Runner {
+                conn: Connections::new(move || {
+                    conn_builder(target.clone(), db_name.clone()).map(Ok)
+                }),
+                validator: self.validator,
+                column_type_validator: self.column_type_validator,
+                substitution: self.substitution.clone(),
+                sort_mode: self.sort_mode,
+                hash_threshold: self.hash_threshold,
+                labels: self.labels.clone(),
+            };
+
             tasks.push(async move {
-                let mut tester =
-                    Runner::new(move || conn_builder(target.clone(), db_name.clone()).map(Ok));
                 let filename = file.to_string_lossy().to_string();
                 tester.run_file_async(filename).await
             })
