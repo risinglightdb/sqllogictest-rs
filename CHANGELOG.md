@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+* fix(runner): when running in parallel, the runner will correctly inherit configuration like `sort_mode` and `labels` from the main runner.
+
 ## [0.20.4] - 2024-06-06
 
 * bump dependencies
