@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::fmt::{Debug, Display};
 use std::path::Path;
-use std::process::{Command, ExitStatus};
+use std::process::{Command, ExitStatus, Output};
 use std::sync::Arc;
 use std::time::Duration;
 use std::vec;
@@ -545,6 +545,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         &mut self,
         record: Record<D::ColumnType>,
     ) -> RecordOutput<D::ColumnType> {
+        tracing::debug!(?record, "testing");
         /// Returns whether we should skip this record, according to given `conditions`.
         fn should_skip(
             labels: &HashSet<String>,
@@ -640,11 +641,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
                 let mut cmd = if cfg!(target_os = "windows") {
                     let mut cmd = std::process::Command::new("cmd");
-                    cmd.arg("/C").arg(command);
+                    cmd.arg("/C").arg(&command);
                     cmd
                 } else {
                     let mut cmd = std::process::Command::new("sh");
-                    cmd.arg("-c").arg(command);
+                    cmd.arg("-c").arg(&command);
                     cmd
                 };
 
@@ -655,6 +656,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         Ok(_) => None,
                         Err(e) => Some(Arc::new(e)),
                     };
+                    tracing::info!(target:"sqllogictest::system_command", command, "background system command spawned");
                     return RecordOutput::System {
                         error,
                         stdout: None,
@@ -675,26 +677,39 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     stderr: String,
                 }
 
-                let mut stdout = None;
+                let mut actual_stdout = None;
                 let error: Option<AnyError> = match result {
-                    Ok(output) => {
-                        if output.status.success() {
+                    Ok(Output {
+                        status,
+                        stdout,
+                        stderr,
+                    }) => {
+                        let stdout = String::from_utf8_lossy(&stdout).to_string();
+                        let stderr = String::from_utf8_lossy(&stderr).to_string();
+                        tracing::info!(target:"sqllogictest::system_command", command, ?status, stdout, stderr, "system command executed");
+                        if status.success() {
                             if expected_stdout.is_some() {
-                                stdout = Some(String::from_utf8_lossy(&output.stdout).to_string());
+                                actual_stdout = Some(stdout);
                             }
                             None
                         } else {
                             Some(Arc::new(SystemError {
-                                status: output.status,
-                                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                                status,
+                                stdout,
+                                stderr,
                             }))
                         }
                     }
-                    Err(e) => Some(Arc::new(e)),
+                    Err(error) => {
+                        tracing::error!(target:"sqllogictest::system_command", command, ?error, "failed to run system command");
+                        Some(Arc::new(error))
+                    }
                 };
 
-                RecordOutput::System { error, stdout }
+                RecordOutput::System {
+                    error,
+                    stdout: actual_stdout,
+                }
             }
             Record::Query {
                 conditions,
@@ -819,8 +834,6 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
     /// Run a single record.
     pub async fn run_async(&mut self, record: Record<D::ColumnType>) -> Result<(), TestError> {
-        tracing::debug!(?record, "testing");
-
         let result = self.apply_record(record.clone()).await;
 
         match (record, result) {
@@ -1509,14 +1522,23 @@ pub fn update_record_with_output<T: ColumnType>(
             },
             RecordOutput::System {
                 stdout: actual_stdout,
-                error: _,
+                error,
             },
-        ) => Some(Record::System {
-            loc,
-            conditions,
-            command,
-            stdout: actual_stdout.clone(),
-        }),
+        ) => {
+            if let Some(error) = error {
+                tracing::error!(
+                    ?error,
+                    command,
+                    "system command failed while updating the record. It will be unchanged."
+                );
+            }
+            Some(Record::System {
+                loc,
+                conditions,
+                command,
+                stdout: actual_stdout.clone(),
+            })
+        }
 
         // No update possible, return the original record
         _ => None,
