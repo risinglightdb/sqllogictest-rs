@@ -975,7 +975,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             ..
                         },
                     ) => {
-                        if !(self.column_type_validator)(&types, &expected_types) {
+                        if !(self.column_type_validator)(types, &expected_types) {
                             return Err(TestErrorKind::QueryResultColumnsMismatch {
                                 sql,
                                 expected: expected_types.iter().map(|c| c.to_char()).join(""),
@@ -984,11 +984,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             .at(loc));
                         }
 
-                        if !(self.validator)(&rows, &expected_results) {
-                            let output_rows = rows
-                                .into_iter()
-                                .map(|strs| strs.iter().join(" "))
-                                .collect_vec();
+                        if !(self.validator)(rows, &expected_results) {
+                            let output_rows =
+                                rows.iter().map(|strs| strs.iter().join(" ")).collect_vec();
                             return Err(TestErrorKind::QueryResultMismatch {
                                 sql,
                                 expected: expected_results.join("\n"),
