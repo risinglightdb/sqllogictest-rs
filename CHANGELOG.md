@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.6] - 2024-06-21
+
+* runner: add logs for `system` command (with target `sqllogictest::system_command`) for ease of debugging. 
+
 ## [0.20.5] - 2024-06-20
 
 * fix(runner): when running in parallel, the runner will correctly inherit configuration like `sort_mode` and `labels` from the main runner.
