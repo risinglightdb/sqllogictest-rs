@@ -23,8 +23,8 @@ glob = "0.3"
 itertools = "0.13"
 quick-junit = { version = "0.4" }
 rand = "0.8"
-sqllogictest = { path = "../sqllogictest", version = "0.20" }
-sqllogictest-engines = { path = "../sqllogictest-engines", version = "0.20" }
+sqllogictest = { path = "../sqllogictest", version = "0.21" }
+sqllogictest-engines = { path = "../sqllogictest-engines", version = "0.21" }
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
