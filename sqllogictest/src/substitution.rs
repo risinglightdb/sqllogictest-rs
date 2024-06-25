@@ -23,6 +23,13 @@ impl<'a> subst::VariableMap<'a> for Substitution {
                 test_dir.path().to_string_lossy().into_owned().into()
             }
 
+            "__NOW__" => std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("failed to get current time")
+                .as_nanos()
+                .to_string()
+                .into(),
+
             key => Env.get(key),
         }
     }

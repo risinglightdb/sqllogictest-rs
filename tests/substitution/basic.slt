@@ -25,6 +25,10 @@ echo "$MY_USERNAME"
 statement ok
 path $__TEST_DIR__
 
+# a special variable `__NOW__` to get the current timestamp in nanoseconds
+statement ok
+time $__NOW__
+
 # non existent variables without default values are errors
 statement error No such variable
 check $NONEXISTENT_VARIABLE
