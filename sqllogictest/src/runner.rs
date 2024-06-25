@@ -23,19 +23,22 @@ use crate::{ColumnType, Connections, MakeConnection};
 /// Type-erased error type.
 type AnyError = Arc<dyn std::error::Error + Send + Sync>;
 
+/// Output of a record.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum RecordOutput<T: ColumnType> {
+    /// No output. Occurs when the record is skipped or not a `query`, `statement`, or `system`
+    /// command.
     Nothing,
+    /// The output of a `query`.
     Query {
         types: Vec<T>,
         rows: Vec<Vec<String>>,
         error: Option<AnyError>,
     },
-    Statement {
-        count: u64,
-        error: Option<AnyError>,
-    },
+    /// The output of a `statement`.
+    Statement { count: u64, error: Option<AnyError> },
+    /// The output of a `system` command.
     #[non_exhaustive]
     System {
         stdout: Option<String>,
@@ -833,10 +836,13 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     }
 
     /// Run a single record.
-    pub async fn run_async(&mut self, record: Record<D::ColumnType>) -> Result<(), TestError> {
+    pub async fn run_async(
+        &mut self,
+        record: Record<D::ColumnType>,
+    ) -> Result<RecordOutput<D::ColumnType>, TestError> {
         let result = self.apply_record(record.clone()).await;
 
-        match (record, result) {
+        match (record, &result) {
             (_, RecordOutput::Nothing) => {}
             // Tolerate the mismatched return type...
             (
@@ -894,7 +900,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     .at(loc))
                 }
                 (None, StatementExpect::Count(expected_count)) => {
-                    if expected_count != count {
+                    if expected_count != *count {
                         return Err(TestErrorKind::StatementResultMismatch {
                             sql,
                             expected: expected_count,
@@ -908,7 +914,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     if !expected_error.is_match(&e.to_string()) {
                         return Err(TestErrorKind::ErrorMismatch {
                             sql,
-                            err: Arc::new(e),
+                            err: Arc::clone(e),
                             expected_err: expected_error.to_string(),
                             kind: RecordKind::Statement,
                         }
@@ -918,7 +924,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 (Some(e), StatementExpect::Count(_) | StatementExpect::Ok) => {
                     return Err(TestErrorKind::Fail {
                         sql,
-                        err: Arc::new(e),
+                        err: Arc::clone(e),
                         kind: RecordKind::Statement,
                     }
                     .at(loc));
@@ -946,7 +952,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         if !expected_error.is_match(&e.to_string()) {
                             return Err(TestErrorKind::ErrorMismatch {
                                 sql,
-                                err: Arc::new(e),
+                                err: Arc::clone(e),
                                 expected_err: expected_error.to_string(),
                                 kind: RecordKind::Query,
                             }
@@ -956,7 +962,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     (Some(e), QueryExpect::Results { .. }) => {
                         return Err(TestErrorKind::Fail {
                             sql,
-                            err: Arc::new(e),
+                            err: Arc::clone(e),
                             kind: RecordKind::Query,
                         }
                         .at(loc));
@@ -969,7 +975,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             ..
                         },
                     ) => {
-                        if !(self.column_type_validator)(&types, &expected_types) {
+                        if !(self.column_type_validator)(types, &expected_types) {
                             return Err(TestErrorKind::QueryResultColumnsMismatch {
                                 sql,
                                 expected: expected_types.iter().map(|c| c.to_char()).join(""),
@@ -978,11 +984,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             .at(loc));
                         }
 
-                        if !(self.validator)(&rows, &expected_results) {
-                            let output_rows = rows
-                                .into_iter()
-                                .map(|strs| strs.iter().join(" "))
-                                .collect_vec();
+                        if !(self.validator)(rows, &expected_results) {
+                            let output_rows =
+                                rows.iter().map(|strs| strs.iter().join(" ")).collect_vec();
                             return Err(TestErrorKind::QueryResultMismatch {
                                 sql,
                                 expected: expected_results.join("\n"),
@@ -1006,12 +1010,16 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 },
             ) => {
                 if let Some(err) = error {
-                    return Err(TestErrorKind::SystemFail { command, err }.at(loc));
+                    return Err(TestErrorKind::SystemFail {
+                        command,
+                        err: Arc::clone(err),
+                    }
+                    .at(loc));
                 }
                 match (expected_stdout, actual_stdout) {
                     (None, _) => {}
                     (Some(expected_stdout), actual_stdout) => {
-                        let actual_stdout = actual_stdout.unwrap_or_default();
+                        let actual_stdout = actual_stdout.clone().unwrap_or_default();
                         // TODO: support newlines contained in expected_stdout
                         if expected_stdout != actual_stdout.trim() {
                             return Err(TestErrorKind::SystemStdoutMismatch {
@@ -1027,17 +1035,24 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             _ => unreachable!(),
         }
 
-        Ok(())
+        Ok(result)
     }
 
     /// Run a single record.
-    pub fn run(&mut self, record: Record<D::ColumnType>) -> Result<(), TestError> {
+    ///
+    /// Returns the output of the record if successful.
+    pub fn run(
+        &mut self,
+        record: Record<D::ColumnType>,
+    ) -> Result<RecordOutput<D::ColumnType>, TestError> {
         futures::executor::block_on(self.run_async(record))
     }
 
     /// Run multiple records.
     ///
     /// The runner will stop early once a halt record is seen.
+    ///
+    /// To acquire the result of each record, manually call `run_async` for each record instead.
     pub async fn run_multi_async(
         &mut self,
         records: impl IntoIterator<Item = Record<D::ColumnType>>,
@@ -1054,6 +1069,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Run multiple records.
     ///
     /// The runner will stop early once a halt record is seen.
+    ///
+    /// To acquire the result of each record, manually call `run` for each record instead.
     pub fn run_multi(
         &mut self,
         records: impl IntoIterator<Item = Record<D::ColumnType>>,
