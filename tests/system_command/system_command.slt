@@ -1,7 +1,7 @@
 control substitution on
 
 system ok
-echo 114514 > ${__TEST_DIR__}/test.txt
+echo 114514 > $__TEST_DIR__/test.txt
 
 query T
 select read("${__TEST_DIR__}/test.txt")
@@ -9,7 +9,7 @@ select read("${__TEST_DIR__}/test.txt")
 114514
 
 system ok
-echo 1919810 > ${__TEST_DIR__}/test.txt
+echo 1919810 > $__TEST_DIR__/test.txt
 
 query T
 select read("${__TEST_DIR__}/test.txt")
@@ -23,10 +23,9 @@ echo "114514"
 114514
 
 
-# Note: when substitution is on, we need to escape the backslash
 # Note: 1 blank line in the middle is ok, but not 2
 system ok
-echo "114\\n\\n514"
+echo "114\n\n514"
 ----
 114
 
