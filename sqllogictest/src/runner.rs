@@ -576,7 +576,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 expected: _,
                 loc: _,
             } => {
-                let sql = match self.may_substitute(sql) {
+                let sql = match self.may_substitute(sql, true) {
                     Ok(sql) => sql,
                     Err(error) => {
                         return RecordOutput::Statement {
@@ -627,7 +627,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     return RecordOutput::Nothing;
                 }
 
-                let mut command = match self.may_substitute(command) {
+                let mut command = match self.may_substitute(command, false) {
                     Ok(command) => command,
                     Err(error) => {
                         return RecordOutput::System {
@@ -723,7 +723,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 expected,
                 loc: _,
             } => {
-                let sql = match self.may_substitute(sql) {
+                let sql = match self.may_substitute(sql, true) {
                     Ok(sql) => sql,
                     Err(error) => {
                         return RecordOutput::Query {
@@ -1196,12 +1196,17 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
     /// Substitute the input SQL or command with [`Substitution`], if enabled by `control
     /// substitution`.
-    fn may_substitute(&self, input: String) -> Result<String, AnyError> {
-        #[derive(thiserror::Error, Debug)]
-        #[error("substitution failed: {0}")]
-        struct SubstError(subst::Error);
+    ///
+    /// If `subst_env_vars`, we will use the `subst` crate to support extensive substitutions, incl. `$NAME`, `${NAME}`, `${NAME:default}`.
+    /// The cost is that we will have to use escape characters, e.g., `\$` & `\\`.
+    ///
+    /// Otherwise, we just do simple string substitution for `__TEST_DIR__` and `__NOW__`.
+    /// This is useful for `system` commands: The shell can do the environment variables, and we can write strings like `\n` without escaping.
+    fn may_substitute(&self, input: String, subst_env_vars: bool) -> Result<String, AnyError> {
         if let Some(substitution) = &self.substitution {
-            subst::substitute(&input, substitution).map_err(|e| Arc::new(SubstError(e)) as AnyError)
+            substitution
+                .substitute(&input, subst_env_vars)
+                .map_err(|e| Arc::new(e) as AnyError)
         } else {
             Ok(input)
         }
