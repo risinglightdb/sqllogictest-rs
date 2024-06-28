@@ -9,7 +9,7 @@ select read("${__TEST_DIR__}/test.txt")
 114514
 
 system ok
-echo 1919810 > ${__TEST_DIR__}/test.txt
+echo 1919810 > $__TEST_DIR__/test.txt
 
 query T
 select read("${__TEST_DIR__}/test.txt")
