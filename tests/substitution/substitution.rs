@@ -37,6 +37,10 @@ impl sqllogictest::DB for FakeDB {
                     x.to_string()
                 }
             }
+            Some(("time", x)) => {
+                let _ = x.parse::<u128>().map_err(|_| FakeDBError)?;
+                x.to_string()
+            }
             _ => return Err(FakeDBError),
         };
 
