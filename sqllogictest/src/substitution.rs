@@ -22,7 +22,7 @@ impl Substitution {
                 .replace("$__TEST_DIR__", &self.test_dir())
                 .replace("$__NOW__", &self.now()))
         } else {
-            subst::substitute(&input, self).map_err(SubstError)
+            subst::substitute(input, self).map_err(SubstError)
         }
     }
 
