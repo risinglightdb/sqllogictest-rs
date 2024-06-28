@@ -35,7 +35,7 @@
 //!
 //! You can also parse the script and execute the records separately:
 //!
-//! ```rust
+//! ```ignore
 //! let records = sqllogictest::parse_file("script.slt").unwrap();
 //! for record in records {
 //!     tester.run(record).unwrap();
