@@ -1,8 +1,15 @@
 //! [Sqllogictest][Sqllogictest] parser and runner.
 //!
+//! This crate supports multiple extensions beyond the original sqllogictest format.
+//! See the [README](https://github.com/risinglightdb/sqllogictest-rs#slt-test-file-format-cookbook) for more information.
+//!
 //! [Sqllogictest]: https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki
 //!
 //! # Usage
+//!
+//! For how to use the CLI tool backed by this library, see the [README](https://github.com/risinglightdb/sqllogictest-rs#use-the-cli-tool).
+//!
+//! For using the crate as a lib, and implement your custom driver, see below.
 //!
 //! Implement [`DB`] trait for your database structure:
 //!
@@ -11,26 +18,27 @@
 //!
 //! impl sqllogictest::DB for Database {
 //!     type Error = ...;
-//!     fn run(&self, sql: &str) -> Result<String, Self::Error> {
+//!     type ColumnType = ...;
+//!     fn run(&mut self, sql: &str) -> Result<sqllogictest::DBOutput<Self::ColumnType>, Self::Error> {
 //!         ...
 //!     }
 //! }
 //! ```
 //!
-//! Create a [`Runner`] on your database instance, and then run the script:
+//! Then create a `Runner` on your database instance, and run the tests:
 //!
 //! ```ignore
-//! let mut tester = sqllogictest::Runner::new(Database::new());
-//! let script = std::fs::read_to_string("script.slt").unwrap();
-//! tester.run_script(&script);
+//! let db = Database {...};
+//! let mut tester = sqllogictest::Runner::new(db);
+//! tester.run_file("script.slt").unwrap();
 //! ```
 //!
 //! You can also parse the script and execute the records separately:
 //!
-//! ```ignore
-//! let records = sqllogictest::parse(&script).unwrap();
+//! ```rust
+//! let records = sqllogictest::parse_file("script.slt").unwrap();
 //! for record in records {
-//!     tester.run(record);
+//!     tester.run(record).unwrap();
 //! }
 //! ```
 

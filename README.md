@@ -14,46 +14,16 @@ This repository provides two crates:
 
 ## Use the library
 
-To add the dependency to your project:
-
-```sh
-cargo add sqllogictest
-```
-
-Implement `DB` trait for your database structure:
-
-```rust
-struct Database {...}
-
-impl sqllogictest::DB for Database {
-    type Error = ...;
-    type ColumnType = ...;
-    fn run(&mut self, sql: &str) -> Result<sqllogictest::DBOutput<Self::ColumnType>, Self::Error> {
-        ...
-    }
-}
-```
-
-Then create a `Runner` on your database instance, and run the tests:
-
-```rust
-let db = Database {...};
-let mut tester = sqllogictest::Runner::new(db);
-tester.run_file("script.slt").unwrap();
-```
-
-You can also parse the script and execute the records separately:
-
-```rust
-let records = sqllogictest::parse_file("script.slt").unwrap();
-for record in records {
-    tester.run(record).unwrap();
-}
-```
+Refer to the [rustdoc](https://docs.rs/sqllogictest/latest/sqllogictest/). 
 
 ## Use the CLI tool
 
-![demo](./docs/demo.gif)
+The CLI tool supports many useful features:
+- Colorful diff output
+- Automatically update test files according to the actual output
+- JUnit format test result report
+- Parallel execution isolated with different databases
+- ...
 
 To install the binary:
 
@@ -64,10 +34,11 @@ cargo install sqllogictest-bin
 You can use it as follows:
 
 ```sh
+# run scripts in `test` directory against postgres with default connection settings
 sqllogictest './test/**/*.slt'
+# run the tests, and update the test files with the actual output!
+sqllogictest './test/**/*.slt' --override
 ```
-
-This command will run scripts in `test` directory against postgres with default connection settings.
 
 You can find more options in `sqllogictest --help` .
 
@@ -102,14 +73,106 @@ SELECT * FROM foo;
 4 5
 ```
 
-### Run a statement that should fail
+### Extension: Run a query/statement that should fail with the expacted error message
+
+The syntax:
+- Do not check the error message: `[statement|query] error`
+- Single line error message (regexp match): `[statement|query] error <regex>` and ` error <regex>`
+- Multiline error message (exact match): Use `----`.
 
 ```text
 # Ensure that the statement errors and that the error
 # message contains 'Multiple object drop not supported'
 statement error Multiple object drop not supported
 DROP VIEW foo, bar;
+
+# The output error message must be the exact match of the expected one to pass the test,
+# except for the leading and trailing whitespaces.
+# Empty lines (not consecutive) are allowed in the expected error message. As a result, the message must end with 2 consecutive empty lines.
+query error
+SELECT 1/0;
+----
+db error: ERROR: Failed to execute query
+
+Caused by these errors:
+1: Failed to evaluate expression: 1/0
+2: Division by zero
+
+
+# The next record begins here after 2 blank lines.
 ```
+
+### Extension: Run external shell commands
+
+This is useful for manipulating some external resources during the test.
+
+```text
+system ok
+exit 0
+
+# The runner will check the exit code of the command, and this will fail.
+system ok
+exit 1
+
+# Check the output of the command. Same as `error`, empty lines (not consecutive) are allowed, and 2 consecutive empty lines ends the result.
+system ok
+echo "Hello\n\nWorld"
+----
+Hello
+
+World
+
+
+# The next record begins here after 2 blank lines.
+
+# Environment variables are supported.
+system ok
+echo $USER
+----
+xxchan
+```
+
+### Extension: Environment variable substituion in query and statement
+
+It needs to be enabled by adding `control substitution on` to the test file.
+
+```
+control substitution on
+
+# see https://docs.rs/subst/latest/subst/ for all features
+query TTTT
+SELECT
+  '$foo'                -- short
+, '${foo}'              -- long
+, '${bar:default}'      -- default value
+, '${bar:$foo-default}' -- recursive default value
+FROM baz;
+----
+...
+```
+
+Besides, there're some special variables supported:
+- `$__TEST_DIR__`: the path to a temporary directory specific to the current test case. 
+  This can be helpful if you need to manipulate some external resources during the test.
+- `$__NOW__`: the current Unix timestamp in nanoseconds.
+
+```
+control substitution on
+
+statement ok
+COPY (SELECT * FROM foo) TO '$__TEST_DIR__/foo.txt';
+
+system ok
+echo "foo" > "$__TEST_DIR__/foo.txt"
+```
+
+> [!NOTE]
+>
+> When substitution is on, special characters need to be excaped, e.g., `\$` and `\\`.
+>
+> `system` commands don't support the advanced substitution features of the [subst](https://docs.rs/subst/latest/subst/) crate,
+> and excaping is also not needed.
+> Environment variables are supported by the shell, and special variables are still supported by plain string substitution.
 
 ## Used by
 
