@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.21.0] - 2024-06-28
+
 **Breaking changes**:
 * runner: `RecordOutput` is now returned by `Runner::run` (or `Runner::run_async`). This allows users to access the output of each record, or check whether the record is skipped.
 * substitution: add a special variable `__NOW__` which will be replaced with the current Unix timestamp in nanoseconds.
