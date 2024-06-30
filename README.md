@@ -116,7 +116,7 @@ exit 1
 
 # Check the output of the command. Same as `error`, empty lines (not consecutive) are allowed, and 2 consecutive empty lines ends the result.
 system ok
-echo "Hello\n\nWorld"
+echo $'Hello\n\nWorld'
 ----
 Hello
 
