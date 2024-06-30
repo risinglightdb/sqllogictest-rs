@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * runner: `RecordOutput` is now returned by `Runner::run` (or `Runner::run_async`). This allows users to access the output of each record, or check whether the record is skipped.
 * runner(substitution): add a special variable `__NOW__` which will be replaced with the current Unix timestamp in nanoseconds.
 * runner(substitution): for `system` commands, we do not substitute environment variables any more, because the shell can do that. It's necessary to escape like `\\` any more. `$__TEST_DIR__`, and are still supported.
+* runner(system): change `sh` to `bash`.
 
 ## [0.20.6] - 2024-06-21
 

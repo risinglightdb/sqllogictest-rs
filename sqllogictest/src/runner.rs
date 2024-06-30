@@ -647,7 +647,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     cmd.arg("/C").arg(&command);
                     cmd
                 } else {
-                    let mut cmd = std::process::Command::new("sh");
+                    let mut cmd = std::process::Command::new("bash");
                     cmd.arg("-c").arg(&command);
                     cmd
                 };
