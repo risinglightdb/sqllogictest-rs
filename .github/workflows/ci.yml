@@ -50,6 +50,11 @@ jobs:
         with:
           command: test
           args: --no-fail-fast
+      - name: Doctest
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --doc
 
   semver:
     runs-on: ubuntu-22.04
