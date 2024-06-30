@@ -77,7 +77,7 @@ SELECT * FROM foo;
 
 The syntax:
 - Do not check the error message: `[statement|query] error`
-- Single line error message (regexp match): `[statement|query] error <regex>` and ` error <regex>`
+- Single line error message (regexp match): `[statement|query] error <regex>`
 - Multiline error message (exact match): Use `----`.
 
 ```text
