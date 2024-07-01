@@ -7,12 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## [0.21.0] - 2024-06-28
+## [0.21.0] - 2024-06-30
 
 **Breaking changes**:
 * runner: `RecordOutput` is now returned by `Runner::run` (or `Runner::run_async`). This allows users to access the output of each record, or check whether the record is skipped.
 * runner(substitution): add a special variable `__NOW__` which will be replaced with the current Unix timestamp in nanoseconds.
 * runner(substitution): for `system` commands, we do not substitute environment variables any more, because the shell can do that. It's necessary to escape like `\\` any more. `$__TEST_DIR__`, and are still supported.
+* runner(system): change `sh` to `bash`.
 
 ## [0.20.6] - 2024-06-21
 
@@ -101,7 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.17.0] - 2023-09-19
 
-* Support environment variables substituion for SQL and system commands.
+* Support environment variables substitution for SQL and system commands.
   For compatibility, this feature is by default disabled, and can be enabled by adding `control substitution on` to the test file.
   ```
   control substitution on
@@ -171,7 +172,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * We enhanced how `skipif` and `onlyif` works. Previously it checks against `DB::engine_name()`, and `sqllogictest-bin` didn't implement it.
   - (parser) A minor **breaking change**: Change the field names of `Condition:: OnlyIf/SkipIf`.
-  - (runner) Add `Runner::add_label`. Now multiple labels are supported ( `DB::engine_name()` is still included). The condition evaluates to true if *any* of the provided labels match the `skipif/onlyif <lable>`.
+  - (runner) Add `Runner::add_label`. Now multiple labels are supported ( `DB::engine_name()` is still included). The condition evaluates to true if *any* of the provided labels match the `skipif/onlyif <label>`.
   - (bin) Add `--label` option to specify custom labels.
 
 ## [0.13.2] - 2023-03-24

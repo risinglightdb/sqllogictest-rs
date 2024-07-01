@@ -116,7 +116,7 @@ exit 1
 
 # Check the output of the command. Same as `error`, empty lines (not consecutive) are allowed, and 2 consecutive empty lines ends the result.
 system ok
-echo "Hello\n\nWorld"
+echo $'Hello\n\nWorld'
 ----
 Hello
 
@@ -132,7 +132,7 @@ echo $USER
 xxchan
 ```
 
-### Extension: Environment variable substituion in query and statement
+### Extension: Environment variable substitution in query and statement
 
 It needs to be enabled by adding `control substitution on` to the test file.
 
@@ -168,7 +168,7 @@ echo "foo" > "$__TEST_DIR__/foo.txt"
 
 > [!NOTE]
 >
-> When substitution is on, special characters need to be excaped, e.g., `\$` and `\\`.
+> When substitution is on, special characters need to be escaped, e.g., `\$` and `\\`.
 >
 > `system` commands don't support the advanced substitution features of the [subst](https://docs.rs/subst/latest/subst/) crate,
 > and excaping is also not needed.

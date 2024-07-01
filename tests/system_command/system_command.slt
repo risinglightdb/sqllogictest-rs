@@ -25,7 +25,7 @@ echo "114514"
 
 # Note: 1 blank line in the middle is ok, but not 2
 system ok
-echo "114\n\n514"
+echo $'114\n\n514'
 ----
 114
 

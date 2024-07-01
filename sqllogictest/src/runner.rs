@@ -78,7 +78,7 @@ pub trait AsyncDB {
 
     /// [`Runner`] calls this function to perform sleep.
     ///
-    /// The default implementation is `std::thread::sleep`, which is universial to any async runtime
+    /// The default implementation is `std::thread::sleep`, which is universal to any async runtime
     /// but would block the current thread. If you are running in tokio runtime, you should override
     /// this by `tokio::time::sleep`.
     async fn sleep(dur: Duration) {
@@ -87,7 +87,7 @@ pub trait AsyncDB {
 
     /// [`Runner`] calls this function to run a system command.
     ///
-    /// The default implementation is `std::process::Command::output`, which is universial to any
+    /// The default implementation is `std::process::Command::output`, which is universal to any
     /// async runtime but would block the current thread. If you are running in tokio runtime, you
     /// should override this by `tokio::process::Command::output`.
     async fn run_command(mut command: Command) -> std::io::Result<std::process::Output> {
@@ -647,7 +647,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     cmd.arg("/C").arg(&command);
                     cmd
                 } else {
-                    let mut cmd = std::process::Command::new("sh");
+                    let mut cmd = std::process::Command::new("bash");
                     cmd.arg("-c").arg(&command);
                     cmd
                 };
