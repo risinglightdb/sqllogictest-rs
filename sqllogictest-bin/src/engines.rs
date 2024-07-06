@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use clap::ValueEnum;
 use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
 use sqllogictest_engines::external::ExternalDriver;
+use sqllogictest_engines::mysql::{MySql, MySqlConfig};
 use sqllogictest_engines::postgres::{PostgresConfig, PostgresExtended, PostgresSimple};
 use tokio::process::Command;
 
@@ -12,6 +13,7 @@ use super::{DBConfig, Result};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum EngineType {
+    Mysql,
     Postgres,
     PostgresExtended,
     External,
@@ -19,15 +21,31 @@ pub enum EngineType {
 
 #[derive(Clone, Debug)]
 pub enum EngineConfig {
+    MySql,
     Postgres,
     PostgresExtended,
     External(String),
 }
 
 pub(crate) enum Engines {
+    MySql(MySql),
     Postgres(PostgresSimple),
     PostgresExtended(PostgresExtended),
     External(ExternalDriver),
+}
+
+impl From<&DBConfig> for MySqlConfig {
+    fn from(config: &DBConfig) -> Self {
+        let (host, port) = config.random_addr();
+
+        let mysql_config = MySqlConfig::new();
+        mysql_config
+            .host(host)
+            .port(port)
+            .database(&config.db)
+            .username(&config.user)
+            .password(&config.pass)
+    }
 }
 
 impl From<&DBConfig> for PostgresConfig {
@@ -54,6 +72,11 @@ pub(crate) async fn connect(
     config: &DBConfig,
 ) -> Result<Engines, EnginesError> {
     Ok(match engine {
+        EngineConfig::MySql => Engines::MySql(
+            MySql::connect(config.into())
+                .await
+                .map_err(|e| EnginesError(e.into()))?,
+        ),
         EngineConfig::Postgres => Engines::Postgres(
             PostgresSimple::connect(config.into())
                 .await
@@ -101,6 +124,7 @@ impl std::error::Error for EnginesError {
 macro_rules! dispatch_engines {
     ($impl:expr, $inner:ident, $body:tt) => {{
         match $impl {
+            Engines::MySql($inner) => $body,
             Engines::Postgres($inner) => $body,
             Engines::PostgresExtended($inner) => $body,
             Engines::External($inner) => $body,
