@@ -52,9 +52,8 @@ impl sqllogictest::AsyncDB for MySql {
                         | "MEDIUMINT UNSIGNED" | "BIGINT UNSIGNED" => {
                             row.try_get::<u64, _>(i).map(|v| v.to_string())
                         }
-                        "FLOAT" | "DOUBLE" | "DECIMAL" => {
-                            row.try_get::<f64, _>(i).map(|v| v.to_string())
-                        }
+                        "FLOAT" => row.try_get::<f32, _>(i).map(|v| v.to_string()),
+                        "DOUBLE" => row.try_get::<f64, _>(i).map(|v| v.to_string()),
                         _ => {
                             return Err(sqlx::Error::Decode(
                                 format!("Unsupported type: {}", type_info.name()).into(),
