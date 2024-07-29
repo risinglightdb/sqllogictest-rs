@@ -13,6 +13,7 @@ pub trait ColumnType: Debug + PartialEq + Eq + Clone + Send + Sync {
 /// - 'T' - text, varchar results
 /// - 'I' - integers
 /// - 'R' - floating point numbers
+///
 /// Any other types are represented with `?`([`DefaultColumnType::Any`]).
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum DefaultColumnType {
