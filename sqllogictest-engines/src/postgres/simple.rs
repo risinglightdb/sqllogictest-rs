@@ -43,7 +43,7 @@ impl sqllogictest::AsyncDB for Postgres<Simple> {
                     cnt = cnt_;
                     break;
                 }
-                _ => unreachable!(),
+                _ => unreachable!("{:?}", row),
             }
             output.push(row_vec);
         }
