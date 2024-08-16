@@ -54,6 +54,20 @@ impl sqllogictest::DB for FakeDB {
                 ],
             });
         }
+        if sql == "select * from example_multiline" {
+            // Check multi-line output return values
+            return Ok(DBOutput::MultiLine {
+                lines: vec![
+                    "+---+---+---+".to_string(),
+                    "| a | b | c |".to_string(),
+                    "+---+---+---+".to_string(),
+                    "| 1 | 2 | 3 |".to_string(),
+                    "| 4 | 5 | 6 |".to_string(),
+                    "| 7 | 8 | 9 |".to_string(),
+                    "+---+---+---+".to_string(),
+                ],
+            });
+        }
         if sql == "select counter()" {
             self.counter += 1;
             return Ok(DBOutput::Rows {
