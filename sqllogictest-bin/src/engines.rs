@@ -37,14 +37,12 @@ pub(crate) enum Engines {
 impl From<&DBConfig> for MySqlConfig {
     fn from(config: &DBConfig) -> Self {
         let (host, port) = config.random_addr();
+        let database_url = format!(
+            "mysql://{}:{}@{}:{}/{}",
+            config.user, config.pass, host, port, config.db
+        );
 
-        let mysql_config = MySqlConfig::new();
-        mysql_config
-            .host(host)
-            .port(port)
-            .database(&config.db)
-            .username(&config.user)
-            .password(&config.pass)
+        MySqlConfig::from_url(&database_url).unwrap()
     }
 }
 
