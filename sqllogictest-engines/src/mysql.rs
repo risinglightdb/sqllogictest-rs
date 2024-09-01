@@ -2,7 +2,9 @@ use std::process::Command;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use mysql_async::prelude::*;
+use mysql_async::prelude::FromValue;
+use mysql_async::prelude::Queryable;
+use mysql_async::FromValueError;
 use sqllogictest::{DBOutput, DefaultColumnType};
 
 type Result<T> = std::result::Result<T, mysql_async::Error>;
@@ -36,8 +38,20 @@ impl sqllogictest::AsyncDB for MySql {
             for row in rows {
                 let mut row_vec = vec![];
                 for i in 0..row.len() {
-                    let value: String = FromValue::from_value(row[i].clone());
-                    row_vec.push(value);
+                    let value: std::result::Result<String, FromValueError> =
+                        FromValue::from_value_opt(row[i].clone());
+                    match value {
+                        Ok(value) => {
+                            if value.is_empty() {
+                                row_vec.push("(empty)".to_string());
+                            } else {
+                                row_vec.push(value);
+                            }
+                        }
+                        Err(_) => {
+                            row_vec.push("NULL".to_string());
+                        }
+                    }
                 }
                 output.push(row_vec);
             }
