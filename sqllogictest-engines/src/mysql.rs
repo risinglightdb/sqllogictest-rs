@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use mysql_async::prelude::FromValue;
 use mysql_async::prelude::Queryable;
 use mysql_async::FromValueError;
+use mysql_async::Value;
 use sqllogictest::{DBOutput, DefaultColumnType};
 
 type Result<T> = std::result::Result<T, mysql_async::Error>;
@@ -32,40 +33,36 @@ impl sqllogictest::AsyncDB for MySql {
 
     async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>> {
         let mut conn = self.pool.get_conn().await?;
-        if sql.trim_start().to_lowercase().starts_with("select") {
-            let mut output = vec![];
-            let rows: Vec<mysql_async::Row> = conn.query(sql).await?;
-            for row in rows {
-                let mut row_vec = vec![];
-                for i in 0..row.len() {
-                    let value: std::result::Result<String, FromValueError> =
-                        FromValue::from_value_opt(row[i].clone());
-                    match value {
-                        Ok(value) => {
-                            if value.is_empty() {
-                                row_vec.push("(empty)".to_string());
-                            } else {
-                                row_vec.push(value);
-                            }
-                        }
-                        Err(_) => {
-                            row_vec.push("NULL".to_string());
-                        }
-                    }
+        let mut output = vec![];
+        let rows: Vec<mysql_async::Row> = conn.query(sql).await?;
+        for row in rows {
+            let mut row_vec = vec![];
+            for i in 0..row.len() {
+                // Since `query*` API in `mysql_async` is implemented using the MySQL text protocol,
+                // we can assume that the return value will be of type `Value::Bytes` or `Value::NULL`.
+                let value = row[i].clone();
+                let value_str = match value {
+                    Value::Bytes(bytes) => match String::from_utf8(bytes) {
+                        Ok(x) => x,
+                        Err(_) => "NULL".to_string(),
+                    },
+                    _ => "NULL".to_string(),
+                };
+                if value_str.is_empty() {
+                    row_vec.push("(empty)".to_string());
+                } else {
+                    row_vec.push(value_str);
                 }
-                output.push(row_vec);
             }
-            if output.is_empty() {
-                Ok(DBOutput::StatementComplete(0))
-            } else {
-                Ok(DBOutput::Rows {
-                    types: vec![DefaultColumnType::Any; output[0].len()],
-                    rows: output,
-                })
-            }
+            output.push(row_vec);
+        }
+        if output.is_empty() {
+            Ok(DBOutput::StatementComplete(0))
         } else {
-            let rows: Vec<mysql_async::Row> = conn.exec(sql, ()).await?;
-            Ok(DBOutput::StatementComplete(rows.len() as u64))
+            Ok(DBOutput::Rows {
+                types: vec![DefaultColumnType::Any; output[0].len()],
+                rows: output,
+            })
         }
     }
 
