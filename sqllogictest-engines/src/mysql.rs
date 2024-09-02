@@ -2,9 +2,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use mysql_async::prelude::FromValue;
 use mysql_async::prelude::Queryable;
-use mysql_async::FromValueError;
 use mysql_async::Value;
 use sqllogictest::{DBOutput, DefaultColumnType};
 
