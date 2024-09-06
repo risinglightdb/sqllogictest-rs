@@ -44,7 +44,7 @@ You can find more options in `sqllogictest --help` .
 
 > **Note**
 >
-> Currently only postgres is supported in the CLI tool.
+> Currently only postgres and mysql are supported in the CLI tool.
 
 ## `.slt` Test File Format Cookbook
 

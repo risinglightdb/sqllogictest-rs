@@ -42,9 +42,10 @@ impl sqllogictest::AsyncDB for MySql {
                 let value_str = match value {
                     Value::Bytes(bytes) => match String::from_utf8(bytes) {
                         Ok(x) => x,
-                        Err(_) => "NULL".to_string(),
+                        Err(_) => unreachable!(),
                     },
-                    _ => "NULL".to_string(),
+                    Value::NULL => "NULL".to_string(),
+                    _ => unreachable!(),
                 };
                 if value_str.is_empty() {
                     row_vec.push("(empty)".to_string());
