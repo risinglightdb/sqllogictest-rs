@@ -56,7 +56,7 @@ impl sqllogictest::AsyncDB for MySql {
             output.push(row_vec);
         }
         if output.is_empty() {
-            Ok(DBOutput::StatementComplete(0))
+            Ok(DBOutput::StatementComplete(conn.affected_rows()))
         } else {
             Ok(DBOutput::Rows {
                 types: vec![DefaultColumnType::Any; output[0].len()],
