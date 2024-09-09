@@ -88,6 +88,9 @@ pub enum QueryExpect<T: ColumnType> {
         label: Option<String>,
         results: Vec<String>,
     },
+    /// Query output can be returned as a multiline output to accommodate
+    /// matching tabular output directly.
+    MultiLine { data: Vec<String> },
     /// Query should fail with the given error message.
     Error(ExpectedError),
 }
@@ -245,6 +248,9 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                             write!(f, " {label}")?;
                         }
                     }
+                    QueryExpect::MultiLine { .. } => {
+                        write!(f, "multiline")?;
+                    }
                     QueryExpect::Error(err) => err.fmt_inline(f)?,
                 }
                 writeln!(f)?;
@@ -259,6 +265,12 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                         }
                         // query always ends with a blank line
                         writeln!(f)?
+                    }
+                    QueryExpect::MultiLine { data } => {
+                        writeln!(f, "{}", RESULTS_DELIMITER)?;
+                        for line in data {
+                            writeln!(f, "{}", line)?;
+                        }
                     }
                     QueryExpect::Error(err) => err.fmt_multiline(f)?,
                 }
@@ -737,6 +749,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                             .map_err(|e| e.at(loc.clone()))?;
                         QueryExpect::Error(error)
                     }
+                    ["multiline"] => QueryExpect::MultiLine { data: Vec::new() },
                     [type_str, res @ ..] => {
                         let types = type_str
                             .chars()
@@ -774,6 +787,14 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                                     break;
                                 }
                                 results.push(line.to_string());
+                            }
+                        }
+                        QueryExpect::MultiLine { data } => {
+                            for (_, line) in &mut lines {
+                                if line.is_empty() {
+                                    break;
+                                }
+                                data.push(line.to_string())
                             }
                         }
                         // If no inline error message is specified, it might be a multiline error.
@@ -986,6 +1007,11 @@ mod tests {
     #[test]
     fn test_rowsort() {
         parse_roundtrip::<DefaultColumnType>("../tests/slt/rowsort.slt")
+    }
+
+    #[test]
+    fn test_multiline_query() {
+        parse_roundtrip::<DefaultColumnType>("../tests/slt/multiline_query.slt")
     }
 
     #[test]
