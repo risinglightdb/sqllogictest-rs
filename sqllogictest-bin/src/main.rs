@@ -170,6 +170,7 @@ pub async fn main() -> Result<()> {
     let addrs = host.into_iter().zip_eq(port).collect();
 
     let engine = match engine {
+        EngineType::Mysql => EngineConfig::MySql,
         EngineType::Postgres => EngineConfig::Postgres,
         EngineType::PostgresExtended => EngineConfig::PostgresExtended,
         EngineType::External => {
