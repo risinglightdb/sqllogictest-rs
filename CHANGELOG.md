@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.22.0] - 2024-09-09
+
+* engines/bin: support MySQL engine
+
 ## [0.21.0] - 2024-06-30
 
 **Breaking changes**:
