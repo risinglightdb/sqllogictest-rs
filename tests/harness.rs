@@ -1,4 +1,4 @@
-use sqllogictest::{DBOutput, DefaultColumnType};
+use sqllogictest::{Column, DBOutput, DefaultColumnType};
 
 sqllogictest::harness!(FakeDB::new, "slt/**/*.slt");
 
@@ -30,7 +30,7 @@ impl sqllogictest::DB for FakeDB {
     fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, FakeDBError> {
         if sql == "select * from example_basic" {
             return Ok(DBOutput::Rows {
-                types: vec![DefaultColumnType::Text],
+                cols: vec![Column::anon(DefaultColumnType::Text)],
                 rows: vec![
                     vec!["Alice".to_string()],
                     vec!["Bob".to_string()],
@@ -42,10 +42,10 @@ impl sqllogictest::DB for FakeDB {
             // Even if the order is not the same as `slt` file, sqllogictest will sort them before
             // comparing.
             return Ok(DBOutput::Rows {
-                types: vec![
-                    DefaultColumnType::Integer,
-                    DefaultColumnType::Integer,
-                    DefaultColumnType::Integer,
+                cols: vec![
+                    Column::anon(DefaultColumnType::Integer),
+                    Column::anon(DefaultColumnType::Integer),
+                    Column::anon(DefaultColumnType::Integer),
                 ],
                 rows: vec![
                     vec!["1".to_string(), "10".to_string(), "2333".to_string()],
@@ -57,7 +57,7 @@ impl sqllogictest::DB for FakeDB {
         if sql == "select counter()" {
             self.counter += 1;
             return Ok(DBOutput::Rows {
-                types: vec![DefaultColumnType::Integer],
+                cols: vec![Column::anon(DefaultColumnType::Integer)],
                 rows: vec![vec![self.counter.to_string()]],
             });
         }

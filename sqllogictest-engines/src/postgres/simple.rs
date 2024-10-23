@@ -2,7 +2,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use sqllogictest::{DBOutput, DefaultColumnType};
+use sqllogictest::{Column, DBOutput, DefaultColumnType};
 
 use super::{Postgres, Result, Simple};
 
@@ -52,7 +52,7 @@ impl sqllogictest::AsyncDB for Postgres<Simple> {
             Ok(DBOutput::StatementComplete(cnt))
         } else {
             Ok(DBOutput::Rows {
-                types: vec![DefaultColumnType::Any; output[0].len()],
+                cols: vec![Column::anon(DefaultColumnType::Any); output[0].len()],
                 rows: output,
             })
         }

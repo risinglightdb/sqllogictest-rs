@@ -1,5 +1,5 @@
 use rusty_fork::rusty_fork_test;
-use sqllogictest::{DBOutput, DefaultColumnType};
+use sqllogictest::{Column, DBOutput, DefaultColumnType};
 
 pub struct FakeDB;
 
@@ -45,7 +45,7 @@ impl sqllogictest::DB for FakeDB {
         };
 
         Ok(DBOutput::Rows {
-            types: vec![DefaultColumnType::Text],
+            cols: vec![Column::anon(DefaultColumnType::Text)],
             rows: vec![vec![result]],
         })
     }

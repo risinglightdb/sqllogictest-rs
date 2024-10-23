@@ -20,6 +20,7 @@ pub enum DefaultColumnType {
     Text,
     Integer,
     FloatingPoint,
+    Boolean,
     Any,
 }
 
@@ -29,6 +30,7 @@ impl ColumnType for DefaultColumnType {
             'T' => Some(Self::Text),
             'I' => Some(Self::Integer),
             'R' => Some(Self::FloatingPoint),
+            'B' => Some(Self::Boolean),
             _ => Some(Self::Any),
         }
     }
@@ -39,6 +41,7 @@ impl ColumnType for DefaultColumnType {
             Self::Integer => 'I',
             Self::FloatingPoint => 'R',
             Self::Any => '?',
+            Self::Boolean => 'B',
         }
     }
 }

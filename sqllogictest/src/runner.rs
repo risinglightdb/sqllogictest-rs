@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::{Command, ExitStatus, Output};
 use std::sync::Arc;
 use std::time::Duration;
-use std::vec;
+use std::{fmt, vec};
 
 use async_trait::async_trait;
 use futures::executor::block_on;
@@ -32,7 +32,7 @@ pub enum RecordOutput<T: ColumnType> {
     Nothing,
     /// The output of a `query`.
     Query {
-        types: Vec<T>,
+        cols: Vec<Column<T>>,
         rows: Vec<Vec<String>>,
         error: Option<AnyError>,
     },
@@ -46,10 +46,47 @@ pub enum RecordOutput<T: ColumnType> {
     },
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Column<T: ColumnType> {
+    pub name: String,
+    pub r#type: T,
+}
+
+impl<T: ColumnType + Display> Display for Column<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.name, self.r#type.to_char())
+    }
+}
+
+impl<T: ColumnType> Column<T> {
+    pub fn new(name: impl Into<String>, r#type: T) -> Self {
+        Self {
+            name: name.into(),
+            r#type,
+        }
+    }
+
+    pub fn anon(t: T) -> Self {
+        Self {
+            name: "?".into(),
+            r#type: t,
+        }
+    }
+    // Create a new Column from a char (delegating to T)
+    pub fn from_char(name: String, value: char) -> Option<Self> {
+        T::from_char(value).map(|r#type| Column { name, r#type })
+    }
+
+    // Convert the type to a char (delegating to T)
+    pub fn to_char(&self) -> char {
+        self.r#type.to_char()
+    }
+}
+
 #[non_exhaustive]
 pub enum DBOutput<T: ColumnType> {
     Rows {
-        types: Vec<T>,
+        cols: Vec<Column<T>>,
         rows: Vec<Vec<String>>,
     },
     /// A statement in the query has completed.
@@ -481,7 +518,7 @@ pub type ColumnTypeValidator<T> = fn(actual: &Vec<T>, expected: &Vec<T>) -> bool
 
 /// The default validator always returns success for any inputs of expected and actual sets of
 /// columns.
-pub fn default_column_validator<T: ColumnType>(_: &Vec<T>, _: &Vec<T>) -> bool {
+pub fn default_column_validator<T: ColumnType>(_: &Vec<Column<T>>, _: &Vec<Column<T>>) -> bool {
     true
 }
 
@@ -489,7 +526,10 @@ pub fn default_column_validator<T: ColumnType>(_: &Vec<T>, _: &Vec<T>) -> bool {
 /// - the number of columns is as expected
 /// - each column has the same type as expected
 #[allow(clippy::ptr_arg)]
-pub fn strict_column_validator<T: ColumnType>(actual: &Vec<T>, expected: &Vec<T>) -> bool {
+pub fn strict_column_validator<T: ColumnType>(
+    actual: &Vec<Column<T>>,
+    expected: &Vec<Column<T>>,
+) -> bool {
     actual.len() == expected.len()
         && !actual
             .iter()
@@ -502,7 +542,7 @@ pub struct Runner<D: AsyncDB, M: MakeConnection> {
     conn: Connections<D, M>,
     // validator is used for validate if the result of query equals to expected.
     validator: Validator,
-    column_type_validator: ColumnTypeValidator<D::ColumnType>,
+    column_type_validator: ColumnTypeValidator<Column<D::ColumnType>>,
     substitution: Option<Substitution>,
     sort_mode: Option<SortMode>,
     /// 0 means never hashing
@@ -536,7 +576,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         self.validator = validator;
     }
 
-    pub fn with_column_validator(&mut self, validator: ColumnTypeValidator<D::ColumnType>) {
+    pub fn with_column_validator(&mut self, validator: ColumnTypeValidator<Column<D::ColumnType>>) {
         self.column_type_validator = validator;
     }
 
@@ -602,8 +642,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 let ret = conn.run(&sql).await;
                 match ret {
                     Ok(out) => match out {
-                        DBOutput::Rows { types, rows } => RecordOutput::Query {
-                            types,
+                        DBOutput::Rows { cols: types, rows } => RecordOutput::Query {
+                            cols: types,
                             rows,
                             error: None,
                         },
@@ -728,7 +768,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     Err(error) => {
                         return RecordOutput::Query {
                             error: Some(error),
-                            types: vec![],
+                            cols: vec![],
                             rows: vec![],
                         }
                     }
@@ -739,7 +779,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     Err(e) => {
                         return RecordOutput::Query {
                             error: Some(Arc::new(e)),
-                            types: vec![],
+                            cols: vec![],
                             rows: vec![],
                         }
                     }
@@ -750,7 +790,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
                 let (types, mut rows) = match conn.run(&sql).await {
                     Ok(out) => match out {
-                        DBOutput::Rows { types, rows } => (types, rows),
+                        DBOutput::Rows { cols: types, rows } => (types, rows),
                         DBOutput::StatementComplete(count) => {
                             return RecordOutput::Statement { count, error: None };
                         }
@@ -758,7 +798,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     Err(e) => {
                         return RecordOutput::Query {
                             error: Some(Arc::new(e)),
-                            types: vec![],
+                            cols: vec![],
                             rows: vec![],
                         };
                     }
@@ -795,7 +835,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
                 RecordOutput::Query {
                     error: None,
-                    types,
+                    cols: types,
                     rows,
                 }
             }
@@ -938,7 +978,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     sql,
                     expected,
                 },
-                RecordOutput::Query { types, rows, error },
+                RecordOutput::Query {
+                    cols: types,
+                    rows,
+                    error,
+                },
             ) => {
                 match (error, expected) {
                     (None, QueryExpect::Error(_)) => {
@@ -970,7 +1014,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     (
                         None,
                         QueryExpect::Results {
-                            types: expected_types,
+                            cols: expected_types,
                             results: expected_results,
                             ..
                         },
@@ -1226,7 +1270,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         filename: impl AsRef<Path>,
         col_separator: &str,
         validator: Validator,
-        column_type_validator: ColumnTypeValidator<D::ColumnType>,
+        column_type_validator: ColumnTypeValidator<Column<D::ColumnType>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use std::io::{Read, Seek, SeekFrom, Write};
         use std::path::PathBuf;
@@ -1367,7 +1411,7 @@ pub fn update_record_with_output<T: ColumnType>(
     record_output: &RecordOutput<T>,
     col_separator: &str,
     validator: Validator,
-    column_type_validator: ColumnTypeValidator<T>,
+    column_type_validator: ColumnTypeValidator<Column<T>>,
 ) -> Option<Record<T>> {
     match (record.clone(), record_output) {
         (_, RecordOutput::Nothing) => None,
@@ -1469,7 +1513,11 @@ pub fn update_record_with_output<T: ColumnType>(
                 sql,
                 expected,
             },
-            RecordOutput::Query { types, rows, error },
+            RecordOutput::Query {
+                cols: types,
+                rows,
+                error,
+            },
         ) => match (error, expected) {
             // Error match
             (Some(e), QueryExpect::Error(expected_error))
@@ -1506,7 +1554,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 let types = match &expected {
                     // If validation is successful, we respect the original file's expected types.
                     QueryExpect::Results {
-                        types: expected_types,
+                        cols: expected_types,
                         ..
                     } if column_type_validator(types, expected_types) => expected_types.clone(),
                     _ => types.clone(),
@@ -1521,13 +1569,13 @@ pub fn update_record_with_output<T: ColumnType>(
                             sort_mode, label, ..
                         } => QueryExpect::Results {
                             results,
-                            types,
+                            cols: types,
                             sort_mode,
                             label,
                         },
                         QueryExpect::Error(_) => QueryExpect::Results {
                             results,
-                            types,
+                            cols: types,
                             sort_mode: None,
                             label: None,
                         },
@@ -1585,7 +1633,10 @@ mod tests {
             // Model a run that produced a 3,4 as output
             record_output: query_output(
                 &[&["3", "4"]],
-                vec![DefaultColumnType::Integer, DefaultColumnType::Any],
+                vec![
+                    Column::anon(DefaultColumnType::Integer),
+                    Column::anon(DefaultColumnType::Any),
+                ],
             ),
 
             expected: Some(record),
@@ -1605,7 +1656,10 @@ mod tests {
             // Model a run that produced a 3,4 as output
             record_output: query_output(
                 &[&["3", "4"]],
-                vec![DefaultColumnType::Integer, DefaultColumnType::Any],
+                vec![
+                    Column::anon(DefaultColumnType::Integer),
+                    Column::anon(DefaultColumnType::Any),
+                ],
             ),
 
             expected: Some(
@@ -1629,7 +1683,10 @@ mod tests {
             // Model a run that produced a 3,4 as output
             record_output: query_output(
                 &[&["3", "4"]],
-                vec![DefaultColumnType::Integer, DefaultColumnType::Any],
+                vec![
+                    Column::anon(DefaultColumnType::Integer),
+                    Column::anon(DefaultColumnType::Any),
+                ],
             ),
 
             expected: Some(
@@ -1712,7 +1769,10 @@ Caused by:
             // Model a run that produced a 3,4 as output
             record_output: query_output(
                 &[&["3", "4"]],
-                vec![DefaultColumnType::Integer, DefaultColumnType::Any],
+                vec![
+                    Column::anon(DefaultColumnType::Integer),
+                    Column::anon(DefaultColumnType::Any),
+                ],
             ),
 
             expected: Some(
@@ -2013,7 +2073,7 @@ Caused by:
     /// Returns a RecordOutput that models the successful execution of a query
     fn query_output(
         rows: &[&[&str]],
-        types: Vec<DefaultColumnType>,
+        cols: Vec<Column<DefaultColumnType>>,
     ) -> RecordOutput<DefaultColumnType> {
         let rows = rows
             .iter()
@@ -2021,7 +2081,7 @@ Caused by:
             .collect::<Vec<_>>();
 
         RecordOutput::Query {
-            types,
+            cols,
             rows,
             error: None,
         }
@@ -2030,7 +2090,7 @@ Caused by:
     /// Returns a RecordOutput that models the error of a query
     fn query_output_error(error_message: &str) -> RecordOutput<DefaultColumnType> {
         RecordOutput::Query {
-            types: vec![],
+            cols: vec![],
             rows: vec![],
             error: Some(Arc::new(TestError(error_message.to_string()))),
         }
