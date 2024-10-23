@@ -73,6 +73,18 @@ SELECT * FROM foo;
 4 5
 ```
 
+### Run a query that should succeed with column names
+
+```text
+# 'II' means two integer output columns
+# rowsort means to sort the output before comparing
+query c1:I,c2:I rowsort
+SELECT * FROM foo;
+----
+3 4
+4 5
+```
+
 ### Extension: Run a query/statement that should fail with the expacted error message
 
 The syntax:

@@ -4,7 +4,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 use mysql_async::Value;
-use sqllogictest::{DBOutput, DefaultColumnType};
+use sqllogictest::{Column, DBOutput, DefaultColumnType};
 
 type Result<T> = std::result::Result<T, mysql_async::Error>;
 
@@ -59,7 +59,7 @@ impl sqllogictest::AsyncDB for MySql {
             Ok(DBOutput::StatementComplete(conn.affected_rows()))
         } else {
             Ok(DBOutput::Rows {
-                types: vec![DefaultColumnType::Any; output[0].len()],
+                cols: vec![Column::anon(DefaultColumnType::Any); output[0].len()],
                 rows: output,
             })
         }

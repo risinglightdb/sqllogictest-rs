@@ -1,4 +1,4 @@
-use sqllogictest::{strict_column_validator, ColumnType, DBOutput};
+use sqllogictest::{strict_column_validator, Column, ColumnType, DBOutput};
 
 pub struct FakeDB;
 
@@ -46,7 +46,10 @@ impl sqllogictest::DB for FakeDB {
     fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, FakeDBError> {
         if sql == "select * from example_typed" {
             Ok(DBOutput::Rows {
-                types: vec![CustomColumnType::Integer, CustomColumnType::Boolean],
+                cols: vec![
+                    Column::anon(CustomColumnType::Integer),
+                    Column::anon(CustomColumnType::Boolean)
+                ],
                 rows: vec![
                     vec!["1".to_string(), "true".to_string()],
                     vec!["2".to_string(), "false".to_string()],
@@ -55,7 +58,7 @@ impl sqllogictest::DB for FakeDB {
             })
         } else if sql == "select * from no_results" {
             Ok(DBOutput::Rows {
-                types: vec![CustomColumnType::Integer, CustomColumnType::Boolean],
+                cols: vec![Column::anon(CustomColumnType::Integer), Column::anon(CustomColumnType::Boolean)],
                 rows: vec![],
             })
         } else {
