@@ -264,9 +264,17 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                         label,
                         ..
                     } => {
-                        write!(f, "{}", cols.iter()
-                            .map(|Column { name, r#type }| format!("{}:{}", name, r#type.to_char()))
-                            .join(","))?;
+                        write!(
+                            f,
+                            "{}",
+                            cols.iter()
+                                .map(|Column { name, r#type }| format!(
+                                    "{}:{}",
+                                    name,
+                                    r#type.to_char()
+                                ))
+                                .join(",")
+                        )?;
                         if let Some(sort_mode) = sort_mode {
                             write!(f, " {}", sort_mode.as_str())?;
                         }
@@ -956,7 +964,10 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
     Ok(records)
 }
 
-fn parse_cols<T: ColumnType>(loc: &Location, type_str: &&str) -> Result<Vec<Column<T>>, ParseError> {
+fn parse_cols<T: ColumnType>(
+    loc: &Location,
+    type_str: &&str,
+) -> Result<Vec<Column<T>>, ParseError> {
     // Check if contains ':' or ',' to determine format
     if type_str.contains(':') {
         // Parse "c1:I,name:I" format
@@ -967,13 +978,15 @@ fn parse_cols<T: ColumnType>(loc: &Location, type_str: &&str) -> Result<Vec<Colu
                     .split_once(':')
                     .ok_or_else(|| ParseErrorKind::InvalidSortMode(part.into()).at(loc.clone()))?;
 
-                let type_char = type_char.trim().chars().next()
-                    .ok_or_else(|| ParseErrorKind::InvalidSortMode(part.into()).at(loc.clone()))?;
+                let type_char =
+                    type_char.trim().chars().next().ok_or_else(|| {
+                        ParseErrorKind::InvalidSortMode(part.into()).at(loc.clone())
+                    })?;
 
                 T::from_char(type_char)
                     .map(|t| Column {
                         name: name.trim().to_string(),
-                        r#type: t
+                        r#type: t,
                     })
                     .ok_or_else(|| ParseErrorKind::InvalidType(type_char).at(loc.clone()))
             })
@@ -986,7 +999,7 @@ fn parse_cols<T: ColumnType>(loc: &Location, type_str: &&str) -> Result<Vec<Colu
                 T::from_char(ch)
                     .map(|t| Column {
                         name: "?".into(),
-                        r#type: t
+                        r#type: t,
                     })
                     .ok_or_else(|| ParseErrorKind::InvalidType(ch).at(loc.clone()))
             })

@@ -48,7 +48,7 @@ impl sqllogictest::DB for FakeDB {
             Ok(DBOutput::Rows {
                 cols: vec![
                     Column::anon(CustomColumnType::Integer),
-                    Column::anon(CustomColumnType::Boolean)
+                    Column::anon(CustomColumnType::Boolean),
                 ],
                 rows: vec![
                     vec!["1".to_string(), "true".to_string()],
@@ -58,7 +58,10 @@ impl sqllogictest::DB for FakeDB {
             })
         } else if sql == "select * from no_results" {
             Ok(DBOutput::Rows {
-                cols: vec![Column::anon(CustomColumnType::Integer), Column::anon(CustomColumnType::Boolean)],
+                cols: vec![
+                    Column::anon(CustomColumnType::Integer),
+                    Column::anon(CustomColumnType::Boolean),
+                ],
                 rows: vec![],
             })
         } else {
