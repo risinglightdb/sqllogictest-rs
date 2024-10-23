@@ -993,11 +993,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     sql,
                     expected,
                 },
-                RecordOutput::Query {
-                    cols,
-                    rows,
-                    error,
-                },
+                RecordOutput::Query { cols, rows, error },
             ) => {
                 match (error, expected) {
                     (None, QueryExpect::Error(_)) => {
