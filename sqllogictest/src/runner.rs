@@ -46,10 +46,17 @@ pub enum RecordOutput<T: ColumnType> {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Column<T: ColumnType> {
     pub name: String,
     pub r#type: T,
+}
+
+impl<T: ColumnType> PartialEq for Column<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.r#type == other.r#type
+            && (other.name == "?" || self.name.to_lowercase() == other.name.to_lowercase())
+    }
 }
 
 impl<T: ColumnType + Display> Display for Column<T> {
@@ -530,11 +537,19 @@ pub fn strict_column_validator<T: ColumnType>(
     actual: &Vec<Column<T>>,
     expected: &Vec<Column<T>>,
 ) -> bool {
-    actual.len() == expected.len()
-        && !actual
-            .iter()
-            .zip(expected.iter())
-            .any(|(actual_column, expected_column)| actual_column != expected_column)
+    if actual.len() != expected.len() {
+        return false;
+    }
+    !actual
+        .iter()
+        .zip(expected.iter())
+        .any(|(actual_col, expected_col)| {
+            let type_mismatch = actual_col.r#type != expected_col.r#type;
+            let name_mismatch = expected_col.name != "?"
+                && actual_col.name.to_lowercase() != expected_col.name.to_lowercase();
+
+            type_mismatch || name_mismatch
+        })
 }
 
 /// Sqllogictest runner.
@@ -979,7 +994,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     expected,
                 },
                 RecordOutput::Query {
-                    cols: types,
+                    cols,
                     rows,
                     error,
                 },
@@ -1014,16 +1029,26 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     (
                         None,
                         QueryExpect::Results {
-                            cols: expected_types,
+                            cols: expected_cols,
                             results: expected_results,
                             ..
                         },
                     ) => {
-                        if !(self.column_type_validator)(types, &expected_types) {
+                        if !(self.column_type_validator)(cols, &expected_cols) {
                             return Err(TestErrorKind::QueryResultColumnsMismatch {
                                 sql,
-                                expected: expected_types.iter().map(|c| c.to_char()).join(""),
-                                actual: types.iter().map(|c| c.to_char()).join(""),
+                                expected: expected_cols
+                                    .iter()
+                                    .map(|Column { name, r#type }| {
+                                        format!("{}:{}", name, r#type.to_char())
+                                    })
+                                    .join(","),
+                                actual: cols
+                                    .iter()
+                                    .map(|Column { name, r#type }| {
+                                        format!("{}:{}", name, r#type.to_char())
+                                    })
+                                    .join(","),
                             }
                             .at(loc));
                         }

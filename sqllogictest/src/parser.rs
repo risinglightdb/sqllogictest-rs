@@ -585,6 +585,8 @@ pub enum ParseErrorKind {
     UnexpectedEOF,
     #[error("invalid sort mode: {0:?}")]
     InvalidSortMode(String),
+    #[error("invalid column: {0:?}")]
+    InvalidColumn(String),
     #[error("invalid line: {0:?}")]
     InvalidLine(String),
     #[error("invalid type character: {0:?} in type string")]
@@ -747,8 +749,8 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                             .map_err(|e| e.at(loc.clone()))?;
                         QueryExpect::Error(error)
                     }
-                    [type_str, res @ ..] => {
-                        let cols = parse_cols(&loc, type_str)?;
+                    [col_str, res @ ..] => {
+                        let cols = parse_cols(col_str, &loc)?;
                         let sort_mode = res
                             .first()
                             .map(|&s| SortMode::try_from_str(s))
@@ -840,43 +842,36 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
     Ok(records)
 }
 
-fn parse_cols<T: ColumnType>(
-    loc: &Location,
-    type_str: &&str,
-) -> Result<Vec<Column<T>>, ParseError> {
-    // Check if contains ':' or ',' to determine format
-    if type_str.contains(':') {
-        // Parse "c1:I,name:I" format
-        type_str
+fn parse_cols<T: ColumnType>(col_str: &&str, loc: &Location) -> Result<Vec<Column<T>>, ParseError> {
+    fn parse_type_char<T: ColumnType>(
+        part: &str,
+        name: String,
+        loc: &Location,
+    ) -> Result<Column<T>, ParseError> {
+        let type_char = part
+            .trim()
+            .chars()
+            .next()
+            .ok_or_else(|| ParseErrorKind::InvalidSortMode(part.into()).at(loc.clone()))?;
+
+        T::from_char(type_char)
+            .map(|t| Column { name, r#type: t })
+            .ok_or_else(|| ParseErrorKind::InvalidType(type_char).at(loc.clone()))
+    }
+    if col_str.contains(':') {
+        col_str
             .split(',')
-            .map(|part| {
-                let (name, type_char) = part
-                    .split_once(':')
-                    .ok_or_else(|| ParseErrorKind::InvalidSortMode(part.into()).at(loc.clone()))?;
-
-                let type_char =
-                    type_char.trim().chars().next().ok_or_else(|| {
-                        ParseErrorKind::InvalidSortMode(part.into()).at(loc.clone())
-                    })?;
-
-                T::from_char(type_char)
-                    .map(|t| Column {
-                        name: name.trim().to_string(),
-                        r#type: t,
-                    })
-                    .ok_or_else(|| ParseErrorKind::InvalidType(type_char).at(loc.clone()))
+            .map(|part| match part.split_once(':') {
+                Some((name, type_str)) => parse_type_char(type_str, name.trim().to_string(), loc),
+                None => parse_type_char(part, "?".into(), loc),
             })
             .try_collect()
     } else {
-        // Original "III" format
-        type_str
+        col_str
             .chars()
             .map(|ch| {
                 T::from_char(ch)
-                    .map(|t| Column {
-                        name: "?".into(),
-                        r#type: t,
-                    })
+                    .map(|t| Column::anon(t))
                     .ok_or_else(|| ParseErrorKind::InvalidType(ch).at(loc.clone()))
             })
             .try_collect()
@@ -991,6 +986,20 @@ mod tests {
 
     use super::*;
     use crate::DefaultColumnType;
+
+    #[test]
+    fn test_mixed_col_name_and_types() {
+        let script = r#"
+query NAME:I,B
+select * from t
+----
+1 true
+
+"#;
+
+        let result = parse::<CustomColumnType>(script);
+        assert!(result.is_ok())
+    }
 
     #[test]
     fn test_trailing_comment() {
