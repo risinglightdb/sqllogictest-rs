@@ -41,7 +41,7 @@ impl ColumnType for DefaultColumnType {
             Self::Integer => 'I',
             Self::FloatingPoint => 'R',
             Self::Any => '?',
-            Self::Boolean => 'B'
+            Self::Boolean => 'B',
         }
     }
 }

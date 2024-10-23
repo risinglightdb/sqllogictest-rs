@@ -57,7 +57,7 @@ impl sqllogictest::DB for FakeDB {
         if sql == "select counter()" {
             self.counter += 1;
             return Ok(DBOutput::Rows {
-                cols: vec![Column::anon(DefaultColumnType::Integer),],
+                cols: vec![Column::anon(DefaultColumnType::Integer)],
                 rows: vec![vec![self.counter.to_string()]],
             });
         }

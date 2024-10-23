@@ -62,14 +62,14 @@ impl<T: ColumnType> Column<T> {
     pub fn new(name: impl Into<String>, r#type: T) -> Self {
         Self {
             name: name.into(),
-            r#type
+            r#type,
         }
     }
 
     pub fn anon(t: T) -> Self {
         Self {
             name: "?".into(),
-            r#type: t
+            r#type: t,
         }
     }
     // Create a new Column from a char (delegating to T)
@@ -526,7 +526,10 @@ pub fn default_column_validator<T: ColumnType>(_: &Vec<Column<T>>, _: &Vec<Colum
 /// - the number of columns is as expected
 /// - each column has the same type as expected
 #[allow(clippy::ptr_arg)]
-pub fn strict_column_validator<T: ColumnType>(actual: &Vec<Column<T>>, expected: &Vec<Column<T>>) -> bool {
+pub fn strict_column_validator<T: ColumnType>(
+    actual: &Vec<Column<T>>,
+    expected: &Vec<Column<T>>,
+) -> bool {
     actual.len() == expected.len()
         && !actual
             .iter()
@@ -975,7 +978,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     sql,
                     expected,
                 },
-                RecordOutput::Query { cols: types, rows, error },
+                RecordOutput::Query {
+                    cols: types,
+                    rows,
+                    error,
+                },
             ) => {
                 match (error, expected) {
                     (None, QueryExpect::Error(_)) => {
@@ -1506,7 +1513,11 @@ pub fn update_record_with_output<T: ColumnType>(
                 sql,
                 expected,
             },
-            RecordOutput::Query { cols: types, rows, error },
+            RecordOutput::Query {
+                cols: types,
+                rows,
+                error,
+            },
         ) => match (error, expected) {
             // Error match
             (Some(e), QueryExpect::Error(expected_error))
@@ -1622,7 +1633,10 @@ mod tests {
             // Model a run that produced a 3,4 as output
             record_output: query_output(
                 &[&["3", "4"]],
-                vec![Column::anon(DefaultColumnType::Integer), Column::anon(DefaultColumnType::Any)],
+                vec![
+                    Column::anon(DefaultColumnType::Integer),
+                    Column::anon(DefaultColumnType::Any),
+                ],
             ),
 
             expected: Some(record),
@@ -1642,7 +1656,10 @@ mod tests {
             // Model a run that produced a 3,4 as output
             record_output: query_output(
                 &[&["3", "4"]],
-                vec![Column::anon(DefaultColumnType::Integer), Column::anon(DefaultColumnType::Any)],
+                vec![
+                    Column::anon(DefaultColumnType::Integer),
+                    Column::anon(DefaultColumnType::Any),
+                ],
             ),
 
             expected: Some(
@@ -1666,7 +1683,10 @@ mod tests {
             // Model a run that produced a 3,4 as output
             record_output: query_output(
                 &[&["3", "4"]],
-                vec![Column::anon(DefaultColumnType::Integer), Column::anon(DefaultColumnType::Any)],
+                vec![
+                    Column::anon(DefaultColumnType::Integer),
+                    Column::anon(DefaultColumnType::Any),
+                ],
             ),
 
             expected: Some(
@@ -1749,7 +1769,10 @@ Caused by:
             // Model a run that produced a 3,4 as output
             record_output: query_output(
                 &[&["3", "4"]],
-                vec![Column::anon(DefaultColumnType::Integer), Column::anon(DefaultColumnType::Any)],
+                vec![
+                    Column::anon(DefaultColumnType::Integer),
+                    Column::anon(DefaultColumnType::Any),
+                ],
             ),
 
             expected: Some(
