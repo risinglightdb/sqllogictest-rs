@@ -8,7 +8,7 @@ use futures::{pin_mut, StreamExt};
 use pg_interval::Interval;
 use postgres_types::{ToSql, Type};
 use rust_decimal::Decimal;
-use sqllogictest::{DBOutput, DefaultColumnType};
+use sqllogictest::{Column, DBOutput, DefaultColumnType};
 
 use super::{Extended, Postgres, Result};
 
@@ -299,13 +299,13 @@ impl sqllogictest::AsyncDB for Postgres<Extended> {
             match rows.rows_affected() {
                 Some(rows) => Ok(DBOutput::StatementComplete(rows)),
                 None => Ok(DBOutput::Rows {
-                    types: vec![DefaultColumnType::Any; stmt.columns().len()],
+                    cols: vec![Column::anon(DefaultColumnType::Any); stmt.columns().len()],
                     rows: vec![],
                 }),
             }
         } else {
             Ok(DBOutput::Rows {
-                types: vec![DefaultColumnType::Any; output[0].len()],
+                cols: vec![Column::anon(DefaultColumnType::Any); output[0].len()],
                 rows: output,
             })
         }

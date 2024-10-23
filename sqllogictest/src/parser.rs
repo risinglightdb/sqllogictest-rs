@@ -9,7 +9,7 @@ use std::time::Duration;
 use itertools::Itertools;
 use regex::Regex;
 
-use crate::ColumnType;
+use crate::{Column, ColumnType};
 
 const RESULTS_DELIMITER: &str = "----";
 
@@ -92,7 +92,7 @@ pub enum StatementExpect {
 pub enum QueryExpect<T: ColumnType> {
     /// Query should succeed and return the given results.
     Results {
-        types: Vec<T>,
+        cols: Vec<Column<T>>,
         sort_mode: Option<SortMode>,
         result_mode: Option<ResultMode>,
         label: Option<String>,
@@ -106,7 +106,7 @@ impl<T: ColumnType> QueryExpect<T> {
     /// Creates a new [`QueryExpect`] with empty results.
     fn empty_results() -> Self {
         Self::Results {
-            types: Vec::new(),
+            cols: Vec::new(),
             sort_mode: None,
             result_mode: None,
             label: None,
@@ -259,12 +259,14 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 write!(f, "query ")?;
                 match expected {
                     QueryExpect::Results {
-                        types,
+                        cols,
                         sort_mode,
                         label,
                         ..
                     } => {
-                        write!(f, "{}", types.iter().map(|c| c.to_char()).join(""))?;
+                        write!(f, "{}", cols.iter()
+                            .map(|Column { name, r#type }| format!("{}:{}", name, r#type.to_char()))
+                            .join(","))?;
                         if let Some(sort_mode) = sort_mode {
                             write!(f, " {}", sort_mode.as_str())?;
                         }
@@ -837,13 +839,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     }
                     [type_str, res @ ..] => {
                         // query <type-string> [<sort-mode>] [<label>] [retry <attempts> backoff <backoff>]
-                        let types = type_str
-                            .chars()
-                            .map(|ch| {
-                                T::from_char(ch)
-                                    .ok_or_else(|| ParseErrorKind::InvalidType(ch).at(loc.clone()))
-                            })
-                            .try_collect()?;
+                        let cols = parse_cols(&loc, type_str)?;
                         let sort_mode = res.first().and_then(|&s| SortMode::try_from_str(s).ok()); // Could be `retry` or label
 
                         // To support `retry`, we assume the label must *not* be "retry"
@@ -861,7 +857,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                         let res = &res[retry_start..];
                         (
                             QueryExpect::Results {
-                                types,
+                                cols,
                                 sort_mode,
                                 result_mode: None,
                                 label,
@@ -958,6 +954,44 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
         }
     }
     Ok(records)
+}
+
+fn parse_cols<T: ColumnType>(loc: &Location, type_str: &&str) -> Result<Vec<Column<T>>, ParseError> {
+    // Check if contains ':' or ',' to determine format
+    if type_str.contains(':') {
+        // Parse "c1:I,name:I" format
+        type_str
+            .split(',')
+            .map(|part| {
+                let (name, type_char) = part
+                    .split_once(':')
+                    .ok_or_else(|| ParseErrorKind::InvalidSortMode(part.into()).at(loc.clone()))?;
+
+                let type_char = type_char.trim().chars().next()
+                    .ok_or_else(|| ParseErrorKind::InvalidSortMode(part.into()).at(loc.clone()))?;
+
+                T::from_char(type_char)
+                    .map(|t| Column {
+                        name: name.trim().to_string(),
+                        r#type: t
+                    })
+                    .ok_or_else(|| ParseErrorKind::InvalidType(type_char).at(loc.clone()))
+            })
+            .try_collect()
+    } else {
+        // Original "III" format
+        type_str
+            .chars()
+            .map(|ch| {
+                T::from_char(ch)
+                    .map(|t| Column {
+                        name: "?".into(),
+                        r#type: t
+                    })
+                    .ok_or_else(|| ParseErrorKind::InvalidType(ch).at(loc.clone()))
+            })
+            .try_collect()
+    }
 }
 
 /// Parse a sqllogictest file. The included scripts are inserted after the `include` record.
@@ -1206,6 +1240,11 @@ mod tests {
     #[test]
     fn test_custom_type() {
         parse_roundtrip::<CustomColumnType>("../tests/custom_type/custom_type.slt")
+    }
+
+    #[test]
+    fn test_columns() {
+        parse_roundtrip::<CustomColumnType>("../tests/columns/columns.slt")
     }
 
     #[test]

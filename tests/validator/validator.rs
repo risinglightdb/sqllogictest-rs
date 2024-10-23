@@ -1,4 +1,4 @@
-use sqllogictest::{DBOutput, DefaultColumnType};
+use sqllogictest::{Column, DBOutput, DefaultColumnType};
 
 pub struct FakeDB;
 
@@ -19,7 +19,7 @@ impl sqllogictest::DB for FakeDB {
 
     fn run(&mut self, _sql: &str) -> Result<DBOutput<Self::ColumnType>, FakeDBError> {
         Ok(DBOutput::Rows {
-            types: vec![DefaultColumnType::Text],
+            cols: vec![Column::new("c1", DefaultColumnType::Text)],
             rows: vec![vec!["Hello, world!".to_string()]],
         })
     }

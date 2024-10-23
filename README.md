@@ -2,7 +2,7 @@
 
 [![Crate](https://img.shields.io/crates/v/sqllogictest.svg)](https://crates.io/crates/sqllogictest)
 [![Docs](https://docs.rs/sqllogictest/badge.svg)](https://docs.rs/sqllogictest)
-[![CI](https://github.com/risinglightdb/sqllogictest-rs/workflows/CI/badge.svg?branch=main)](https://github.com/risinglightdb/sqllogictest-rs/actions)
+[![CI](https://github.com/featuremesh/sqllogictest-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/featuremesh/sqllogictest-rs/actions)
 
 [Sqllogictest][Sqllogictest] is a testing framework to verify the correctness of an SQL database.
 
@@ -73,6 +73,18 @@ SELECT * FROM foo;
 4 5
 ```
 
+### Run a query that should succeed with column names
+
+```text
+# 'c1:I,c2:I' means two integer output columns with names
+# rowsort means to sort the output before comparing
+query c1:I,c2:I rowsort
+SELECT * FROM foo;
+----
+3 4
+4 5
+```
+
 ### Extension: Ignore volatile parts of output
 
 You can use `<slt:ignore>` to skip the volatile parts of the output. This is helpful for e.g., testing the format
@@ -83,7 +95,7 @@ query T
 EXPLAIN SELECT * FROM foo;
 ----
 Seq Scan on t  (cost=<slt:ignore> rows=<slt:ignore> width=<slt:ignore>)
-   Filter: (x > 1)  
+   Filter: (x > 1)
 ```
 
 ### Extension: Run a query/statement that should fail with the expacted error message
