@@ -2,7 +2,7 @@
 
 [![Crate](https://img.shields.io/crates/v/sqllogictest.svg)](https://crates.io/crates/sqllogictest)
 [![Docs](https://docs.rs/sqllogictest/badge.svg)](https://docs.rs/sqllogictest)
-[![CI](https://github.com/risinglightdb/sqllogictest-rs/workflows/CI/badge.svg?branch=main)](https://github.com/risinglightdb/sqllogictest-rs/actions)
+[![CI](https://github.com/featuremesh/sqllogictest-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/featuremesh/sqllogictest-rs/actions)
 
 [Sqllogictest][Sqllogictest] is a testing framework to verify the correctness of an SQL database.
 
