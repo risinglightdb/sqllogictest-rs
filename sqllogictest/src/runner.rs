@@ -463,33 +463,36 @@ fn format_diff(
 }
 
 fn format_column_diff(expected: &str, actual: &str, colorize: bool) -> String {
-    let (expected, actual) = TextDiff::from_chars(expected, actual)
-        .iter_all_changes()
-        .fold(
-            ("".to_string(), "".to_string()),
-            |(expected, actual), change| match change.tag() {
-                ChangeTag::Equal => (
-                    format!("{}{}", expected, change.value()),
-                    format!("{}{}", actual, change.value()),
-                ),
-                ChangeTag::Delete => (
-                    if colorize {
-                        format!("{}[{}]", expected, change.value().bright_red())
-                    } else {
-                        format!("{}[{}]", expected, change.value())
-                    },
-                    actual,
-                ),
-                ChangeTag::Insert => (
-                    expected,
-                    if colorize {
-                        format!("{}[{}]", actual, change.value().bright_green())
-                    } else {
-                        format!("{}[{}]", actual, change.value())
-                    },
-                ),
-            },
-        );
+    let (expected, actual) = TextDiff::from_slices(
+        &expected.split(",").collect::<Vec<_>>()[..],
+        &actual.split(",").collect::<Vec<_>>()[..],
+    )
+    .iter_all_changes()
+    .fold(
+        ("".to_string(), "".to_string()),
+        |(expected, actual), change| match change.tag() {
+            ChangeTag::Equal => (
+                format!("{}{}", expected, change.value()),
+                format!("{}{}", actual, change.value()),
+            ),
+            ChangeTag::Delete => (
+                if colorize {
+                    format!("{}[{}]", expected, change.value().bright_red())
+                } else {
+                    format!("{}[{}]", expected, change.value())
+                },
+                actual,
+            ),
+            ChangeTag::Insert => (
+                expected,
+                if colorize {
+                    format!("{}[{}]", actual, change.value().bright_green())
+                } else {
+                    format!("{}[{}]", actual, change.value())
+                },
+            ),
+        },
+    );
     format!("[Expected] {expected}\n[Actual  ] {actual}")
 }
 
