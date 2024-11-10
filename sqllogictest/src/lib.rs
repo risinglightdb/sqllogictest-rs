@@ -27,7 +27,10 @@
 //!     type Error = MyError;
 //!     // Or define your own column type
 //!     type ColumnType = sqllogictest::DefaultColumnType;
-//!     fn run(&mut self, sql: &str) -> Result<sqllogictest::DBOutput<Self::ColumnType>, Self::Error> {
+//!     fn run(
+//!         &mut self,
+//!         sql: &str,
+//!     ) -> Result<sqllogictest::DBOutput<Self::ColumnType>, Self::Error> {
 //!         // TODO
 //!         Ok(sqllogictest::DBOutput::StatementComplete(0))
 //!     }

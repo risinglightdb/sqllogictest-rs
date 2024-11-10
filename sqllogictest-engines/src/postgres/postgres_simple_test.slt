@@ -1,0 +1,20 @@
+query I 
+select 1
+----
+1
+
+statement ok
+drop table if exists t
+
+statement ok
+create table t(v1 int not null, v2 int not null, v3 int not null)
+
+statement ok
+insert into t values (1, 2, 3), (4, 5, 6), (7, 8, 9)
+
+query III
+select * from t
+----
+1 2 3
+4 5 6
+7 8 9
