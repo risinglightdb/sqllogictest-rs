@@ -43,7 +43,11 @@ impl sqllogictest::AsyncDB for Postgres<Simple> {
                     cnt = cnt_;
                     break;
                 }
-                _ => unreachable!(),
+                tokio_postgres::SimpleQueryMessage::RowDescription(_) => {
+                    // information about the row (i.e., column names), we can skip them for now
+                    continue;
+                }
+                cmd => unreachable!("unsupported cmd: {cmd:?}, please create an issue in risinglightdb/sqllogictest-rs"),
             }
             output.push(row_vec);
         }
