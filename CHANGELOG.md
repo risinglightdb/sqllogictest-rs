@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.22.1] - 2024-11-11
+
+* engines/bin: fix compatibility with the new tokio-postgres minor version.
+
 ## [0.22.0] - 2024-09-09
 
 * engines/bin: support MySQL engine
