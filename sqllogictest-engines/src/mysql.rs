@@ -37,7 +37,8 @@ impl sqllogictest::AsyncDB for MySql {
             let mut row_vec = vec![];
             for i in 0..row.len() {
                 // Since `query*` API in `mysql_async` is implemented using the MySQL text protocol,
-                // we can assume that the return value will be of type `Value::Bytes` or `Value::NULL`.
+                // we can assume that the return value will be of type `Value::Bytes` or
+                // `Value::NULL`.
                 let value = row[i].clone();
                 let value_str = match value {
                     Value::Bytes(bytes) => match String::from_utf8(bytes) {
