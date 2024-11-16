@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - runner: Previously, `query` returning 0 rows will become `statement ok`. Now it returns `statement count 0`.
   - bin: Now `--override` will not change the type chars of `query <types>`, since in practice
     it becomes `?`s which might cause confusion.
+* runner: `statement count <n>` is incorrectly handled when the result is a `query`.
 
 ## [0.22.1] - 2024-11-11
 
