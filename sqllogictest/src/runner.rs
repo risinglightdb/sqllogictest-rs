@@ -1740,7 +1740,7 @@ Caused by:
             record_output: statement_output(3),
 
             expected: Some(
-                "statement ok\n\
+                "statement count 3\n\
                  select * from foo;",
             ),
         }
@@ -1973,6 +1973,7 @@ Caused by:
     }
 
     impl TestCase<'_> {
+        #[track_caller]
         fn run(self) {
             let Self {
                 input,
