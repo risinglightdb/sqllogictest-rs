@@ -1332,6 +1332,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     if matches!(record, Record::Halt { .. }) {
                         *halt = true;
                         writeln!(outfile, "{record}")?;
+                        tracing::info!(
+                            "halt record found, all following records will be written AS IS"
+                        );
                         continue;
                     }
                     let record_output = self.apply_record(record.clone()).await;
@@ -1408,13 +1411,13 @@ pub fn update_record_with_output<T: ColumnType>(
                 connection,
                 expected: _,
             },
-            RecordOutput::Statement { error: None, .. },
+            RecordOutput::Statement { error: None, count },
         ) => Some(Record::Statement {
             sql,
             loc,
             conditions,
             connection,
-            expected: StatementExpect::Ok,
+            expected: StatementExpect::Count(*count),
         }),
         // statement, statement
         (

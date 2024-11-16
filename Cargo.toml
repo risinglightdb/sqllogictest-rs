@@ -3,7 +3,7 @@ resolver = "2"
 members = ["sqllogictest", "sqllogictest-bin", "sqllogictest-engines", "tests"]
 
 [workspace.package]
-version = "0.22.1"
+version = "0.23.0"
 edition = "2021"
 homepage = "https://github.com/risinglightdb/sqllogictest-rs"
 keywords = ["sql", "database", "parser", "cli"]
