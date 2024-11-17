@@ -17,7 +17,7 @@ use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
 use rand::distributions::DistString;
 use rand::seq::SliceRandom;
 use sqllogictest::{
-    default_validator, strict_column_validator, update_record_with_output, AsyncDB, Injected,
+    default_column_validator, default_validator, update_record_with_output, AsyncDB, Injected,
     MakeConnection, Record, Runner,
 };
 
@@ -750,7 +750,7 @@ async fn update_record<M: MakeConnection>(
         &record_output,
         "\t",
         default_validator,
-        strict_column_validator,
+        default_column_validator,
     ) {
         Some(new_record) => {
             writeln!(outfile, "{new_record}")?;

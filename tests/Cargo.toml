@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-regex = "1.9.1"
+regex = "1.11.1"
 rusty-fork = "0.3"
 sqllogictest = { path = "../sqllogictest" }
 

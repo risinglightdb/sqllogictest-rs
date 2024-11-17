@@ -849,7 +849,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 Record::Statement {
                     sql, expected, loc, ..
                 },
-                RecordOutput::Query { error: None, .. },
+                RecordOutput::Query {
+                    error: None, rows, ..
+                },
             ) => {
                 if let StatementExpect::Error(_) = expected {
                     return Err(TestErrorKind::Ok {
@@ -857,6 +859,16 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         kind: RecordKind::Query,
                     }
                     .at(loc));
+                }
+                if let StatementExpect::Count(expected_count) = expected {
+                    if expected_count != rows.len() as u64 {
+                        return Err(TestErrorKind::StatementResultMismatch {
+                            sql,
+                            expected: expected_count,
+                            actual: format!("returned {} rows", rows.len()),
+                        }
+                        .at(loc));
+                    }
                 }
             }
             (
@@ -1332,6 +1344,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     if matches!(record, Record::Halt { .. }) {
                         *halt = true;
                         writeln!(outfile, "{record}")?;
+                        tracing::info!(
+                            "halt record found, all following records will be written AS IS"
+                        );
                         continue;
                     }
                     let record_output = self.apply_record(record.clone()).await;
@@ -1380,9 +1395,11 @@ pub fn update_record_with_output<T: ColumnType>(
                 loc,
                 conditions,
                 connection,
-                expected: expected @ (StatementExpect::Ok | StatementExpect::Count(_)),
+                expected: mut expected @ (StatementExpect::Ok | StatementExpect::Count(_)),
             },
-            RecordOutput::Query { error: None, .. },
+            RecordOutput::Query {
+                error: None, rows, ..
+            },
         ) => {
             // statement ok
             // SELECT ...
@@ -1390,6 +1407,10 @@ pub fn update_record_with_output<T: ColumnType>(
             // This case can be used when we want to only ensure the query succeeds,
             // but don't care about the output.
             // DuckDB has a few of these.
+
+            if let StatementExpect::Count(expected_count) = &mut expected {
+                *expected_count = rows.len() as u64;
+            }
 
             Some(Record::Statement {
                 sql,
@@ -1408,13 +1429,13 @@ pub fn update_record_with_output<T: ColumnType>(
                 connection,
                 expected: _,
             },
-            RecordOutput::Statement { error: None, .. },
+            RecordOutput::Statement { error: None, count },
         ) => Some(Record::Statement {
             sql,
             loc,
             conditions,
             connection,
-            expected: StatementExpect::Ok,
+            expected: StatementExpect::Count(*count),
         }),
         // statement, statement
         (
@@ -1737,7 +1758,7 @@ Caused by:
             record_output: statement_output(3),
 
             expected: Some(
-                "statement ok\n\
+                "statement count 3\n\
                  select * from foo;",
             ),
         }
@@ -1970,6 +1991,7 @@ Caused by:
     }
 
     impl TestCase<'_> {
+        #[track_caller]
         fn run(self) {
             let Self {
                 input,
