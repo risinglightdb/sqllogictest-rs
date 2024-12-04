@@ -769,15 +769,31 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     QueryExpect::Error(_) => None,
                 }
                 .or(self.sort_mode);
+
+                let mut value_sort = false;
                 match sort_mode {
                     None | Some(SortMode::NoSort) => {}
                     Some(SortMode::RowSort) => {
                         rows.sort_unstable();
                     }
-                    Some(SortMode::ValueSort) => todo!("value sort"),
+                    Some(SortMode::ValueSort) => {
+                        rows = rows
+                            .iter()
+                            .flat_map(|row| row.iter())
+                            .map(|s| vec![s.to_owned()])
+                            .collect();
+                        rows.sort_unstable();
+                        value_sort = true;
+                    }
                 };
 
-                if self.hash_threshold > 0 && rows.len() * types.len() > self.hash_threshold {
+                let num_values = if value_sort {
+                    rows.len()
+                } else {
+                    rows.len() * types.len()
+                };
+
+                if self.hash_threshold > 0 && num_values > self.hash_threshold {
                     let mut md5 = md5::Md5::new();
                     for line in &rows {
                         for value in line {
@@ -996,7 +1012,20 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             .at(loc));
                         }
 
-                        if !(self.validator)(rows, &expected_results) {
+                        let actual_results =
+                            if types.len() > 1 && rows.len() * types.len() == expected_results.len() {
+                                // value-wise mode
+                                rows.into_iter()
+                                    .flat_map(|strs| strs.iter().map(normalize_string).collect_vec())
+                                    .collect_vec()
+                            } else {
+                                // row-wise mode
+                                rows.into_iter()
+                                    .map(|strs| strs.iter().map(normalize_string).join(" "))
+                                    .collect_vec()
+                            };
+
+                        if !(self.validator)(&[actual_results], &expected_results) {
                             let output_rows =
                                 rows.iter().map(|strs| strs.iter().join(" ")).collect_vec();
                             return Err(TestErrorKind::QueryResultMismatch {
