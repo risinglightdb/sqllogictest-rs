@@ -154,7 +154,7 @@ pub struct TestErrorDisplay<'a> {
     colorize: bool,
 }
 
-impl<'a> Display for TestErrorDisplay<'a> {
+impl Display for TestErrorDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -189,7 +189,7 @@ pub struct ParallelTestErrorDisplay<'a> {
     colorize: bool,
 }
 
-impl<'a> Display for ParallelTestErrorDisplay<'a> {
+impl Display for ParallelTestErrorDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "parallel test failed")?;
         write!(f, "Caused by:")?;
@@ -332,7 +332,7 @@ pub struct TestErrorKindDisplay<'a> {
     colorize: bool,
 }
 
-impl<'a> Display for TestErrorKindDisplay<'a> {
+impl Display for TestErrorKindDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if !self.colorize {
             return write!(f, "{}", self.error);
