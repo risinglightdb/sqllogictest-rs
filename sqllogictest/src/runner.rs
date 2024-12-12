@@ -1038,8 +1038,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
                         let actual_results = match self.result_mode {
                             Some(ResultMode::ValueWise) => rows
-                                .into_iter()
-                                .flat_map(|strs| strs.into_iter())
+                                .iter()
+                                .flat_map(|strs| strs.iter())
                                 .map(|str| vec![str.to_string()])
                                 .collect_vec(),
                             // default to rowwise
