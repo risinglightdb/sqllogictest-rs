@@ -850,8 +850,10 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 });
             }
             ["control", res @ ..] => match res {
-                ["resultmode", result_mode] =>  match ResultMode::try_from_str(result_mode) {
-                    Ok(result_mode) => records.push(Record::Control(Control::ResultMode(result_mode))),
+                ["resultmode", result_mode] => match ResultMode::try_from_str(result_mode) {
+                    Ok(result_mode) => {
+                        records.push(Record::Control(Control::ResultMode(result_mode)))
+                    }
                     Err(k) => return Err(k.at(loc)),
                 },
                 ["sortmode", sort_mode] => match SortMode::try_from_str(sort_mode) {
@@ -871,7 +873,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                         ParseErrorKind::InvalidNumber((*threshold).into()).at(loc.clone())
                     })?,
                 });
-            },
+            }
             _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
         }
     }

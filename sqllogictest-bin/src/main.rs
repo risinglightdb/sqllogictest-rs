@@ -16,7 +16,10 @@ use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
 use rand::distributions::DistString;
 use rand::seq::SliceRandom;
-use sqllogictest::{default_column_validator, default_normalizer, default_validator, update_record_with_output, AsyncDB, Injected, MakeConnection, Record, Runner};
+use sqllogictest::{
+    default_column_validator, default_normalizer, default_validator, update_record_with_output,
+    AsyncDB, Injected, MakeConnection, Record, Runner,
+};
 
 #[derive(Default, Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 #[must_use]

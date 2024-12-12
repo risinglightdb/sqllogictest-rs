@@ -467,9 +467,14 @@ pub fn default_normalizer(s: &String) -> String {
 /// # Default
 ///
 /// By default, the ([`default_validator`]) will be used compare normalized results.
-pub type Validator = fn(normalizer: Normalizer, actual: &[Vec<String>], expected: &[String]) -> bool;
+pub type Validator =
+    fn(normalizer: Normalizer, actual: &[Vec<String>], expected: &[String]) -> bool;
 
-pub fn default_validator(normalizer: Normalizer, actual: &[Vec<String>], expected: &[String]) -> bool {
+pub fn default_validator(
+    normalizer: Normalizer,
+    actual: &[Vec<String>],
+    expected: &[String],
+) -> bool {
     let expected_results = expected.iter().map(normalizer).collect_vec();
     // Default, we compare normalized results. Whitespace characters are ignored.
     let normalized_rows = actual
@@ -1032,11 +1037,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         }
 
                         let actual_results = match self.result_mode {
-                            Some(ResultMode::ValueWise) =>
-                                rows.into_iter()
-                                    .flat_map(|strs| strs.into_iter())
-                                    .map(|str| vec![str.to_string()])
-                                    .collect_vec(),
+                            Some(ResultMode::ValueWise) => rows
+                                .into_iter()
+                                .flat_map(|strs| strs.into_iter())
+                                .map(|str| vec![str.to_string()])
+                                .collect_vec(),
                             // default to rowwise
                             _ => rows.clone(),
                         };
@@ -1591,7 +1596,10 @@ pub fn update_record_with_output<T: ColumnType>(
                     connection,
                     expected: match expected {
                         QueryExpect::Results {
-                            sort_mode, label, result_mode, ..
+                            sort_mode,
+                            label,
+                            result_mode,
+                            ..
                         } => QueryExpect::Results {
                             results,
                             types,
