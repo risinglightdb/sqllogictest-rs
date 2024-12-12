@@ -262,6 +262,7 @@ pub async fn main() -> Result<()> {
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_parallel(
     jobs: usize,
     keep_db_on_failure: bool,
@@ -308,7 +309,7 @@ async fn run_parallel(
     let mut stream = futures::stream::iter(create_databases.into_iter())
         .map(|(db_name, filename)| {
             let mut config = config.clone();
-            config.db = db_name.clone();
+            config.db.clone_from(&db_name);
             let file = filename.to_string_lossy().to_string();
             let engine = engine.clone();
             let labels = labels.to_vec();
