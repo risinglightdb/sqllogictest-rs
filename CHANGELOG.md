@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.23.1] - 2024-12-13
+
+* feat(bin): add opt `--keep-db-on-failure`
+
 ## [0.23.0] - 2024-11-16
 
 * Refine the behavior of `update_record_with_output` / `--override`
