@@ -449,9 +449,16 @@ fn format_column_diff(expected: &str, actual: &str, colorize: bool) -> String {
     format!("[Expected] {expected}\n[Actual  ] {actual}")
 }
 
+/// Normalizer will be used by [`Runner`] to normalize the result values
+///
+/// # Default
+///
+/// By default, the ([`default_normalizer`]) will be used to normalize values.
+pub type Normalizer = fn(s: &String) -> String;
+
 /// Trim and replace multiple whitespaces with one.
 #[allow(clippy::ptr_arg)]
-fn normalize_string(s: &String) -> String {
+pub fn default_normalizer(s: &String) -> String {
     s.trim().split_ascii_whitespace().join(" ")
 }
 
@@ -459,16 +466,22 @@ fn normalize_string(s: &String) -> String {
 ///
 /// # Default
 ///
-/// By default ([`default_validator`]), we will use compare normalized results.
-pub type Validator = fn(actual: &[Vec<String>], expected: &[String]) -> bool;
+/// By default, the ([`default_validator`]) will be used compare normalized results.
+pub type Validator =
+    fn(normalizer: Normalizer, actual: &[Vec<String>], expected: &[String]) -> bool;
 
-pub fn default_validator(actual: &[Vec<String>], expected: &[String]) -> bool {
-    let expected_results = expected.iter().map(normalize_string).collect_vec();
+pub fn default_validator(
+    normalizer: Normalizer,
+    actual: &[Vec<String>],
+    expected: &[String],
+) -> bool {
+    let expected_results = expected.iter().map(normalizer).collect_vec();
     // Default, we compare normalized results. Whitespace characters are ignored.
     let normalized_rows = actual
         .iter()
-        .map(|strs| strs.iter().map(normalize_string).join(" "))
+        .map(|strs| strs.iter().map(normalizer).join(" "))
         .collect_vec();
+
     normalized_rows == expected_results
 }
 
@@ -502,9 +515,12 @@ pub struct Runner<D: AsyncDB, M: MakeConnection> {
     conn: Connections<D, M>,
     // validator is used for validate if the result of query equals to expected.
     validator: Validator,
+    // normalizer is used to normalize the result text
+    normalizer: Normalizer,
     column_type_validator: ColumnTypeValidator<D::ColumnType>,
     substitution: Option<Substitution>,
     sort_mode: Option<SortMode>,
+    result_mode: Option<ResultMode>,
     /// 0 means never hashing
     hash_threshold: usize,
     /// Labels for condition `skipif` and `onlyif`.
@@ -518,9 +534,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     pub fn new(make_conn: M) -> Self {
         Runner {
             validator: default_validator,
+            normalizer: default_normalizer,
             column_type_validator: default_column_validator,
             substitution: None,
             sort_mode: None,
+            result_mode: None,
             hash_threshold: 0,
             labels: HashSet::new(),
             conn: Connections::new(make_conn),
@@ -532,6 +550,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         self.labels.insert(label.to_string());
     }
 
+    pub fn with_normalizer(&mut self, normalizer: Normalizer) {
+        self.normalizer = normalizer;
+    }
     pub fn with_validator(&mut self, validator: Validator) {
         self.validator = validator;
     }
@@ -769,15 +790,31 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     QueryExpect::Error(_) => None,
                 }
                 .or(self.sort_mode);
+
+                let mut value_sort = false;
                 match sort_mode {
                     None | Some(SortMode::NoSort) => {}
                     Some(SortMode::RowSort) => {
                         rows.sort_unstable();
                     }
-                    Some(SortMode::ValueSort) => todo!("value sort"),
+                    Some(SortMode::ValueSort) => {
+                        rows = rows
+                            .iter()
+                            .flat_map(|row| row.iter())
+                            .map(|s| vec![s.to_owned()])
+                            .collect();
+                        rows.sort_unstable();
+                        value_sort = true;
+                    }
                 };
 
-                if self.hash_threshold > 0 && rows.len() * types.len() > self.hash_threshold {
+                let num_values = if value_sort {
+                    rows.len()
+                } else {
+                    rows.len() * types.len()
+                };
+
+                if self.hash_threshold > 0 && num_values > self.hash_threshold {
                     let mut md5 = md5::Md5::new();
                     for line in &rows {
                         for value in line {
@@ -807,6 +844,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 match control {
                     Control::SortMode(sort_mode) => {
                         self.sort_mode = Some(sort_mode);
+                    }
+                    Control::ResultMode(result_mode) => {
+                        self.result_mode = Some(result_mode);
                     }
                     Control::Substitution(on_off) => match (&mut self.substitution, on_off) {
                         (s @ None, true) => *s = Some(Substitution::default()),
@@ -996,7 +1036,17 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             .at(loc));
                         }
 
-                        if !(self.validator)(rows, &expected_results) {
+                        let actual_results = match self.result_mode {
+                            Some(ResultMode::ValueWise) => rows
+                                .iter()
+                                .flat_map(|strs| strs.iter())
+                                .map(|str| vec![str.to_string()])
+                                .collect_vec(),
+                            // default to rowwise
+                            _ => rows.clone(),
+                        };
+
+                        if !(self.validator)(self.normalizer, &actual_results, &expected_results) {
                             let output_rows =
                                 rows.iter().map(|strs| strs.iter().join(" ")).collect_vec();
                             return Err(TestErrorKind::QueryResultMismatch {
@@ -1167,9 +1217,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     conn_builder(target.clone(), db_name.clone()).map(Ok)
                 }),
                 validator: self.validator,
+                normalizer: self.normalizer,
                 column_type_validator: self.column_type_validator,
                 substitution: self.substitution.clone(),
                 sort_mode: self.sort_mode,
+                result_mode: self.result_mode,
                 hash_threshold: self.hash_threshold,
                 labels: self.labels.clone(),
             };
@@ -1240,6 +1292,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         filename: impl AsRef<Path>,
         col_separator: &str,
         validator: Validator,
+        normalizer: Normalizer,
         column_type_validator: ColumnTypeValidator<D::ColumnType>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use std::io::{Read, Seek, SeekFrom, Write};
@@ -1355,6 +1408,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         &record_output,
                         col_separator,
                         validator,
+                        normalizer,
                         column_type_validator,
                     )
                     .unwrap_or(record);
@@ -1384,6 +1438,7 @@ pub fn update_record_with_output<T: ColumnType>(
     record_output: &RecordOutput<T>,
     col_separator: &str,
     validator: Validator,
+    normalizer: Normalizer,
     column_type_validator: ColumnTypeValidator<T>,
 ) -> Option<Record<T>> {
     match (record.clone(), record_output) {
@@ -1523,7 +1578,7 @@ pub fn update_record_with_output<T: ColumnType>(
                     QueryExpect::Results {
                         results: expected_results,
                         ..
-                    } if validator(rows, expected_results) => expected_results.clone(),
+                    } if validator(normalizer, rows, expected_results) => expected_results.clone(),
                     _ => rows.iter().map(|cols| cols.join(col_separator)).collect(),
                 };
                 let types = match &expected {
@@ -1541,17 +1596,22 @@ pub fn update_record_with_output<T: ColumnType>(
                     connection,
                     expected: match expected {
                         QueryExpect::Results {
-                            sort_mode, label, ..
+                            sort_mode,
+                            label,
+                            result_mode,
+                            ..
                         } => QueryExpect::Results {
                             results,
                             types,
                             sort_mode,
+                            result_mode,
                             label,
                         },
                         QueryExpect::Error(_) => QueryExpect::Results {
                             results,
                             types,
                             sort_mode: None,
+                            result_mode: None,
                             label: None,
                         },
                     },
@@ -2009,6 +2069,7 @@ Caused by:
                 &record_output,
                 " ",
                 default_validator,
+                default_normalizer,
                 strict_column_validator,
             );
 
