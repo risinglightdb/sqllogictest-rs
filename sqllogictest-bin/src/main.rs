@@ -1,6 +1,6 @@
 mod engines;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io::{stdout, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -62,6 +62,9 @@ struct Opt {
     /// database will be created for each test file.
     #[clap(long, short)]
     jobs: Option<usize>,
+    /// When using `-j`, whether to keep the temporary database when a test case fails.
+    #[clap(long, default_value = "false")]
+    keep_db_on_failure: bool,
 
     /// Report to junit XML.
     #[clap(long)]
@@ -146,6 +149,7 @@ pub async fn main() -> Result<()> {
         external_engine_command_template,
         color,
         jobs,
+        keep_db_on_failure,
         junit,
         host,
         port,
@@ -228,6 +232,7 @@ pub async fn main() -> Result<()> {
     let result = if let Some(jobs) = jobs {
         run_parallel(
             jobs,
+            keep_db_on_failure,
             &mut test_suite,
             files,
             &engine,
@@ -257,8 +262,10 @@ pub async fn main() -> Result<()> {
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_parallel(
     jobs: usize,
+    keep_db_on_failure: bool,
     test_suite: &mut TestSuite,
     files: Vec<PathBuf>,
     engine: &EngineConfig,
@@ -302,7 +309,7 @@ async fn run_parallel(
     let mut stream = futures::stream::iter(create_databases.into_iter())
         .map(|(db_name, filename)| {
             let mut config = config.clone();
-            config.db = db_name;
+            config.db.clone_from(&db_name);
             let file = filename.to_string_lossy().to_string();
             let engine = engine.clone();
             let labels = labels.to_vec();
@@ -316,7 +323,7 @@ async fn run_parallel(
                 })
                 .await
                 .unwrap();
-                (file, res, buf)
+                (db_name, file, res, buf)
             }
         })
         .buffer_unordered(jobs);
@@ -324,10 +331,11 @@ async fn run_parallel(
     eprintln!("{}", style("[TEST IN PROGRESS]").blue().bold());
 
     let mut failed_case = vec![];
+    let mut failed_db: HashSet<String> = HashSet::new();
 
     let start = Instant::now();
 
-    while let Some((file, res, mut buf)) = stream.next().await {
+    while let Some((db_name, file, res, mut buf)) = stream.next().await {
         let test_case_name = file.replace(['/', ' ', '.', '-'], "_");
         let case = match res {
             Ok(duration) => {
@@ -341,6 +349,7 @@ async fn run_parallel(
                 writeln!(buf, "{}\n\n{:?}", style("[FAILED]").red().bold(), e)?;
                 writeln!(buf)?;
                 failed_case.push(file.clone());
+                failed_db.insert(db_name.clone());
                 let mut status = TestCaseStatus::non_success(NonSuccessKind::Failure);
                 status.set_type("test failure");
                 let mut case = TestCase::new(test_case_name, status);
@@ -362,6 +371,17 @@ async fn run_parallel(
     );
 
     for db_name in db_names {
+        if keep_db_on_failure && failed_db.contains(&db_name) {
+            eprintln!(
+                "+ {}",
+                style(format!(
+                    "DATABASE {db_name} contains failed cases, kept for debugging"
+                ))
+                .red()
+                .bold()
+            );
+            continue;
+        }
         let query = format!("DROP DATABASE {db_name};");
         eprintln!("+ {query}");
         if let Err(err) = db.run(&query).await {
