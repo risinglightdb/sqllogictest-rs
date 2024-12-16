@@ -36,6 +36,10 @@ pub enum RecordOutput<T: ColumnType> {
         rows: Vec<Vec<String>>,
         error: Option<AnyError>,
     },
+    MultiLineQuery {
+        lines: Vec<String>,
+        error: Option<AnyError>,
+    },
     /// The output of a `statement`.
     Statement { count: u64, error: Option<AnyError> },
     /// The output of a `system` command.
@@ -51,6 +55,9 @@ pub enum DBOutput<T: ColumnType> {
     Rows {
         types: Vec<T>,
         rows: Vec<Vec<String>>,
+    },
+    MultiLine {
+        lines: Vec<String>,
     },
     /// A statement in the query has completed.
     ///
@@ -293,6 +300,8 @@ pub enum TestErrorKind {
         expected: String,
         actual: String,
     },
+    #[error("query result type mismatch:\n[SQL] {sql}\nThe query expected {expected} output")]
+    QueryResultTypeMismatch { sql: String, expected: String },
     #[error(
         "query columns mismatch:\n[SQL] {sql}\n{}",
         format_column_diff(expected, actual, false)
@@ -607,6 +616,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             rows,
                             error: None,
                         },
+                        DBOutput::MultiLine { lines } => {
+                            RecordOutput::MultiLineQuery { lines, error: None }
+                        }
                         DBOutput::StatementComplete(count) => {
                             RecordOutput::Statement { count, error: None }
                         }
@@ -751,6 +763,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 let (types, mut rows) = match conn.run(&sql).await {
                     Ok(out) => match out {
                         DBOutput::Rows { types, rows } => (types, rows),
+                        DBOutput::MultiLine { lines } => {
+                            return RecordOutput::MultiLineQuery { lines, error: None }
+                        }
                         DBOutput::StatementComplete(count) => {
                             return RecordOutput::Statement { count, error: None };
                         }
@@ -766,6 +781,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
                 let sort_mode = match expected {
                     QueryExpect::Results { sort_mode, .. } => sort_mode,
+                    QueryExpect::MultiLine { .. } => None,
                     QueryExpect::Error(_) => None,
                 }
                 .or(self.sort_mode);
@@ -893,6 +909,14 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     .at(loc))
                 }
                 QueryExpect::Results { .. } => {}
+                QueryExpect::MultiLine { data } => {
+                    return Err(TestErrorKind::QueryResultMismatch {
+                        sql,
+                        expected: data.join("\n"),
+                        actual: "".to_string(),
+                    }
+                    .at(loc));
+                }
             },
             (
                 Record::Statement {
@@ -971,11 +995,26 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             .at(loc));
                         }
                     }
+                    (Some(e), QueryExpect::MultiLine { .. }) => {
+                        return Err(TestErrorKind::Fail {
+                            sql,
+                            err: Arc::clone(e),
+                            kind: RecordKind::Query,
+                        }
+                        .at(loc))
+                    }
                     (Some(e), QueryExpect::Results { .. }) => {
                         return Err(TestErrorKind::Fail {
                             sql,
                             err: Arc::clone(e),
                             kind: RecordKind::Query,
+                        }
+                        .at(loc));
+                    }
+                    (None, QueryExpect::MultiLine { .. }) => {
+                        return Err(TestErrorKind::QueryResultTypeMismatch {
+                            sql,
+                            expected: "multiline".to_string(),
                         }
                         .at(loc));
                     }
@@ -1006,6 +1045,72 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             }
                             .at(loc));
                         }
+                    }
+                };
+            }
+            (
+                Record::Query {
+                    loc,
+                    conditions: _,
+                    connection: _,
+                    sql,
+                    expected,
+                },
+                RecordOutput::MultiLineQuery { lines, error },
+            ) => {
+                match (error, expected) {
+                    (None, QueryExpect::Error(_)) => {
+                        return Err(TestErrorKind::Ok {
+                            sql,
+                            kind: RecordKind::Query,
+                        }
+                        .at(loc));
+                    }
+                    (Some(e), QueryExpect::Error(expected_error)) => {
+                        if !expected_error.is_match(&e.to_string()) {
+                            return Err(TestErrorKind::ErrorMismatch {
+                                sql,
+                                err: Arc::clone(e),
+                                expected_err: expected_error.to_string(),
+                                kind: RecordKind::Query,
+                            }
+                            .at(loc));
+                        }
+                    }
+                    (Some(e), QueryExpect::MultiLine { .. }) => {
+                        return Err(TestErrorKind::Fail {
+                            sql,
+                            err: Arc::clone(e),
+                            kind: RecordKind::Query,
+                        }
+                        .at(loc))
+                    }
+                    (Some(e), QueryExpect::Results { .. }) => {
+                        return Err(TestErrorKind::Fail {
+                            sql,
+                            err: Arc::clone(e),
+                            kind: RecordKind::Query,
+                        }
+                        .at(loc));
+                    }
+                    (None, QueryExpect::MultiLine { data }) => {
+                        for (actual, expected) in lines.iter().zip(data.iter()) {
+                            if actual != expected {
+                                return Err(TestErrorKind::QueryResultMismatch {
+                                    sql,
+                                    expected: data.join("\n"),
+                                    actual: lines.join("\n"),
+                                }
+                                .at(loc));
+                            }
+                        }
+                    }
+                    (None, QueryExpect::Results { .. }) => {
+                        return Err(TestErrorKind::QueryResultTypeMismatch {
+                            sql,
+                            expected: "result".to_string(),
+                        }
+                        .at(loc));
                     }
                 };
             }
@@ -1504,6 +1609,7 @@ pub fn update_record_with_output<T: ColumnType>(
             (Some(e), r) => {
                 let reference = match &r {
                     QueryExpect::Error(e) => Some(e),
+                    QueryExpect::MultiLine { .. } => None,
                     QueryExpect::Results { .. } => None,
                 };
                 Some(Record::Query {
@@ -1548,6 +1654,12 @@ pub fn update_record_with_output<T: ColumnType>(
                             sort_mode,
                             label,
                         },
+                        QueryExpect::MultiLine { .. } => QueryExpect::Results {
+                            results,
+                            types,
+                            sort_mode: None,
+                            label: None,
+                        },
                         QueryExpect::Error(_) => QueryExpect::Results {
                             results,
                             types,
@@ -1557,6 +1669,59 @@ pub fn update_record_with_output<T: ColumnType>(
                     },
                 })
             }
+        },
+        // query, multiline query
+        (
+            Record::Query {
+                loc,
+                conditions,
+                connection,
+                sql,
+                expected,
+            },
+            RecordOutput::MultiLineQuery { lines, error },
+        ) => match (error, expected) {
+            // Error match
+            (Some(e), QueryExpect::Error(expected_error))
+                if expected_error.is_match(&e.to_string()) =>
+            {
+                None
+            }
+            // Error mismatch
+            (Some(e), r) => {
+                let reference = match &r {
+                    QueryExpect::Error(e) => Some(e),
+                    QueryExpect::MultiLine { .. } => None,
+                    QueryExpect::Results { .. } => None,
+                };
+                Some(Record::Query {
+                    sql,
+                    expected: QueryExpect::Error(ExpectedError::from_actual_error(
+                        reference,
+                        &e.to_string(),
+                    )),
+                    loc,
+                    conditions,
+                    connection,
+                })
+            }
+            (None, expected) => Some(Record::Query {
+                sql,
+                loc,
+                conditions,
+                connection,
+                expected: match expected {
+                    QueryExpect::Results { .. } => QueryExpect::MultiLine {
+                        data: lines.clone(),
+                    },
+                    QueryExpect::MultiLine { .. } => QueryExpect::MultiLine {
+                        data: lines.clone(),
+                    },
+                    QueryExpect::Error(_) => QueryExpect::MultiLine {
+                        data: lines.clone(),
+                    },
+                },
+            }),
         },
         (
             Record::System {
