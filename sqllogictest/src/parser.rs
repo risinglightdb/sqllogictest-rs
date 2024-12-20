@@ -1033,6 +1033,11 @@ mod tests {
     }
 
     #[test]
+    fn test_valuesort() {
+        parse_roundtrip::<DefaultColumnType>("../tests/slt/valuesort.slt")
+    }
+
+    #[test]
     fn test_substitution() {
         parse_roundtrip::<DefaultColumnType>("../tests/substitution/basic.slt")
     }
