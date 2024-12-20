@@ -85,6 +85,7 @@ pub enum QueryExpect<T: ColumnType> {
     Results {
         types: Vec<T>,
         sort_mode: Option<SortMode>,
+        result_mode: Option<ResultMode>,
         label: Option<String>,
         results: Vec<String>,
     },
@@ -98,6 +99,7 @@ impl<T: ColumnType> QueryExpect<T> {
         Self::Results {
             types: Vec::new(),
             sort_mode: None,
+            result_mode: None,
             label: None,
             results: Vec::new(),
         }
@@ -287,6 +289,7 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
             }
             Record::Control(c) => match c {
                 Control::SortMode(m) => write!(f, "control sortmode {}", m.as_str()),
+                Control::ResultMode(m) => write!(f, "control resultmode {}", m.as_str()),
                 Control::Substitution(s) => write!(f, "control substitution {}", s.as_str()),
             },
             Record::Condition(cond) => match cond {
@@ -435,6 +438,8 @@ impl PartialEq for ExpectedError {
 pub enum Control {
     /// Control sort mode.
     SortMode(SortMode),
+    /// control result mode.
+    ResultMode(ResultMode),
     /// Control whether or not to substitute variables in the SQL.
     Substitution(bool),
 }
@@ -542,6 +547,38 @@ impl ControlItem for SortMode {
             Self::RowSort => "rowsort",
             Self::ValueSort => "valuesort",
         }
+    }
+}
+
+/// Whether the results should be parsed as value-wise or row-wise
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum ResultMode {
+    /// Results are in a single column
+    ValueWise,
+    /// The default option where results are in columns separated by spaces
+    RowWise,
+}
+
+impl ControlItem for ResultMode {
+    fn try_from_str(s: &str) -> Result<Self, ParseErrorKind> {
+        match s {
+            "rowwise" => Ok(Self::RowWise),
+            "valuewise" => Ok(Self::ValueWise),
+            _ => Err(ParseErrorKind::InvalidSortMode(s.to_string())),
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::RowWise => "rowwise",
+            Self::ValueWise => "valuewise",
+        }
+    }
+}
+
+impl fmt::Display for ResultMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
     }
 }
 
@@ -754,6 +791,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                         QueryExpect::Results {
                             types,
                             sort_mode,
+                            result_mode: None,
                             label,
                             results: Vec::new(),
                         }
@@ -812,6 +850,12 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 });
             }
             ["control", res @ ..] => match res {
+                ["resultmode", result_mode] => match ResultMode::try_from_str(result_mode) {
+                    Ok(result_mode) => {
+                        records.push(Record::Control(Control::ResultMode(result_mode)))
+                    }
+                    Err(k) => return Err(k.at(loc)),
+                },
                 ["sortmode", sort_mode] => match SortMode::try_from_str(sort_mode) {
                     Ok(sort_mode) => records.push(Record::Control(Control::SortMode(sort_mode))),
                     Err(k) => return Err(k.at(loc)),
@@ -986,6 +1030,11 @@ mod tests {
     #[test]
     fn test_rowsort() {
         parse_roundtrip::<DefaultColumnType>("../tests/slt/rowsort.slt")
+    }
+
+    #[test]
+    fn test_valuesort() {
+        parse_roundtrip::<DefaultColumnType>("../tests/slt/valuesort.slt")
     }
 
     #[test]

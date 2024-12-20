@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.24.0] - 2024-12-20
+
+* runner: Added a `Normalizer` type for normalizing result values. A new function
+  `with_normalizer(normalizer: Normalizer)`
+  has been added to the Runner to allow for specifying a custom Normalizer. The existing default normalizer
+  is available via the `runner::default_normalizer(..)` function.
+* parser: Added a new control mode `resultmode` that controls whether the results are in
+  `valuewise` or `columnwise` mode. The default is `columnwise` which means results are in columns.
+  `valuewise` means the results are in a single column (sqlite test style).
+* parser: Added `valuesort`sort mode. The `valuesort` mode works like rowsort except that it does not
+  honor row groupings. Each individual result value is sorted on its own.
+
+**Breaking change**:
+
+* The `Validator` type used in various function in Runner implementation has a new required field `Normalizer`
+  that is used to normalize result values.
+
 ## [0.23.1] - 2024-12-13
 
 * feat(bin): add opt `--keep-db-on-failure`
@@ -14,9 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.23.0] - 2024-11-16
 
 * Refine the behavior of `update_record_with_output` / `--override`
-  - runner: Previously, `query` returning 0 rows will become `statement ok`. Now it returns `statement count 0`.
-  - bin: Now `--override` will not change the type chars of `query <types>`, since in practice
-    it becomes `?`s which might cause confusion.
+    - runner: Previously, `query` returning 0 rows will become `statement ok`. Now it returns `statement count 0`.
+    - bin: Now `--override` will not change the type chars of `query <types>`, since in practice
+      it becomes `?`s which might cause confusion.
 * runner: `statement count <n>` is incorrectly handled when the result is a `query`.
 
 ## [0.22.1] - 2024-11-11
@@ -30,18 +47,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.21.0] - 2024-06-30
 
 **Breaking changes**:
-* runner: `RecordOutput` is now returned by `Runner::run` (or `Runner::run_async`). This allows users to access the output of each record, or check whether the record is skipped.
-* runner(substitution): add a special variable `__NOW__` which will be replaced with the current Unix timestamp in nanoseconds.
-* runner(substitution): for `system` commands, we do not substitute environment variables any more, because the shell can do that. It's necessary to escape like `\\` any more. `$__TEST_DIR__`, and are still supported.
+
+* runner: `RecordOutput` is now returned by `Runner::run` (or `Runner::run_async`). This allows users to access the
+  output of each record, or check whether the record is skipped.
+* runner(substitution): add a special variable `__NOW__` which will be replaced with the current Unix timestamp in
+  nanoseconds.
+* runner(substitution): for `system` commands, we do not substitute environment variables any more, because the shell
+  can do that. It's necessary to escape like `\\` any more. `$__TEST_DIR__`, and are still supported.
 * runner(system): change `sh` to `bash`.
 
 ## [0.20.6] - 2024-06-21
 
-* runner: add logs for `system` command (with target `sqllogictest::system_command`) for ease of debugging. 
+* runner: add logs for `system` command (with target `sqllogictest::system_command`) for ease of debugging.
 
 ## [0.20.5] - 2024-06-20
 
-* fix(runner): when running in parallel, the runner will correctly inherit configuration like `sort_mode` and `labels` from the main runner.
+* fix(runner): when running in parallel, the runner will correctly inherit configuration like `sort_mode` and `labels`
+  from the main runner.
 
 ## [0.20.4] - 2024-06-06
 
@@ -57,9 +79,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.20.1] - 2024-04-17
 
-* bin: When using `-j <jobs>` to run tests in parallel, add a random suffix to the temporary databases. This is useful if the test is manually canceled, but you want to rerun it freshly. Note that if the test failed, the database will be dropped. This is existing behavior and unchanged.
-* bin: replace `env_logger` with `tracing-subscriber`. You will be able to see the record being executed with `RUST_LOG=debug sqllogictest ...`.
-* runner: fix the behavior of background `system` commands (end with `&`). In `0.20.0`, it will block until the process exits. Now we return immediately.
+* bin: When using `-j <jobs>` to run tests in parallel, add a random suffix to the temporary databases. This is useful
+  if the test is manually canceled, but you want to rerun it freshly. Note that if the test failed, the database will be
+  dropped. This is existing behavior and unchanged.
+* bin: replace `env_logger` with `tracing-subscriber`. You will be able to see the record being executed with
+  `RUST_LOG=debug sqllogictest ...`.
+* runner: fix the behavior of background `system` commands (end with `&`). In `0.20.0`, it will block until the process
+  exits. Now we return immediately.
   ```
   system ok
   sleep 5 &
@@ -75,16 +101,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ----
   Hello, world!
   ```
-  Currently, only exact match is supported. Besides, the output cannot contain more than one blank lines in between. The record ends with two consecutive blank lines.
+  Currently, only exact match is supported. Besides, the output cannot contain more than one blank lines in between. The
+  record ends with two consecutive blank lines.
 
   Some minor **Breaking changes**:
-  - Add field `stdout` to `parser::Record::System` and `runner::RecordOutput::System`, and mark them as `#[non_exhaustive]`.
-  - Change trait method `AsyncDB::run_command`'s return type from `std::process::ExitStatus` to `std::process::Output`.
-
+    - Add field `stdout` to `parser::Record::System` and `runner::RecordOutput::System`, and mark them as
+      `#[non_exhaustive]`.
+    - Change trait method `AsyncDB::run_command`'s return type from `std::process::ExitStatus` to
+      `std::process::Output`.
 
 ## [0.19.1] - 2024-01-04
 
-* parser: `include` now returns error if no file is matched. 
+* parser: `include` now returns error if no file is matched.
 
 ## [0.19.0] - 2023-11-11
 
@@ -104,17 +132,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     2: Division by zero
   ```
 
-  The output error message must be the exact match of the expected one to pass the test, except for the leading and trailing whitespaces. Users may use `--override` to let the runner update the test files with the actual output.
+  The output error message must be the exact match of the expected one to pass the test, except for the leading and
+  trailing whitespaces. Users may use `--override` to let the runner update the test files with the actual output.
 
-  Empty lines are allowed in the expected error message. As a result, the message must end with two consecutive empty lines.
+  Empty lines are allowed in the expected error message. As a result, the message must end with two consecutive empty
+  lines.
 
   Breaking changes in the parser:
-  - Add new variants to `ParseErrorKind`. Mark it as `#[non_exhaustive]`.
-  - Change the type of `expected_error` from `Regex` to `ExpectedError`, which is either a inline `Regex` or multiline `String`.
+    - Add new variants to `ParseErrorKind`. Mark it as `#[non_exhaustive]`.
+    - Change the type of `expected_error` from `Regex` to `ExpectedError`, which is either a inline `Regex` or multiline
+      `String`.
 
 ## [0.17.2] - 2023-11-01
 
-* fix(runner): fix parallel testing db name duplication. Now we use full file path instead of filename as the temporary db name in `run_parallel_async`.
+* fix(runner): fix parallel testing db name duplication. Now we use full file path instead of filename as the temporary
+  db name in `run_parallel_async`.
 
 ## [0.17.1] - 2023-09-20
 
@@ -123,7 +155,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.17.0] - 2023-09-19
 
 * Support environment variables substitution for SQL and system commands.
-  For compatibility, this feature is by default disabled, and can be enabled by adding `control substitution on` to the test file.
+  For compatibility, this feature is by default disabled, and can be enabled by adding `control substitution on` to the
+  test file.
   ```
   control substitution on
 
@@ -138,7 +171,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ...
   ```
 
-  Besides, there's a special variable `$__TEST_DIR__` which is the path to a temporary directory specific to the current test case.
+  Besides, there's a special variable `$__TEST_DIR__` which is the path to a temporary directory specific to the current
+  test case.
   This can be helpful if you need to manipulate some external resources during the test.
   ```
   control substitution on
@@ -151,12 +185,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ```
 
   Changes:
-  - (parser) **Breaking change**: Add `Control::Substitution`. Mark `Control` as `#[non_exhaustive]`.
-  - (runner) **Breaking change**: Remove `enable_testdir`. For migration, one should now enable general substitution by the `control` statement and use a dollar-prefixed `$__TEST_DIR__`.
+    - (parser) **Breaking change**: Add `Control::Substitution`. Mark `Control` as `#[non_exhaustive]`.
+    - (runner) **Breaking change**: Remove `enable_testdir`. For migration, one should now enable general substitution
+      by the `control` statement and use a dollar-prefixed `$__TEST_DIR__`.
 
 ## [0.16.0] - 2023-09-15
 
-* Support running external system commands with the syntax below. This is useful for manipulating some external resources during the test.
+* Support running external system commands with the syntax below. This is useful for manipulating some external
+  resources during the test.
   ```
   system ok
   echo "Hello, world!"
@@ -164,14 +200,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The runner will check the exit code of the command, and the output will be ignored. Currently, only `ok` is supported.
 
   Changes:
-  - (parser) **Breaking change**: Add `Record::System`, and corresponding `TestErrorKind` and `RecordOutput`. Mark `TestErrorKind` and `RecordOutput` as `#[non_exhaustive]`.
-  - (runner) Add `run_command` to `AsyncDB` trait. The default implementation will run the command with `std::process::Command::status`. Implementors can override this method to utilize an asynchronous runtime such as `tokio`.
+    - (parser) **Breaking change**: Add `Record::System`, and corresponding `TestErrorKind` and `RecordOutput`. Mark
+      `TestErrorKind` and `RecordOutput` as `#[non_exhaustive]`.
+    - (runner) Add `run_command` to `AsyncDB` trait. The default implementation will run the command with
+      `std::process::Command::status`. Implementors can override this method to utilize an asynchronous runtime such as
+      `tokio`.
 
-* fix(runner): fix database name duplication for parallel tests by using the **full path** of the test file (instead of the file name) as the database name.
+* fix(runner): fix database name duplication for parallel tests by using the **full path** of the test file (instead of
+  the file name) as the database name.
 
 ## [0.15.3] - 2023-08-02
 
-* fix(bin): fix error context display. To avoid stack backtrace being printed, unset `RUST_BACKTRACE` environment variable, or use pre-built binaries built with stable toolchain instead.
+* fix(bin): fix error context display. To avoid stack backtrace being printed, unset `RUST_BACKTRACE` environment
+  variable, or use pre-built binaries built with stable toolchain instead.
 
 ## [0.15.2] - 2023-07-31
 
@@ -179,21 +220,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.15.1] - 2023-07-24
 
-* fix `statement error` unexpectedly passed when result is a successful `query`. Similarly for expected `query error` but successful `statement ok`.
+* fix `statement error` unexpectedly passed when result is a successful `query`. Similarly for expected `query error`
+  but successful `statement ok`.
 
 ## [0.15.0] - 2023-07-06
 
-* Allow multiple connections to the database in a single test case, which is useful for testing the transaction behavior. This can be achieved by attaching a `connection foo` record before the query or statement.
-  - (parser) Add `Record::Connection`.
-  - (runner) **Breaking change**: Since the runner may establish multiple connections at runtime, `Runner::new` now takes a `impl MakeConnection`, which is usually a closure that returns a try-future of the `AsyncDB` instance.
-  - (bin) The connection to the database is now established lazily on the first query or statement.
+* Allow multiple connections to the database in a single test case, which is useful for testing the transaction
+  behavior. This can be achieved by attaching a `connection foo` record before the query or statement.
+    - (parser) Add `Record::Connection`.
+    - (runner) **Breaking change**: Since the runner may establish multiple connections at runtime, `Runner::new` now
+      takes a `impl MakeConnection`, which is usually a closure that returns a try-future of the `AsyncDB` instance.
+    - (bin) The connection to the database is now established lazily on the first query or statement.
 
 ## [0.14.0] - 2023-06-08
 
-* We enhanced how `skipif` and `onlyif` works. Previously it checks against `DB::engine_name()`, and `sqllogictest-bin` didn't implement it.
-  - (parser) A minor **breaking change**: Change the field names of `Condition:: OnlyIf/SkipIf`.
-  - (runner) Add `Runner::add_label`. Now multiple labels are supported ( `DB::engine_name()` is still included). The condition evaluates to true if *any* of the provided labels match the `skipif/onlyif <label>`.
-  - (bin) Add `--label` option to specify custom labels.
+* We enhanced how `skipif` and `onlyif` works. Previously it checks against `DB::engine_name()`, and `sqllogictest-bin`
+  didn't implement it.
+    - (parser) A minor **breaking change**: Change the field names of `Condition:: OnlyIf/SkipIf`.
+    - (runner) Add `Runner::add_label`. Now multiple labels are supported ( `DB::engine_name()` is still included). The
+      condition evaluates to true if *any* of the provided labels match the `skipif/onlyif <label>`.
+    - (bin) Add `--label` option to specify custom labels.
 
 ## [0.13.2] - 2023-03-24
 
@@ -232,15 +278,17 @@ This release contains some minor fixes.
 
 ## [0.10.0] - 2022-12-15
 
-- Improve the ability to unparse and update the test files. Mainly add `update_record_with_output` and `update_test_file` to the library. 
+- Improve the ability to unparse and update the test files. Mainly add `update_record_with_output` and
+  `update_test_file` to the library.
 
   More details:
-  * Add `impl Display` for `Record` (refactor `unparse`).
-  * Add `Record::Whitespace` so the whitespace in the original files can be reconstructed during `unparse`.
-  * Add tests for unparsing and updating records.
-  * Refactor and fix the behavior about newlines and `halt` for CLI options `--override` and `--format`.
+    * Add `impl Display` for `Record` (refactor `unparse`).
+    * Add `Record::Whitespace` so the whitespace in the original files can be reconstructed during `unparse`.
+    * Add tests for unparsing and updating records.
+    * Refactor and fix the behavior about newlines and `halt` for CLI options `--override` and `--format`.
 - Fix: `hash-threshold` should be compared with the number of values instead of the number of rows.
-- **Breaking change**: The type of `Validator` is changed from `fn(&Vec<String>, &Vec<String>) -> bool` to `fn(&[Vec<String>], &[String]) -> bool`. Also added a `default_validator`.
+- **Breaking change**: The type of `Validator` is changed from `fn(&Vec<String>, &Vec<String>) -> bool` to
+  `fn(&[Vec<String>], &[String]) -> bool`. Also added a `default_validator`.
 
 Thanks to the contributions of @alamb and @xudong963 .
 
@@ -249,19 +297,22 @@ Thanks to the contributions of @alamb and @xudong963 .
 - Improve the format and color handling for errors.
 - Support `hash-threshold`.
 - Fix `statement count <n>` for postgres engines.
-- **Breaking change**: use `Vec<Vec<String>>` instead of `String` as the query results by `DB`. This allows the runner to verify the results more precisely.
-  + For `rowsort`, runner will only sort actual results now, which means the result in the test cases should be sorted.
+- **Breaking change**: use `Vec<Vec<String>>` instead of `String` as the query results by `DB`. This allows the runner
+  to verify the results more precisely.
+    + For `rowsort`, runner will only sort actual results now, which means the result in the test cases should be
+      sorted.
 - **Breaking change**: `Hook` is removed.
 - **Breaking change**: `Record` and parser's behavior are tweaked:
-  + retain `Include` record when linking its content
-  + keep parsing after `Halt`
-  + move `Begin/EndInclude` to `Injected`
-- Added CLI options `--override` and `--format`, which can override the test files with the actual output of the database, or reformat the test files.
+    + retain `Include` record when linking its content
+    + keep parsing after `Halt`
+    + move `Begin/EndInclude` to `Injected`
+- Added CLI options `--override` and `--format`, which can override the test files with the actual output of the
+  database, or reformat the test files.
 
 ## [0.8.0] - 2022-11-22
 
 - Support checking error message using `statement error <regex>` and `query error <regex>` syntax.
-  - **Breaking change**: `Record::Statement`,  `Record::Query` and `TestErrorKind` are changed accordingly.
+    - **Breaking change**: `Record::Statement`,  `Record::Query` and `TestErrorKind` are changed accordingly.
 
 ## [0.7.1] - 2022-11-15
 
