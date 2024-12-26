@@ -1,0 +1,16 @@
+query I retry 3 backoff 5s
+SELECT id FROM test;
+----
+1
+
+query I rowsort retry 2 backoff 1s
+SELECT id FROM test ORDER BY random();
+----
+1
+2
+3
+
+query I retry 1 backoff 500ms
+SELECT id FROM test;
+----
+1 
