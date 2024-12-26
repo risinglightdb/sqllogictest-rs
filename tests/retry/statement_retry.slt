@@ -1,0 +1,5 @@
+statement ok retry 3 backoff 5s
+INSERT INTO test VALUES (1);
+
+statement count 5 retry 2 backoff 1s
+UPDATE test SET value = value + 1; 

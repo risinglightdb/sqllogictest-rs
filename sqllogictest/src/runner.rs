@@ -596,6 +596,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 // compare result in run_async
                 expected: _,
                 loc: _,
+                retry: _,
             } => {
                 let sql = match self.may_substitute(sql, true) {
                     Ok(sql) => sql,
@@ -743,6 +744,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 // compare result in run_async
                 expected,
                 loc: _,
+                retry: _,
             } => {
                 let sql = match self.may_substitute(sql, true) {
                     Ok(sql) => sql,
@@ -880,6 +882,36 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         &mut self,
         record: Record<D::ColumnType>,
     ) -> Result<RecordOutput<D::ColumnType>, TestError> {
+        let retry = match &record {
+            Record::Statement { retry, .. } => retry.clone(),
+            Record::Query { retry, .. } => retry.clone(),
+            _ => None,
+        };
+        if retry.is_none() {
+            return self.run_async_no_retry(record).await;
+        }
+
+        // Retry for `retry.attempts` times. The parser ensures that `retry.attempts` must > 0.
+        let retry = retry.unwrap();
+        let mut last_error = None;
+        for _ in 0..retry.attempts {
+            let result = self.run_async_no_retry(record.clone()).await;
+            if result.is_ok() {
+                return result;
+            }
+            tracing::warn!(target:"sqllogictest::retry", backoff = ?retry.backoff, error = ?result, "retrying");
+            D::sleep(retry.backoff).await;
+            last_error = result.err();
+        }
+
+        Err(last_error.unwrap())
+    }
+
+    /// Run a single record without retry.
+    async fn run_async_no_retry(
+        &mut self,
+        record: Record<D::ColumnType>,
+    ) -> Result<RecordOutput<D::ColumnType>, TestError> {
         let result = self.apply_record(record.clone()).await;
 
         match (record, &result) {
@@ -941,6 +973,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     conditions: _,
                     sql,
                     expected,
+                    retry: _,
                 },
                 RecordOutput::Statement { count, error },
             ) => match (error, expected) {
@@ -989,6 +1022,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     connection: _,
                     sql,
                     expected,
+                    retry: _,
                 },
                 RecordOutput::Query { types, rows, error },
             ) => {
@@ -1451,6 +1485,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 conditions,
                 connection,
                 expected: mut expected @ (StatementExpect::Ok | StatementExpect::Count(_)),
+                retry,
             },
             RecordOutput::Query {
                 error: None, rows, ..
@@ -1473,6 +1508,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 conditions,
                 connection,
                 expected,
+                retry,
             })
         }
         // query, statement
@@ -1483,6 +1519,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 conditions,
                 connection,
                 expected: _,
+                retry,
             },
             RecordOutput::Statement { error: None, count },
         ) => Some(Record::Statement {
@@ -1491,6 +1528,7 @@ pub fn update_record_with_output<T: ColumnType>(
             conditions,
             connection,
             expected: StatementExpect::Count(*count),
+            retry,
         }),
         // statement, statement
         (
@@ -1500,6 +1538,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 connection,
                 sql,
                 expected,
+                retry,
             },
             RecordOutput::Statement { count, error },
         ) => match (error, expected) {
@@ -1513,6 +1552,7 @@ pub fn update_record_with_output<T: ColumnType>(
                     StatementExpect::Count(_) => StatementExpect::Count(*count),
                     StatementExpect::Error(_) | StatementExpect::Ok => StatementExpect::Ok,
                 },
+                retry,
             }),
             // Error match
             (Some(e), StatementExpect::Error(expected_error))
@@ -1535,6 +1575,7 @@ pub fn update_record_with_output<T: ColumnType>(
                     loc,
                     conditions,
                     connection,
+                    retry,
                 })
             }
         },
@@ -1546,6 +1587,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 connection,
                 sql,
                 expected,
+                retry,
             },
             RecordOutput::Query { types, rows, error },
         ) => match (error, expected) {
@@ -1570,6 +1612,7 @@ pub fn update_record_with_output<T: ColumnType>(
                     loc,
                     conditions,
                     connection,
+                    retry,
                 })
             }
             (None, expected) => {
@@ -1597,7 +1640,7 @@ pub fn update_record_with_output<T: ColumnType>(
                     expected: match expected {
                         QueryExpect::Results {
                             sort_mode,
-                            label,
+
                             result_mode,
                             ..
                         } => QueryExpect::Results {
@@ -1605,16 +1648,15 @@ pub fn update_record_with_output<T: ColumnType>(
                             types,
                             sort_mode,
                             result_mode,
-                            label,
                         },
                         QueryExpect::Error(_) => QueryExpect::Results {
                             results,
                             types,
                             sort_mode: None,
                             result_mode: None,
-                            label: None,
                         },
                     },
+                    retry,
                 })
             }
         },

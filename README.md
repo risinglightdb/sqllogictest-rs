@@ -132,6 +132,18 @@ echo $USER
 xxchan
 ```
 
+### Extension: Retry
+
+```text
+query I retry 3 backoff 5s
+SELECT id FROM test;
+----
+1
+
+statement ok retry 3 backoff 5s
+UPDATE test SET id = 1;
+```
+
 ### Extension: Environment variable substitution in query and statement
 
 It needs to be enabled by adding `control substitution on` to the test file.
