@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.25.0] - 2024-12-26
+
+* runner: Add `retry` clause to `statement ok` and `query ok|error`.
+
 ## [0.24.0] - 2024-12-20
 
 * runner: Added a `Normalizer` type for normalizing result values. A new function
