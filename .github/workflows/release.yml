@@ -49,9 +49,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - os: ubuntu-20.04
+        - os: ubuntu-22.04
           rust: stable
           target: x86_64-unknown-linux-musl
+        - os: ubuntu-22.04
+          rust: stable
+          target: aarch64-unknown-linux-musl
         - os: macos-latest
           rust: stable
           target: x86_64-apple-darwin
@@ -68,10 +71,20 @@ jobs:
       with:
         fetch-depth: 1
     - name: Install packages (Ubuntu)
-      if: matrix.os == 'ubuntu-20.04'
+      if: matrix.os == 'ubuntu-22.04'
       run: |
+        sudo dpkg --add-architecture arm64
+        cat <<EOL | sudo tee "/etc/apt/sources.list"
+        deb [arch=amd64] http://azure.archive.ubuntu.com/ubuntu jammy main restricted universe multiverse
+        deb [arch=amd64] http://azure.archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse
+        deb [arch=amd64] http://azure.archive.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
+        deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy main restricted universe multiverse
+        deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy-updates main restricted universe multiverse
+        deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy-security main restricted universe multiverse
+        EOL
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends xz-utils liblz4-tool musl-tools
+        sudo apt-get install -y --no-install-recommends xz-utils liblz4-tool musl-tools musl-dev musl-dev:arm64
+        echo "RUSTFLAGS=-Clinker=rust-lld" >> $GITHUB_ENV
     - name: Install Rust
       uses: actions-rs/toolchain@v1
       with:
