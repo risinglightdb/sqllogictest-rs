@@ -95,6 +95,7 @@ pub enum QueryExpect<T: ColumnType> {
         types: Vec<T>,
         sort_mode: Option<SortMode>,
         result_mode: Option<ResultMode>,
+        label: Option<String>,
         results: Vec<String>,
     },
     /// Query should fail with the given error message.
@@ -108,6 +109,7 @@ impl<T: ColumnType> QueryExpect<T> {
             types: Vec::new(),
             sort_mode: None,
             result_mode: None,
+            label: None,
             results: Vec::new(),
         }
     }
@@ -255,11 +257,17 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 write!(f, "query ")?;
                 match expected {
                     QueryExpect::Results {
-                        types, sort_mode, ..
+                        types,
+                        sort_mode,
+                        label,
+                        ..
                     } => {
                         write!(f, "{}", types.iter().map(|c| c.to_char()).join(""))?;
                         if let Some(sort_mode) = sort_mode {
                             write!(f, " {}", sort_mode.as_str())?;
+                        }
+                        if let Some(label) = label {
+                            write!(f, " {label}")?;
                         }
                     }
                     QueryExpect::Error(err) => err.fmt_inline(f)?,
@@ -281,6 +289,8 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                         for result in results {
                             write!(f, "\n{result}")?;
                         }
+
+                        // query always ends with a blank line
                         writeln!(f)?
                     }
                     QueryExpect::Error(err) => err.fmt_multiline(f)?,
@@ -815,6 +825,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                         }
                     }
                     [type_str, res @ ..] => {
+                        // query <type-string> [<sort-mode>] [<label>] [retry <attempts> backoff <backoff>]
                         let types = type_str
                             .chars()
                             .map(|ch| {
@@ -822,17 +833,30 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                                     .ok_or_else(|| ParseErrorKind::InvalidType(ch).at(loc.clone()))
                             })
                             .try_collect()?;
-                        let sort_mode = res.first().and_then(|&s| SortMode::try_from_str(s).ok()); // Could be `retry`
+                        let sort_mode = res.first().and_then(|&s| SortMode::try_from_str(s).ok()); // Could be `retry` or label
 
-                        let retry_start = if sort_mode.is_some() { 1 } else { 0 };
+                        // To support `retry`, we assume the label must *not* be "retry"
+                        let label_start = if sort_mode.is_some() { 1 } else { 0 };
+                        let res = &res[label_start..];
+                        let label = res.first().and_then(|&s| {
+                            if s != "retry" {
+                                Some(s.to_owned())
+                            } else {
+                                None // `retry` is not a valid label
+                            }
+                        });
+
+                        let retry_start = if label.is_some() { 1 } else { 0 };
+                        let res = &res[retry_start..];
                         (
                             QueryExpect::Results {
                                 types,
                                 sort_mode,
                                 result_mode: None,
+                                label,
                                 results: Vec::new(),
                             },
-                            &res[retry_start..],
+                            res,
                         )
                     }
                     [] => (QueryExpect::empty_results(), &[][..]),

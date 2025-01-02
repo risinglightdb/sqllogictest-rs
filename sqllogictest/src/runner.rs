@@ -1640,7 +1640,7 @@ pub fn update_record_with_output<T: ColumnType>(
                     expected: match expected {
                         QueryExpect::Results {
                             sort_mode,
-
+                            label,
                             result_mode,
                             ..
                         } => QueryExpect::Results {
@@ -1648,12 +1648,14 @@ pub fn update_record_with_output<T: ColumnType>(
                             types,
                             sort_mode,
                             result_mode,
+                            label,
                         },
                         QueryExpect::Error(_) => QueryExpect::Results {
                             results,
                             types,
                             sort_mode: None,
                             result_mode: None,
+                            label: None,
                         },
                     },
                     retry,
