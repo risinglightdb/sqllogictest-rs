@@ -145,6 +145,7 @@ SELECT id FROM test;
 ----
 database error: table not found
 
+
 statement ok retry 3 backoff 5s
 UPDATE test SET id = 1;
 

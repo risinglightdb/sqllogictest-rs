@@ -9,7 +9,9 @@ UPDATE test SET value = value + 1;
 ----
 table not found
 
+
 statement error
 UPDATE test SET value = value + 1; 
 ----
 table not found
+

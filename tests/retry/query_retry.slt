@@ -20,7 +20,9 @@ SELECT id FROM test;
 ----
 table not found
 
+
 query error
 SELECT id FROM test;
 ----
 table not found
+
