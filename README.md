@@ -140,9 +140,22 @@ SELECT id FROM test;
 ----
 1
 
+query error retry 3 backoff 5s
+SELECT id FROM test;
+----
+database error: table not found
+
+
 statement ok retry 3 backoff 5s
 UPDATE test SET id = 1;
+
+statement error
+UPDATE test SET value = value + 1; 
+----
+database error: table not found
 ```
+
+Due to the limitation of syntax, the retry clause can't be used along with the single-line regex error message extension.
 
 ### Extension: Environment variable substitution in query and statement
 

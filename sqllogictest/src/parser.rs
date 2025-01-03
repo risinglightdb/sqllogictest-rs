@@ -755,12 +755,16 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
             ["statement", res @ ..] => {
                 let (mut expected, res) = match res {
                     ["ok", retry @ ..] => (StatementExpect::Ok, retry),
-                    ["error", err_tokens @ ..] => {
-                        // NOTE: `statement error` can't be used with `retry` now because all the
-                        // tokens after `error` are treated as error message.
-                        let error = ExpectedError::parse_inline_tokens(err_tokens)
-                            .map_err(|e| e.at(loc.clone()))?;
-                        (StatementExpect::Error(error), &[][..])
+                    ["error", res @ ..] => {
+                        if res.len() == 4 && res[0] == "retry" && res[2] == "backoff" {
+                            // `statement error retry <num> backoff <duration>`
+                            // To keep syntax simple, let's assume the error message must be multiline.
+                            (StatementExpect::Error(ExpectedError::Empty), res)
+                        } else {
+                            let error = ExpectedError::parse_inline_tokens(res)
+                                .map_err(|e| e.at(loc.clone()))?;
+                            (StatementExpect::Error(error), &[][..])
+                        }
                     }
                     ["count", count_str, retry @ ..] => {
                         let count = count_str.parse::<u64>().map_err(|_| {
@@ -799,12 +803,16 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
             }
             ["query", res @ ..] => {
                 let (mut expected, res) = match res {
-                    ["error", err_tokens @ ..] => {
-                        // NOTE: `query error` can't be used with `retry` now because all the tokens
-                        // after `error` are treated as error message.
-                        let error = ExpectedError::parse_inline_tokens(err_tokens)
-                            .map_err(|e| e.at(loc.clone()))?;
-                        (QueryExpect::Error(error), &[][..])
+                    ["error", res @ ..] => {
+                        if res.len() == 4 && res[0] == "retry" && res[2] == "backoff" {
+                            // `query error retry <num> backoff <duration>`
+                            // To keep syntax simple, let's assume the error message must be multiline.
+                            (QueryExpect::Error(ExpectedError::Empty), res)
+                        } else {
+                            let error = ExpectedError::parse_inline_tokens(res)
+                                .map_err(|e| e.at(loc.clone()))?;
+                            (QueryExpect::Error(error), &[][..])
+                        }
                     }
                     [type_str, res @ ..] => {
                         let types = type_str
