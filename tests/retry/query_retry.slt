@@ -10,7 +10,17 @@ SELECT id FROM test ORDER BY random();
 2
 3
 
-query I retry 1 backoff 500ms
+query I retry 2 backoff 500ms
 SELECT id FROM test;
 ----
 1 
+
+query error retry 2 backoff 500ms
+SELECT id FROM test;
+----
+table not found
+
+query error
+SELECT id FROM test;
+----
+table not found

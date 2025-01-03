@@ -3,3 +3,13 @@ INSERT INTO test VALUES (1);
 
 statement count 5 retry 2 backoff 1s
 UPDATE test SET value = value + 1; 
+
+statement error retry 2 backoff 500ms
+UPDATE test SET value = value + 1; 
+----
+table not found
+
+statement error
+UPDATE test SET value = value + 1; 
+----
+table not found
