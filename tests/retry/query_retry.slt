@@ -1,3 +1,4 @@
+# SYNTAX: query <type-string> [<sort-mode>] [<label>] [retry <attempts> backoff <backoff>]
 query I retry 3 backoff 5s
 SELECT id FROM test;
 ----
@@ -14,6 +15,37 @@ query I retry 2 backoff 500ms
 SELECT id FROM test;
 ----
 1 
+
+query I my_label retry 1 backoff 500ms
+SELECT id FROM test;
+----
+1 
+
+query I rowsort my_label retry 1 backoff 500ms
+SELECT id FROM test;
+----
+1 
+
+query I rowsort my_label
+SELECT id FROM test;
+----
+1 
+
+query I rowsort
+SELECT id FROM test;
+----
+1 
+
+query I my_label
+SELECT id FROM test;
+----
+1 
+
+query I
+SELECT id FROM test;
+----
+1 
+
 
 query error retry 2 backoff 500ms
 SELECT id FROM test;
