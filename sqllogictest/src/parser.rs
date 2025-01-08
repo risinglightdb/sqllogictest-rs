@@ -158,8 +158,8 @@ pub enum Record<T: ColumnType> {
         /// The external command.
         command: String,
         stdout: Option<String>,
-                /// Optional retry configuration
-                retry: Option<RetryConfig>,
+        /// Optional retry configuration
+        retry: Option<RetryConfig>,
     },
     /// A sleep period.
     Sleep {
