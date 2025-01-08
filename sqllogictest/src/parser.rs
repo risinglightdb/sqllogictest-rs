@@ -158,6 +158,8 @@ pub enum Record<T: ColumnType> {
         /// The external command.
         command: String,
         stdout: Option<String>,
+                /// Optional retry configuration
+                retry: Option<RetryConfig>,
     },
     /// A sleep period.
     Sleep {
@@ -302,8 +304,17 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 conditions: _,
                 command,
                 stdout,
+                retry,
             } => {
                 writeln!(f, "system ok\n{command}")?;
+                if let Some(retry) = retry {
+                    write!(
+                        f,
+                        " retry {} backoff {}",
+                        retry.attempts,
+                        humantime::format_duration(retry.backoff)
+                    )?;
+                }
                 if let Some(stdout) = stdout {
                     writeln!(f, "----\n{}\n", stdout.trim())?;
                 }
@@ -898,7 +909,9 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     retry,
                 });
             }
-            ["system", "ok"] => {
+            ["system", "ok", res @ ..] => {
+                let retry = parse_retry_config(res).map_err(|e| e.at(loc.clone()))?;
+
                 // TODO: we don't support asserting error message for system command
                 // The command is found on second and subsequent lines of the record
                 // up to first line of the form "----" or until the end of the record.
@@ -913,6 +926,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     conditions: std::mem::take(&mut conditions),
                     command,
                     stdout,
+                    retry,
                 });
             }
             ["control", res @ ..] => match res {

@@ -644,6 +644,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 command,
                 loc: _,
                 stdout: expected_stdout,
+                retry: _,
             } => {
                 if should_skip(&self.labels, "", &conditions) {
                     return RecordOutput::Nothing;
@@ -885,6 +886,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         let retry = match &record {
             Record::Statement { retry, .. } => retry.clone(),
             Record::Query { retry, .. } => retry.clone(),
+            Record::System { retry, .. } => retry.clone(),
             _ => None,
         };
         if retry.is_none() {
@@ -1099,6 +1101,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     conditions: _,
                     command,
                     stdout: expected_stdout,
+                    retry: _,
                 },
                 RecordOutput::System {
                     error,
@@ -1668,6 +1671,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 conditions,
                 command,
                 stdout: _,
+                retry,
             },
             RecordOutput::System {
                 stdout: actual_stdout,
@@ -1686,6 +1690,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 conditions,
                 command,
                 stdout: actual_stdout.clone(),
+                retry,
             })
         }
 
