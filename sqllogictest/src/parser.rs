@@ -1341,11 +1341,11 @@ select * from foo;
 
     #[test]
     fn test_statement_retry() {
-        parse_roundtrip::<DefaultColumnType>("../tests/retry/statement_retry.slt")
+        parse_roundtrip::<DefaultColumnType>("../tests/no_run/statement_retry.slt")
     }
 
     #[test]
     fn test_query_retry() {
-        parse_roundtrip::<DefaultColumnType>("../tests/retry/query_retry.slt")
+        parse_roundtrip::<DefaultColumnType>("../tests/no_run/query_retry.slt")
     }
 }
