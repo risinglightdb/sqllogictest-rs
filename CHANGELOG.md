@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.26.1] - 2025-01-08
+
+* parser/runner: support `system ok retry`
+
 ## [0.26.0] - 2025-01-06
 
-* paser: Add back `label` support, which was removed in 0.25.0.
+* parser: Add back `label` support, which was removed in 0.25.0.
 * parser/runner: support `[statement|query] error retry` (Only support multi-line error message)
 
 ## [0.25.0] - 2024-12-26

@@ -1,0 +1,9 @@
+query I retry 3 backoff 0s
+select counter()
+----
+3
+
+system ok retry 3 backoff 1ms1ns
+echo "hello"
+----
+hello
