@@ -63,11 +63,11 @@ struct Opt {
     #[clap(long, short)]
     jobs: Option<usize>,
     /// When using `-j`, whether to keep the temporary database when a test case fails.
-    #[clap(long, default_value = "false")]
+    #[clap(long, default_value = "false", env = "SLT_KEEP_DB_ON_FAILURE")]
     keep_db_on_failure: bool,
 
     /// Whether to exit immediately when a test case fails.
-    #[clap(long, default_value = "false")]
+    #[clap(long, default_value = "false", env = "SLT_FAIL_FAST")]
     fail_fast: bool,
 
     /// Report to junit XML.

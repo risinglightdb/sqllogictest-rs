@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.26.2] - 2025-01-08
 
-* bin: support `--fail-fast`
+* bin: support `--fail-fast`, and add env vars `SLT_FAIL_FAST` and `SLT_KEEP_DB_ON_FAILURE`
 
 ## [0.26.1] - 2025-01-08
 
