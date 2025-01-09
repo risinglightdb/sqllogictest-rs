@@ -66,6 +66,10 @@ struct Opt {
     #[clap(long, default_value = "false")]
     keep_db_on_failure: bool,
 
+    /// Whether to exit immediately when a test case fails.
+    #[clap(long, default_value = "false")]
+    fail_fast: bool,
+
     /// Report to junit XML.
     #[clap(long)]
     junit: Option<String>,
@@ -150,6 +154,7 @@ pub async fn main() -> Result<()> {
         color,
         jobs,
         keep_db_on_failure,
+        fail_fast,
         junit,
         host,
         port,
@@ -239,6 +244,7 @@ pub async fn main() -> Result<()> {
             config,
             &labels,
             junit.clone(),
+            fail_fast,
         )
         .await
     } else {
@@ -249,6 +255,7 @@ pub async fn main() -> Result<()> {
             config,
             &labels,
             junit.clone(),
+            fail_fast,
         )
         .await
     };
@@ -272,6 +279,7 @@ async fn run_parallel(
     config: DBConfig,
     labels: &[String],
     junit: Option<String>,
+    fail_fast: bool,
 ) -> Result<()> {
     let mut create_databases = BTreeMap::new();
     let mut filenames = BTreeSet::new();
@@ -332,11 +340,14 @@ async fn run_parallel(
 
     let mut failed_case = vec![];
     let mut failed_db: HashSet<String> = HashSet::new();
+    let mut remaining_files: HashSet<String> = HashSet::from_iter(filenames.clone());
 
     let start = Instant::now();
 
     while let Some((db_name, file, res, mut buf)) = stream.next().await {
+        remaining_files.remove(&file);
         let test_case_name = file.replace(['/', ' ', '.', '-'], "_");
+        let mut failed = false;
         let case = match res {
             Ok(duration) => {
                 let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
@@ -346,6 +357,7 @@ async fn run_parallel(
                 case
             }
             Err(e) => {
+                failed = true;
                 writeln!(buf, "{}\n\n{:?}", style("[FAILED]").red().bold(), e)?;
                 writeln!(buf)?;
                 failed_case.push(file.clone());
@@ -363,6 +375,20 @@ async fn run_parallel(
         };
         test_suite.add_test_case(case);
         tokio::task::block_in_place(|| stdout().write_all(&buf))?;
+        if fail_fast && failed {
+            println!("early exit after failure...");
+            break;
+        }
+    }
+
+    for file in remaining_files {
+        println!("{file} is not finished, skipping");
+        let test_case_name = file.replace(['/', ' ', '.', '-'], "_");
+        let mut case = TestCase::new(test_case_name, TestCaseStatus::skipped());
+        case.set_time(Duration::from_millis(0));
+        case.set_timestamp(Local::now());
+        case.set_classname(junit.as_deref().unwrap_or_default());
+        test_suite.add_test_case(case);
     }
 
     eprintln!(
@@ -404,10 +430,12 @@ async fn run_serial(
     config: DBConfig,
     labels: &[String],
     junit: Option<String>,
+    fail_fast: bool,
 ) -> Result<()> {
     let mut failed_case = vec![];
-
-    for file in files {
+    let mut skipped_case = vec![];
+    let mut files = files.into_iter();
+    for file in &mut files {
         let mut runner = Runner::new(|| engines::connect(engine, &config));
         for label in labels {
             runner.add_label(label);
@@ -415,6 +443,7 @@ async fn run_serial(
 
         let filename = file.to_string_lossy().to_string();
         let test_case_name = filename.replace(['/', ' ', '.', '-'], "_");
+        let mut failed = false;
         let case = match run_test_file(&mut std::io::stdout(), runner, &file).await {
             Ok(duration) => {
                 let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
@@ -424,6 +453,7 @@ async fn run_serial(
                 case
             }
             Err(e) => {
+                failed = true;
                 println!("{}\n\n{:?}", style("[FAILED]").red().bold(), e);
                 println!();
                 failed_case.push(filename.clone());
@@ -439,6 +469,23 @@ async fn run_serial(
             }
         };
         test_suite.add_test_case(case);
+        if fail_fast && failed {
+            println!("early exit after failure...");
+            break;
+        }
+    }
+    for file in files {
+        let filename = file.to_string_lossy().to_string();
+        let test_case_name = filename.replace(['/', ' ', '.', '-'], "_");
+        let mut case = TestCase::new(test_case_name, TestCaseStatus::skipped());
+        case.set_time(Duration::from_millis(0));
+        case.set_timestamp(Local::now());
+        case.set_classname(junit.as_deref().unwrap_or_default());
+        test_suite.add_test_case(case);
+        skipped_case.push(filename.clone());
+    }
+    if !skipped_case.is_empty() {
+        println!("some test case skipped:\n{:#?}", skipped_case);
     }
 
     if !failed_case.is_empty() {

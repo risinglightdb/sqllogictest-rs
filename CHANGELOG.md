@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.26.2] - 2025-01-08
+
+* bin: support `--fail-fast`
+
 ## [0.26.1] - 2025-01-08
 
 * parser/runner: support `system ok retry`
