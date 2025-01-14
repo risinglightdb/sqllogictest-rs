@@ -397,8 +397,8 @@ async fn run_parallel(
         start.elapsed().as_millis()
     );
 
-    // Abort running cases and drop the session connections to the DB server
-    // before dropping temporary databases.
+    // If `fail_fast`, there could be some ongoing cases (then active connections)
+    // in the stream. Abort them before dropping temporary databases.
     drop(stream);
 
     for db_name in db_names {
