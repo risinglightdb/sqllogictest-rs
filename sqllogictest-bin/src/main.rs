@@ -837,11 +837,9 @@ async fn update_record<M: MakeConnection>(
 }
 
 mod utils {
-    use std::{
-        future::Future,
-        pin::Pin,
-        task::{Context, Poll},
-    };
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
 
     use tokio::task::{JoinError, JoinHandle};
 
