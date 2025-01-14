@@ -33,6 +33,7 @@ tokio = { version = "1", features = [
     "fs",
     "process",
 ] }
+tokio-util = { version = "0.7.12", features = ["rt"] }
 fs-err = "3.0.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"

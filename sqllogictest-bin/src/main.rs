@@ -20,7 +20,7 @@ use sqllogictest::{
     default_column_validator, default_normalizer, default_validator, update_record_with_output,
     AsyncDB, Injected, MakeConnection, Record, Runner,
 };
-use utils::AbortOnDropHandle;
+use tokio_util::task::AbortOnDropHandle;
 
 #[derive(Default, Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 #[must_use]
@@ -323,7 +323,7 @@ async fn run_parallel(
             let engine = engine.clone();
             let labels = labels.to_vec();
             async move {
-                let (buf, res) = AbortOnDropHandle(tokio::spawn(async move {
+                let (buf, res) = AbortOnDropHandle::new(tokio::spawn(async move {
                     let mut buf = vec![];
                     let res =
                         connect_and_run_test_file(&mut buf, filename, &engine, config, &labels)
@@ -834,29 +834,4 @@ async fn update_record<M: MakeConnection>(
     }
 
     Ok(())
-}
-
-mod utils {
-    use std::future::Future;
-    use std::pin::Pin;
-    use std::task::{Context, Poll};
-
-    use tokio::task::{JoinError, JoinHandle};
-
-    /// A wrapper around a [`tokio::task::JoinHandle`], which aborts the task when it is dropped.
-    pub struct AbortOnDropHandle<T>(pub JoinHandle<T>);
-
-    impl<T> Drop for AbortOnDropHandle<T> {
-        fn drop(&mut self) {
-            self.0.abort();
-        }
-    }
-
-    impl<T> Future for AbortOnDropHandle<T> {
-        type Output = Result<T, JoinError>;
-
-        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-            Pin::new(&mut self.0).poll(cx)
-        }
-    }
 }
