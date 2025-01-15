@@ -344,7 +344,7 @@ async fn run_parallel(
     let mut remaining_files: HashSet<String> = HashSet::from_iter(filenames.clone());
 
     let start = Instant::now();
-
+    let mut connection_refused = false;
     while let Some((db_name, file, res, mut buf)) = stream.next().await {
         remaining_files.remove(&file);
         let test_case_name = file.replace(['/', ' ', '.', '-'], "_");
@@ -359,7 +359,11 @@ async fn run_parallel(
             }
             Err(e) => {
                 failed = true;
-                writeln!(buf, "{}\n\n{:?}", style("[FAILED]").red().bold(), e)?;
+                let err = format!("{:?}", e);
+                if err.contains("Connection refused") {
+                    connection_refused = true;
+                }
+                writeln!(buf, "{}\n\n{}", style("[FAILED]").red().bold(), err)?;
                 writeln!(buf)?;
                 failed_case.push(file.clone());
                 failed_db.insert(db_name.clone());
@@ -376,6 +380,10 @@ async fn run_parallel(
         };
         test_suite.add_test_case(case);
         tokio::task::block_in_place(|| stdout().write_all(&buf))?;
+        if connection_refused {
+            eprintln!("Connection refused. The server may be down. Exiting...");
+            break;
+        }
         if fail_fast && failed {
             println!("early exit after failure...");
             break;
@@ -401,22 +409,31 @@ async fn run_parallel(
     // in the stream. Abort them before dropping temporary databases.
     drop(stream);
 
-    for db_name in db_names {
-        if keep_db_on_failure && failed_db.contains(&db_name) {
-            eprintln!(
-                "+ {}",
-                style(format!(
-                    "DATABASE {db_name} contains failed cases, kept for debugging"
-                ))
-                .red()
-                .bold()
-            );
-            continue;
-        }
-        let query = format!("DROP DATABASE {db_name};");
-        eprintln!("+ {query}");
-        if let Err(err) = db.run(&query).await {
-            eprintln!("  ignore error: {err}");
+    if connection_refused {
+        eprintln!("Skip dropping databases due to connection refused: {db_names:?}");
+    } else {
+        for db_name in db_names {
+            if keep_db_on_failure && failed_db.contains(&db_name) {
+                eprintln!(
+                    "+ {}",
+                    style(format!(
+                        "DATABASE {db_name} contains failed cases, kept for debugging"
+                    ))
+                    .red()
+                    .bold()
+                );
+                continue;
+            }
+            let query = format!("DROP DATABASE {db_name};");
+            eprintln!("+ {query}");
+            if let Err(err) = db.run(&query).await {
+                let err = err.to_string();
+                if err.contains("Connection refused") {
+                    eprintln!("  Connection refused. The server may be down. Exiting...");
+                    break;
+                }
+                eprintln!("  ignore DROP DATABASE error: {err}");
+            }
         }
     }
 
@@ -440,6 +457,7 @@ async fn run_serial(
     let mut failed_case = vec![];
     let mut skipped_case = vec![];
     let mut files = files.into_iter();
+    let mut connection_refused = false;
     for file in &mut files {
         let mut runner = Runner::new(|| engines::connect(engine, &config));
         for label in labels {
@@ -459,7 +477,11 @@ async fn run_serial(
             }
             Err(e) => {
                 failed = true;
-                println!("{}\n\n{:?}", style("[FAILED]").red().bold(), e);
+                let err = format!("{:?}", e);
+                if err.contains("Connection refused") {
+                    connection_refused = true;
+                }
+                println!("{}\n\n{}", style("[FAILED]").red().bold(), err);
                 println!();
                 failed_case.push(filename.clone());
                 let mut status = TestCaseStatus::non_success(NonSuccessKind::Failure);
@@ -474,6 +496,10 @@ async fn run_serial(
             }
         };
         test_suite.add_test_case(case);
+        if connection_refused {
+            eprintln!("Connection refused. The server may be down. Exiting...");
+            break;
+        }
         if fail_fast && failed {
             println!("early exit after failure...");
             break;
