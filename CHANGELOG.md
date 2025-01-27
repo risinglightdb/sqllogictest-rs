@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.26.4] - 2025-01-27
+
+* runner: add random string in path generation to avoid conflict when using `include`.
+* bin: detect connection refused error and exit early to make error message clearer.
+
 ## [0.26.3] - 2025-01-14
 
 * bin: when `--fail-fast` is enabled, abort all remaining connections before dropping temporary databases.
