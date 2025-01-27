@@ -25,6 +25,7 @@ subst = "0.3"
 tempfile = "3"
 thiserror = "2"
 tracing = "0.1"
+rand = "0.8.5"
 
 [dev-dependencies]
 pretty_assertions = "1"

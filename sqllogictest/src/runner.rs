@@ -14,6 +14,7 @@ use futures::{stream, Future, FutureExt, StreamExt};
 use itertools::Itertools;
 use md5::Digest;
 use owo_colors::OwoColorize;
+use rand::Rng;
 use similar::{Change, ChangeTag, TextDiff};
 
 use crate::parser::*;
@@ -1339,7 +1340,12 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
         fn create_outfile(filename: impl AsRef<Path>) -> std::io::Result<(PathBuf, File)> {
             let filename = filename.as_ref();
-            let outfilename = filename.file_name().unwrap().to_str().unwrap().to_owned() + ".temp";
+            let outfilename = format!(
+                "{}{:010}{}",
+                filename.file_name().unwrap().to_str().unwrap().to_owned(),
+                rand::thread_rng().gen_range(0..10_000_000),
+                ".temp"
+            );
             let outfilename = filename.parent().unwrap().join(outfilename);
             // create a temp file in read-write mode
             let outfile = OpenOptions::new()
