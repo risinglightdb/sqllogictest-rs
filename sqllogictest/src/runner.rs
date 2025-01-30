@@ -14,6 +14,7 @@ use futures::{stream, Future, FutureExt, StreamExt};
 use itertools::Itertools;
 use md5::Digest;
 use owo_colors::OwoColorize;
+use rand::Rng;
 use similar::{Change, ChangeTag, TextDiff};
 
 use crate::parser::*;
@@ -198,7 +199,7 @@ pub struct TestErrorDisplay<'a> {
     colorize: bool,
 }
 
-impl<'a> Display for TestErrorDisplay<'a> {
+impl Display for TestErrorDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -233,7 +234,7 @@ pub struct ParallelTestErrorDisplay<'a> {
     colorize: bool,
 }
 
-impl<'a> Display for ParallelTestErrorDisplay<'a> {
+impl Display for ParallelTestErrorDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "parallel test failed")?;
         write!(f, "Caused by:")?;
@@ -376,7 +377,7 @@ pub struct TestErrorKindDisplay<'a> {
     colorize: bool,
 }
 
-impl<'a> Display for TestErrorKindDisplay<'a> {
+impl Display for TestErrorKindDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if !self.colorize {
             return write!(f, "{}", self.error);
@@ -496,9 +497,16 @@ fn format_column_diff(expected: &str, actual: &str, colorize: bool) -> String {
     format!("[Expected] {expected}\n[Actual  ] {actual}")
 }
 
+/// Normalizer will be used by [`Runner`] to normalize the result values
+///
+/// # Default
+///
+/// By default, the ([`default_normalizer`]) will be used to normalize values.
+pub type Normalizer = fn(s: &String) -> String;
+
 /// Trim and replace multiple whitespaces with one.
 #[allow(clippy::ptr_arg)]
-fn normalize_string(s: &String) -> String {
+pub fn default_normalizer(s: &String) -> String {
     s.trim().split_ascii_whitespace().join(" ")
 }
 
@@ -506,16 +514,22 @@ fn normalize_string(s: &String) -> String {
 ///
 /// # Default
 ///
-/// By default ([`default_validator`]), we will use compare normalized results.
-pub type Validator = fn(actual: &[Vec<String>], expected: &[String]) -> bool;
+/// By default, the ([`default_validator`]) will be used compare normalized results.
+pub type Validator =
+    fn(normalizer: Normalizer, actual: &[Vec<String>], expected: &[String]) -> bool;
 
-pub fn default_validator(actual: &[Vec<String>], expected: &[String]) -> bool {
-    let expected_results = expected.iter().map(normalize_string).collect_vec();
+pub fn default_validator(
+    normalizer: Normalizer,
+    actual: &[Vec<String>],
+    expected: &[String],
+) -> bool {
+    let expected_results = expected.iter().map(normalizer).collect_vec();
     // Default, we compare normalized results. Whitespace characters are ignored.
     let normalized_rows = actual
         .iter()
-        .map(|strs| strs.iter().map(normalize_string).join(" "))
+        .map(|strs| strs.iter().map(normalizer).join(" "))
         .collect_vec();
+
     normalized_rows == expected_results
 }
 
@@ -560,9 +574,12 @@ pub struct Runner<D: AsyncDB, M: MakeConnection> {
     conn: Connections<D, M>,
     // validator is used for validate if the result of query equals to expected.
     validator: Validator,
+    // normalizer is used to normalize the result text
+    normalizer: Normalizer,
     column_type_validator: ColumnTypeValidator<Column<D::ColumnType>>,
     substitution: Option<Substitution>,
     sort_mode: Option<SortMode>,
+    result_mode: Option<ResultMode>,
     /// 0 means never hashing
     hash_threshold: usize,
     /// Labels for condition `skipif` and `onlyif`.
@@ -576,9 +593,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     pub fn new(make_conn: M) -> Self {
         Runner {
             validator: default_validator,
+            normalizer: default_normalizer,
             column_type_validator: default_column_validator,
             substitution: None,
             sort_mode: None,
+            result_mode: None,
             hash_threshold: 0,
             labels: HashSet::new(),
             conn: Connections::new(make_conn),
@@ -590,6 +609,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         self.labels.insert(label.to_string());
     }
 
+    pub fn with_normalizer(&mut self, normalizer: Normalizer) {
+        self.normalizer = normalizer;
+    }
     pub fn with_validator(&mut self, validator: Validator) {
         self.validator = validator;
     }
@@ -633,6 +655,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 // compare result in run_async
                 expected: _,
                 loc: _,
+                retry: _,
             } => {
                 let sql = match self.may_substitute(sql, true) {
                     Ok(sql) => sql,
@@ -680,6 +703,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 command,
                 loc: _,
                 stdout: expected_stdout,
+                retry: _,
             } => {
                 if should_skip(&self.labels, "", &conditions) {
                     return RecordOutput::Nothing;
@@ -780,6 +804,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 // compare result in run_async
                 expected,
                 loc: _,
+                retry: _,
             } => {
                 let sql = match self.may_substitute(sql, true) {
                     Ok(sql) => sql,
@@ -827,12 +852,28 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     QueryExpect::Error(_) => None,
                 }
                 .or(self.sort_mode);
+
+                let mut value_sort = false;
                 match sort_mode {
                     None | Some(SortMode::NoSort) => {}
                     Some(SortMode::RowSort) => {
                         rows.sort_unstable();
                     }
-                    Some(SortMode::ValueSort) => todo!("value sort"),
+                    Some(SortMode::ValueSort) => {
+                        rows = rows
+                            .iter()
+                            .flat_map(|row| row.iter())
+                            .map(|s| vec![s.to_owned()])
+                            .collect();
+                        rows.sort_unstable();
+                        value_sort = true;
+                    }
+                };
+
+                let num_values = if value_sort {
+                    rows.len()
+                } else {
+                    rows.len() * types.len()
                 };
 
                 if self.hash_threshold > 0 && rows.len() * types.len() > self.hash_threshold {
@@ -866,6 +907,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     Control::SortMode(sort_mode) => {
                         self.sort_mode = Some(sort_mode);
                     }
+                    Control::ResultMode(result_mode) => {
+                        self.result_mode = Some(result_mode);
+                    }
                     Control::Substitution(on_off) => match (&mut self.substitution, on_off) {
                         (s @ None, true) => *s = Some(Substitution::default()),
                         (s @ Some(_), false) => *s = None,
@@ -898,6 +942,37 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         &mut self,
         record: Record<D::ColumnType>,
     ) -> Result<RecordOutput<D::ColumnType>, TestError> {
+        let retry = match &record {
+            Record::Statement { retry, .. } => retry.clone(),
+            Record::Query { retry, .. } => retry.clone(),
+            Record::System { retry, .. } => retry.clone(),
+            _ => None,
+        };
+        if retry.is_none() {
+            return self.run_async_no_retry(record).await;
+        }
+
+        // Retry for `retry.attempts` times. The parser ensures that `retry.attempts` must > 0.
+        let retry = retry.unwrap();
+        let mut last_error = None;
+        for _ in 0..retry.attempts {
+            let result = self.run_async_no_retry(record.clone()).await;
+            if result.is_ok() {
+                return result;
+            }
+            tracing::warn!(target:"sqllogictest::retry", backoff = ?retry.backoff, error = ?result, "retrying");
+            D::sleep(retry.backoff).await;
+            last_error = result.err();
+        }
+
+        Err(last_error.unwrap())
+    }
+
+    /// Run a single record without retry.
+    async fn run_async_no_retry(
+        &mut self,
+        record: Record<D::ColumnType>,
+    ) -> Result<RecordOutput<D::ColumnType>, TestError> {
         let result = self.apply_record(record.clone()).await;
 
         match (record, &result) {
@@ -907,7 +982,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 Record::Statement {
                     sql, expected, loc, ..
                 },
-                RecordOutput::Query { error: None, .. },
+                RecordOutput::Query {
+                    error: None, rows, ..
+                },
             ) => {
                 if let StatementExpect::Error(_) = expected {
                     return Err(TestErrorKind::Ok {
@@ -915,6 +992,16 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         kind: RecordKind::Query,
                     }
                     .at(loc));
+                }
+                if let StatementExpect::Count(expected_count) = expected {
+                    if expected_count != rows.len() as u64 {
+                        return Err(TestErrorKind::StatementResultMismatch {
+                            sql,
+                            expected: expected_count,
+                            actual: format!("returned {} rows", rows.len()),
+                        }
+                        .at(loc));
+                    }
                 }
             }
             (
@@ -947,6 +1034,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     conditions: _,
                     sql,
                     expected,
+                    retry: _,
                 },
                 RecordOutput::Statement { count, error },
             ) => match (error, expected) {
@@ -995,6 +1083,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     connection: _,
                     sql,
                     expected,
+                    retry: _,
                 },
                 RecordOutput::Query { cols, rows, error },
             ) => {
@@ -1052,7 +1141,17 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             .at(loc));
                         }
 
-                        if !(self.validator)(rows, &expected_results) {
+                        let actual_results = match self.result_mode {
+                            Some(ResultMode::ValueWise) => rows
+                                .iter()
+                                .flat_map(|strs| strs.iter())
+                                .map(|str| vec![str.to_string()])
+                                .collect_vec(),
+                            // default to rowwise
+                            _ => rows.clone(),
+                        };
+
+                        if !(self.validator)(self.normalizer, &actual_results, &expected_results) {
                             let output_rows =
                                 rows.iter().map(|strs| strs.iter().join(" ")).collect_vec();
                             return Err(TestErrorKind::QueryResultMismatch {
@@ -1071,6 +1170,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     conditions: _,
                     command,
                     stdout: expected_stdout,
+                    retry: _,
                 },
                 RecordOutput::System {
                     error,
@@ -1223,9 +1323,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     conn_builder(target.clone(), db_name.clone()).map(Ok)
                 }),
                 validator: self.validator,
+                normalizer: self.normalizer,
                 column_type_validator: self.column_type_validator,
                 substitution: self.substitution.clone(),
                 sort_mode: self.sort_mode,
+                result_mode: self.result_mode,
                 hash_threshold: self.hash_threshold,
                 labels: self.labels.clone(),
             };
@@ -1265,11 +1367,13 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Substitute the input SQL or command with [`Substitution`], if enabled by `control
     /// substitution`.
     ///
-    /// If `subst_env_vars`, we will use the `subst` crate to support extensive substitutions, incl. `$NAME`, `${NAME}`, `${NAME:default}`.
-    /// The cost is that we will have to use escape characters, e.g., `\$` & `\\`.
+    /// If `subst_env_vars`, we will use the `subst` crate to support extensive substitutions, incl.
+    /// `$NAME`, `${NAME}`, `${NAME:default}`. The cost is that we will have to use escape
+    /// characters, e.g., `\$` & `\\`.
     ///
     /// Otherwise, we just do simple string substitution for `__TEST_DIR__` and `__NOW__`.
-    /// This is useful for `system` commands: The shell can do the environment variables, and we can write strings like `\n` without escaping.
+    /// This is useful for `system` commands: The shell can do the environment variables, and we can
+    /// write strings like `\n` without escaping.
     fn may_substitute(&self, input: String, subst_env_vars: bool) -> Result<String, AnyError> {
         if let Some(substitution) = &self.substitution {
             substitution
@@ -1294,6 +1398,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         filename: impl AsRef<Path>,
         col_separator: &str,
         validator: Validator,
+        normalizer: Normalizer,
         column_type_validator: ColumnTypeValidator<Column<D::ColumnType>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use std::io::{Read, Seek, SeekFrom, Write};
@@ -1303,7 +1408,12 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
         fn create_outfile(filename: impl AsRef<Path>) -> std::io::Result<(PathBuf, File)> {
             let filename = filename.as_ref();
-            let outfilename = filename.file_name().unwrap().to_str().unwrap().to_owned() + ".temp";
+            let outfilename = format!(
+                "{}{:010}{}",
+                filename.file_name().unwrap().to_str().unwrap().to_owned(),
+                rand::thread_rng().gen_range(0..10_000_000),
+                ".temp"
+            );
             let outfilename = filename.parent().unwrap().join(outfilename);
             // create a temp file in read-write mode
             let outfile = OpenOptions::new()
@@ -1398,6 +1508,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     if matches!(record, Record::Halt { .. }) {
                         *halt = true;
                         writeln!(outfile, "{record}")?;
+                        tracing::info!(
+                            "halt record found, all following records will be written AS IS"
+                        );
                         continue;
                     }
                     let record_output = self.apply_record(record.clone()).await;
@@ -1406,6 +1519,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         &record_output,
                         col_separator,
                         validator,
+                        normalizer,
                         column_type_validator,
                     )
                     .unwrap_or(record);
@@ -1435,6 +1549,7 @@ pub fn update_record_with_output<T: ColumnType>(
     record_output: &RecordOutput<T>,
     col_separator: &str,
     validator: Validator,
+    normalizer: Normalizer,
     column_type_validator: ColumnTypeValidator<Column<T>>,
 ) -> Option<Record<T>> {
     match (record.clone(), record_output) {
@@ -1446,9 +1561,12 @@ pub fn update_record_with_output<T: ColumnType>(
                 loc,
                 conditions,
                 connection,
-                expected: expected @ (StatementExpect::Ok | StatementExpect::Count(_)),
+                expected: mut expected @ (StatementExpect::Ok | StatementExpect::Count(_)),
+                retry,
             },
-            RecordOutput::Query { error: None, .. },
+            RecordOutput::Query {
+                error: None, rows, ..
+            },
         ) => {
             // statement ok
             // SELECT ...
@@ -1457,12 +1575,17 @@ pub fn update_record_with_output<T: ColumnType>(
             // but don't care about the output.
             // DuckDB has a few of these.
 
+            if let StatementExpect::Count(expected_count) = &mut expected {
+                *expected_count = rows.len() as u64;
+            }
+
             Some(Record::Statement {
                 sql,
                 loc,
                 conditions,
                 connection,
                 expected,
+                retry,
             })
         }
         // query, statement
@@ -1473,14 +1596,16 @@ pub fn update_record_with_output<T: ColumnType>(
                 conditions,
                 connection,
                 expected: _,
+                retry,
             },
-            RecordOutput::Statement { error: None, .. },
+            RecordOutput::Statement { error: None, count },
         ) => Some(Record::Statement {
             sql,
             loc,
             conditions,
             connection,
-            expected: StatementExpect::Ok,
+            expected: StatementExpect::Count(*count),
+            retry,
         }),
         // statement, statement
         (
@@ -1490,6 +1615,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 connection,
                 sql,
                 expected,
+                retry,
             },
             RecordOutput::Statement { count, error },
         ) => match (error, expected) {
@@ -1503,6 +1629,7 @@ pub fn update_record_with_output<T: ColumnType>(
                     StatementExpect::Count(_) => StatementExpect::Count(*count),
                     StatementExpect::Error(_) | StatementExpect::Ok => StatementExpect::Ok,
                 },
+                retry,
             }),
             // Error match
             (Some(e), StatementExpect::Error(expected_error))
@@ -1525,6 +1652,7 @@ pub fn update_record_with_output<T: ColumnType>(
                     loc,
                     conditions,
                     connection,
+                    retry,
                 })
             }
         },
@@ -1536,6 +1664,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 connection,
                 sql,
                 expected,
+                retry,
             },
             RecordOutput::Query {
                 cols: types,
@@ -1564,6 +1693,7 @@ pub fn update_record_with_output<T: ColumnType>(
                     loc,
                     conditions,
                     connection,
+                    retry,
                 })
             }
             (None, expected) => {
@@ -1572,7 +1702,7 @@ pub fn update_record_with_output<T: ColumnType>(
                     QueryExpect::Results {
                         results: expected_results,
                         ..
-                    } if validator(rows, expected_results) => expected_results.clone(),
+                    } if validator(normalizer, rows, expected_results) => expected_results.clone(),
                     _ => rows.iter().map(|cols| cols.join(col_separator)).collect(),
                 };
                 let types = match &expected {
@@ -1590,20 +1720,26 @@ pub fn update_record_with_output<T: ColumnType>(
                     connection,
                     expected: match expected {
                         QueryExpect::Results {
-                            sort_mode, label, ..
+                            sort_mode,
+                            label,
+                            result_mode,
+                            ..
                         } => QueryExpect::Results {
                             results,
                             cols: types,
                             sort_mode,
+                            result_mode,
                             label,
                         },
                         QueryExpect::Error(_) => QueryExpect::Results {
                             results,
                             cols: types,
                             sort_mode: None,
+                            result_mode: None,
                             label: None,
                         },
                     },
+                    retry,
                 })
             }
         },
@@ -1613,6 +1749,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 conditions,
                 command,
                 stdout: _,
+                retry,
             },
             RecordOutput::System {
                 stdout: actual_stdout,
@@ -1631,6 +1768,7 @@ pub fn update_record_with_output<T: ColumnType>(
                 conditions,
                 command,
                 stdout: actual_stdout.clone(),
+                retry,
             })
         }
 
@@ -1819,7 +1957,7 @@ Caused by:
             record_output: statement_output(3),
 
             expected: Some(
-                "statement ok\n\
+                "statement count 3\n\
                  select * from foo;",
             ),
         }
@@ -2052,6 +2190,7 @@ Caused by:
     }
 
     impl TestCase<'_> {
+        #[track_caller]
         fn run(self) {
             let Self {
                 input,
@@ -2069,6 +2208,7 @@ Caused by:
                 &record_output,
                 " ",
                 default_validator,
+                default_normalizer,
                 strict_column_validator,
             );
 

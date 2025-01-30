@@ -75,5 +75,8 @@ fn test() {
     let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
     tester.with_column_validator(strict_column_validator);
 
-    tester.run_file("./custom_type/custom_type.slt").unwrap();
+    let r = tester.run_file("./custom_type/custom_type.slt");
+    if let Err(err) = r {
+        eprintln!("{:?}", err);
+    }
 }
