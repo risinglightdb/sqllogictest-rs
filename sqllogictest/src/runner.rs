@@ -876,7 +876,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     rows.len() * types.len()
                 };
 
-                if self.hash_threshold > 0 && rows.len() * types.len() > self.hash_threshold {
+                if self.hash_threshold > 0 && num_values > self.hash_threshold {
                     let mut md5 = md5::Md5::new();
                     for line in &rows {
                         for value in line {
