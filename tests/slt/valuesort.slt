@@ -1,0 +1,28 @@
+query III valuesort
+select * from example_sort
+----
+1
+10
+10
+100
+2
+20
+2333
+2333
+2333
+
+control resultmode rowwise
+
+# value sort is always single column
+query III valuesort
+select * from example_sort
+----
+1
+10
+10
+100
+2
+20
+2333
+2333
+2333

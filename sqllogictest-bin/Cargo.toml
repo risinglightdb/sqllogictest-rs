@@ -21,10 +21,10 @@ console = { version = "0.15" }
 futures = { version = "0.3", default-features = false }
 glob = "0.3"
 itertools = "0.13"
-quick-junit = { version = "0.4" }
+quick-junit = { version = "0.5" }
 rand = "0.8"
-sqllogictest = { path = "../sqllogictest", version = "0.22" }
-sqllogictest-engines = { path = "../sqllogictest-engines", version = "0.22" }
+sqllogictest = { path = "../sqllogictest", version = "0.26" }
+sqllogictest-engines = { path = "../sqllogictest-engines", version = "0.26" }
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
@@ -33,6 +33,7 @@ tokio = { version = "1", features = [
     "fs",
     "process",
 ] }
-fs-err = "2.9.0"
+tokio-util = { version = "0.7.12", features = ["rt"] }
+fs-err = "3.0.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
