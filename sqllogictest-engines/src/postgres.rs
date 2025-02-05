@@ -2,7 +2,6 @@ mod extended;
 mod simple;
 
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use tokio::task::JoinHandle;
 
@@ -16,8 +15,8 @@ pub struct Extended;
 /// Generic Postgres engine based on the client from [`tokio_postgres`]. The protocol `P` can be
 /// either [`Simple`] or [`Extended`].
 pub struct Postgres<P> {
-    client: Arc<tokio_postgres::Client>,
-    join_handle: JoinHandle<()>,
+    /// `None` means the connection is closed.
+    conn: Option<(tokio_postgres::Client, JoinHandle<()>)>,
     _protocol: PhantomData<P>,
 }
 
@@ -34,26 +33,28 @@ impl<P> Postgres<P> {
     pub async fn connect(config: PostgresConfig) -> Result<Self> {
         let (client, connection) = config.connect(tokio_postgres::NoTls).await?;
 
-        let join_handle = tokio::spawn(async move {
+        let connection = tokio::spawn(async move {
             if let Err(e) = connection.await {
                 log::error!("Postgres connection error: {:?}", e);
             }
         });
 
         Ok(Self {
-            client: Arc::new(client),
-            join_handle,
+            conn: Some((client, connection)),
             _protocol: PhantomData,
         })
     }
 
     /// Returns a reference of the inner Postgres client.
-    pub fn pg_client(&self) -> &tokio_postgres::Client {
-        &self.client
+    pub fn client(&self) -> &tokio_postgres::Client {
+        &self.conn.as_ref().expect("fuck").0
     }
 
     /// Shutdown the Postgres connection.
     async fn shutdown(&mut self) {
-        (&mut self.join_handle).await.ok();
+        if let Some((client, connection)) = self.conn.take() {
+            drop(client);
+            connection.await.ok();
+        }
     }
 }
