@@ -72,6 +72,9 @@ pub trait AsyncDB {
     /// Async run a SQL query and return the output.
     async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, Self::Error>;
 
+    /// Shutdown the connection gracefully.
+    async fn shutdown(&mut self);
+
     /// Engine name of current database.
     fn engine_name(&self) -> &str {
         ""
@@ -123,6 +126,10 @@ where
 
     async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, Self::Error> {
         D::run(self, sql)
+    }
+
+    async fn shutdown(&mut self) {
+        // Do nothing as `DB` trait doesn't have a shutdown method.
     }
 
     fn engine_name(&self) -> &str {
@@ -512,7 +519,7 @@ pub fn strict_column_validator<T: ColumnType>(actual: &Vec<T>, expected: &Vec<T>
 }
 
 /// Sqllogictest runner.
-pub struct Runner<D: AsyncDB, M: MakeConnection> {
+pub struct Runner<D: AsyncDB, M: MakeConnection<Conn = D>> {
     conn: Connections<D, M>,
     // validator is used for validate if the result of query equals to expected.
     validator: Validator,
@@ -526,6 +533,13 @@ pub struct Runner<D: AsyncDB, M: MakeConnection> {
     hash_threshold: usize,
     /// Labels for condition `skipif` and `onlyif`.
     labels: HashSet<String>,
+}
+
+impl<D: AsyncDB, M: MakeConnection<Conn = D>> Drop for Runner<D, M> {
+    fn drop(&mut self) {
+        tracing::debug!("shutting down runner...");
+        block_on(self.conn.shutdown_all());
+    }
 }
 
 impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {

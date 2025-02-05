@@ -51,10 +51,9 @@ impl<P> Postgres<P> {
     pub fn pg_client(&self) -> &tokio_postgres::Client {
         &self.client
     }
-}
 
-impl<P> Drop for Postgres<P> {
-    fn drop(&mut self) {
-        self.join_handle.abort()
+    /// Shutdown the Postgres connection.
+    async fn shutdown(&mut self) {
+        (&mut self.join_handle).await.ok();
     }
 }

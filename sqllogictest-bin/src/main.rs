@@ -437,6 +437,9 @@ async fn run_parallel(
         }
     }
 
+    // Shutdown the connection for managing temporary databases.
+    db.shutdown().await;
+
     if !failed_case.is_empty() {
         Err(anyhow!("some test case failed:\n{:#?}", failed_case))
     } else {

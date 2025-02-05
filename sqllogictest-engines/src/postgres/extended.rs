@@ -311,6 +311,10 @@ impl sqllogictest::AsyncDB for Postgres<Extended> {
         }
     }
 
+    async fn shutdown(&mut self) {
+        self.shutdown().await;
+    }
+
     fn engine_name(&self) -> &str {
         "postgres-extended"
     }

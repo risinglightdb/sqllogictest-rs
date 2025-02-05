@@ -66,6 +66,10 @@ impl sqllogictest::AsyncDB for MySql {
         }
     }
 
+    async fn shutdown(&mut self) {
+        self.pool.clone().disconnect().await.ok();
+    }
+
     fn engine_name(&self) -> &str {
         "mysql"
     }

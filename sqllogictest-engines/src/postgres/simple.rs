@@ -62,6 +62,10 @@ impl sqllogictest::AsyncDB for Postgres<Simple> {
         }
     }
 
+    async fn shutdown(&mut self) {
+        self.shutdown().await;
+    }
+
     fn engine_name(&self) -> &str {
         "postgres"
     }
