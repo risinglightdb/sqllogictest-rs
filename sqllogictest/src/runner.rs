@@ -1153,7 +1153,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
                         if !(self.validator)(self.normalizer, &actual_results, &expected_results) {
                             let output_rows =
-                                rows.iter().map(|strs| strs.iter().join(" ")).collect_vec();
+                                rows.iter().map(|strs| strs.iter().join("\t")).collect_vec();
                             return Err(TestErrorKind::QueryResultMismatch {
                                 sql,
                                 expected: expected_results.join("\n"),
