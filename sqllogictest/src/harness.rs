@@ -35,5 +35,6 @@ macro_rules! harness {
 pub fn test(filename: impl AsRef<Path>, make_conn: impl MakeConnection) -> Result<(), Failed> {
     let mut tester = Runner::new(make_conn);
     tester.run_file(filename)?;
+    tester.shutdown();
     Ok(())
 }

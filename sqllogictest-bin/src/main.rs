@@ -470,7 +470,7 @@ async fn run_serial(
         let filename = file.to_string_lossy().to_string();
         let test_case_name = filename.replace(['/', ' ', '.', '-'], "_");
         let mut failed = false;
-        let case = match run_test_file(&mut std::io::stdout(), runner, &file).await {
+        let case = match run_test_file(&mut std::io::stdout(), &mut runner, &file).await {
             Ok(duration) => {
                 let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
                 case.set_time(duration);
@@ -498,6 +498,7 @@ async fn run_serial(
                 case
             }
         };
+        runner.shutdown_async().await;
         test_suite.add_test_case(case);
         if connection_refused {
             eprintln!("Connection refused. The server may be down. Exiting...");
@@ -537,14 +538,16 @@ async fn update_test_files(
     format: bool,
 ) -> Result<()> {
     for file in files {
-        let runner = Runner::new(|| engines::connect(engine, &config));
+        let mut runner = Runner::new(|| engines::connect(engine, &config));
 
-        if let Err(e) = update_test_file(&mut std::io::stdout(), runner, &file, format).await {
+        if let Err(e) = update_test_file(&mut std::io::stdout(), &mut runner, &file, format).await {
             {
                 println!("{}\n\n{:?}", style("[FAILED]").red().bold(), e);
                 println!();
             }
         };
+
+        runner.shutdown_async().await;
     }
 
     Ok(())
@@ -565,16 +568,17 @@ async fn connect_and_run_test_file(
     for label in labels {
         runner.add_label(label);
     }
-    let result = run_test_file(out, runner, filename).await?;
+    let result = run_test_file(out, &mut runner, filename).await;
+    runner.shutdown_async().await;
 
-    Ok(result)
+    result
 }
 
 /// Different from [`Runner::run_file_async`], we re-implement it here to print some progress
 /// information.
 async fn run_test_file<T: std::io::Write, M: MakeConnection>(
     out: &mut T,
-    mut runner: Runner<M::Conn, M>,
+    runner: &mut Runner<M::Conn, M>,
     filename: impl AsRef<Path>,
 ) -> Result<Duration> {
     let filename = filename.as_ref();
@@ -679,7 +683,7 @@ fn finish_test_file<T: std::io::Write>(
 /// progress information.
 async fn update_test_file<T: std::io::Write, M: MakeConnection>(
     out: &mut T,
-    mut runner: Runner<M::Conn, M>,
+    runner: &mut Runner<M::Conn, M>,
     filename: impl AsRef<Path>,
     format: bool,
 ) -> Result<()> {
@@ -807,7 +811,7 @@ async fn update_test_file<T: std::io::Write, M: MakeConnection>(
                     writeln!(outfile, "{record}")?;
                     continue;
                 }
-                update_record(outfile, &mut runner, record, format)
+                update_record(outfile, runner, record, format)
                     .await
                     .context(format!("failed to run `{}`", style(filename).bold()))?;
             }

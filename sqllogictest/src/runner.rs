@@ -535,13 +535,6 @@ pub struct Runner<D: AsyncDB, M: MakeConnection<Conn = D>> {
     labels: HashSet<String>,
 }
 
-impl<D: AsyncDB, M: MakeConnection<Conn = D>> Drop for Runner<D, M> {
-    fn drop(&mut self) {
-        tracing::debug!("shutting down runner...");
-        block_on(self.conn.shutdown_all());
-    }
-}
-
 impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Create a new test runner on the database, with the given connection maker.
     ///
@@ -1483,6 +1476,19 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         override_with_outfile(filename, outfilename, outfile)?;
 
         Ok(())
+    }
+}
+
+impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
+    /// Shutdown all connections in the runner.
+    pub async fn shutdown_async(&mut self) {
+        tracing::debug!("shutting down runner...");
+        self.conn.shutdown_all().await;
+    }
+
+    /// Shutdown all connections in the runner.
+    pub fn shutdown(&mut self) {
+        block_on(self.shutdown_async());
     }
 }
 
