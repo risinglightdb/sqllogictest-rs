@@ -47,7 +47,7 @@ impl<P> Postgres<P> {
 
     /// Returns a reference of the inner Postgres client.
     pub fn client(&self) -> &tokio_postgres::Client {
-        &self.conn.as_ref().expect("fuck").0
+        &self.conn.as_ref().expect("connection is shutdown").0
     }
 
     /// Shutdown the Postgres connection.
