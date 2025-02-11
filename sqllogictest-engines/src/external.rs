@@ -113,6 +113,11 @@ impl AsyncDB for ExternalDriver {
         }
     }
 
+    async fn shutdown(&mut self) {
+        self.stdin.shutdown().await.ok();
+        self.child.wait().await.ok();
+    }
+
     fn engine_name(&self) -> &str {
         "external"
     }

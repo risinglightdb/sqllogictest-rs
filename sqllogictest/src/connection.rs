@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::future::IntoFuture;
 
+use futures::future::join_all;
 use futures::Future;
 
 use crate::{AsyncDB, Connection as ConnectionName, DBOutput};
@@ -67,5 +68,10 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Connections<D, M> {
     /// This is a shortcut for calling `get(Default)` then `run`.
     pub async fn run_default(&mut self, sql: &str) -> Result<DBOutput<D::ColumnType>, D::Error> {
         self.get(ConnectionName::Default).await?.run(sql).await
+    }
+
+    /// Shutdown all connections.
+    pub async fn shutdown_all(&mut self) {
+        join_all(self.conns.values_mut().map(|conn| conn.shutdown())).await;
     }
 }

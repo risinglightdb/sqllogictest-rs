@@ -154,4 +154,8 @@ impl AsyncDB for Engines {
     async fn run_command(command: std::process::Command) -> std::io::Result<std::process::Output> {
         Command::from(command).output().await
     }
+
+    async fn shutdown(&mut self) {
+        dispatch_engines!(self, e, { e.shutdown().await })
+    }
 }
