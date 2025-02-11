@@ -109,6 +109,9 @@ pub trait DB {
     /// Run a SQL query and return the output.
     fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, Self::Error>;
 
+    /// Shutdown the connection gracefully.
+    fn shutdown(&mut self) {}
+
     /// Engine name of current database.
     fn engine_name(&self) -> &str {
         ""
@@ -129,7 +132,7 @@ where
     }
 
     async fn shutdown(&mut self) {
-        // Do nothing as `DB` trait doesn't have a shutdown method.
+        D::shutdown(self);
     }
 
     fn engine_name(&self) -> &str {
