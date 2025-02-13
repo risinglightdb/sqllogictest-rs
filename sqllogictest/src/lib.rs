@@ -37,7 +37,8 @@
 //! }
 //!
 //! // Then create a `Runner` on your database instance, and run the tests:
-//! let mut tester = sqllogictest::Runner::new(|| async {
+//! let ctx = sqllogictest::RunnerContext::new("the_db_name".to_owned());
+//! let mut tester = sqllogictest::Runner::new(ctx, || async {
 //!     let db = MyDatabase {
 //!         // fields
 //!     };
