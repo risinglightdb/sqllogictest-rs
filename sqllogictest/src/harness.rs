@@ -20,7 +20,9 @@ macro_rules! harness {
                 let path = entry.expect("failed to read glob entry");
                 tests.push($crate::harness::Trial::test(
                     path.to_str().unwrap().to_string(),
-                    move || $crate::harness::test(db_name, &path, || async { Ok($db_fn()) }),
+                    move || {
+                        $crate::harness::test(&path, $db_name.to_owned(), || async { Ok($db_fn()) })
+                    },
                 ));
             }
 
@@ -35,7 +37,7 @@ macro_rules! harness {
 
 pub fn test(
     filename: impl AsRef<Path>,
-    db_name: impl ToOwned<Owned = String>,
+    db_name: String,
     make_conn: impl MakeConnection,
 ) -> Result<(), Failed> {
     let ctx = RunnerContext::new(db_name.to_owned());
