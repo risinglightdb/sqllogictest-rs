@@ -18,7 +18,7 @@ use rand::distributions::DistString;
 use rand::seq::SliceRandom;
 use sqllogictest::{
     default_column_validator, default_normalizer, default_validator, update_record_with_output,
-    AsyncDB, Injected, MakeConnection, Record, Runner,
+    AsyncDB, Injected, MakeConnection, Record, Runner, RunnerContext,
 };
 use tokio_util::task::AbortOnDropHandle;
 
@@ -462,7 +462,8 @@ async fn run_serial(
     let mut files = files.into_iter();
     let mut connection_refused = false;
     for file in &mut files {
-        let mut runner = Runner::new(|| engines::connect(engine, &config));
+        let ctx = RunnerContext::new(config.db.clone());
+        let mut runner = Runner::new(ctx, || engines::connect(engine, &config));
         for label in labels {
             runner.add_label(label);
         }
@@ -538,7 +539,8 @@ async fn update_test_files(
     format: bool,
 ) -> Result<()> {
     for file in files {
-        let mut runner = Runner::new(|| engines::connect(engine, &config));
+        let ctx = RunnerContext::new(config.db.clone());
+        let mut runner = Runner::new(ctx, || engines::connect(engine, &config));
 
         if let Err(e) = update_test_file(&mut std::io::stdout(), &mut runner, &file, format).await {
             {
@@ -564,7 +566,8 @@ async fn connect_and_run_test_file(
     config: DBConfig,
     labels: &[String],
 ) -> Result<Duration> {
-    let mut runner = Runner::new(|| engines::connect(engine, &config));
+    let ctx = RunnerContext::new(config.db.clone());
+    let mut runner = Runner::new(ctx, || engines::connect(engine, &config));
     for label in labels {
         runner.add_label(label);
     }

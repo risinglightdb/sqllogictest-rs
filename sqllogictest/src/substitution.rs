@@ -1,14 +1,11 @@
-use std::sync::{Arc, OnceLock};
-
 use subst::Env;
-use tempfile::{tempdir, TempDir};
+
+use crate::RunnerContext;
 
 /// Substitute environment variables and special variables like `__TEST_DIR__` in SQL.
 #[derive(Default, Clone)]
 pub(crate) struct Substitution {
-    /// The temporary directory for `__TEST_DIR__`.
-    /// Lazily initialized and cleaned up when dropped.
-    test_dir: Arc<OnceLock<TempDir>>,
+    pub(crate) runner_ctx: &'a RunnerContext,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -20,17 +17,19 @@ impl Substitution {
         if !subst_env_vars {
             Ok(input
                 .replace("$__TEST_DIR__", &self.test_dir())
-                .replace("$__NOW__", &self.now()))
+                .replace("$__NOW__", &self.now())
+                .replace("$__DATABASE__", self.runner_ctx.db_name()))
         } else {
             subst::substitute(input, self).map_err(SubstError)
         }
     }
 
     fn test_dir(&self) -> String {
-        let test_dir = self
-            .test_dir
-            .get_or_init(|| tempdir().expect("failed to create testdir"));
-        test_dir.path().to_string_lossy().into_owned()
+        self.runner_ctx
+            .test_dir()
+            .path()
+            .to_string_lossy()
+            .into_owned()
     }
 
     fn now(&self) -> String {
@@ -42,13 +41,14 @@ impl Substitution {
     }
 }
 
-impl<'a> subst::VariableMap<'a> for Substitution {
+impl<'a> subst::VariableMap<'a> for Substitution<'a> {
     type Value = String;
 
     fn get(&'a self, key: &str) -> Option<Self::Value> {
         match key {
             "__TEST_DIR__" => self.test_dir().into(),
             "__NOW__" => self.now().into(),
+            "__DATABASE__" => self.runner_ctx.db_name().to_owned().into(),
             key => Env.get(key),
         }
     }

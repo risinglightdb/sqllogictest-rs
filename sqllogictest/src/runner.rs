@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::fmt::{Debug, Display};
 use std::path::Path;
 use std::process::{Command, ExitStatus, Output};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use std::vec;
 
@@ -16,6 +16,7 @@ use md5::Digest;
 use owo_colors::OwoColorize;
 use rand::Rng;
 use similar::{Change, ChangeTag, TextDiff};
+use tempfile::{tempdir, TempDir};
 
 use crate::parser::*;
 use crate::substitution::Substitution;
@@ -521,15 +522,42 @@ pub fn strict_column_validator<T: ColumnType>(actual: &Vec<T>, expected: &Vec<T>
             .any(|(actual_column, expected_column)| actual_column != expected_column)
 }
 
+pub struct RunnerContext {
+    /// The database name.
+    db_name: String,
+    /// The temporary directory for the test.
+    /// Lazily initialized when substitute `__TEST_DIR__` and cleaned up when dropped.
+    test_dir: OnceLock<TempDir>,
+}
+
+impl RunnerContext {
+    pub fn new(db_name: String) -> Self {
+        RunnerContext {
+            db_name,
+            test_dir: OnceLock::new(),
+        }
+    }
+
+    pub fn db_name(&self) -> &str {
+        &self.db_name
+    }
+
+    pub fn test_dir(&self) -> &TempDir {
+        self.test_dir
+            .get_or_init(|| tempdir().expect("failed to create testdir"))
+    }
+}
+
 /// Sqllogictest runner.
 pub struct Runner<D: AsyncDB, M: MakeConnection<Conn = D>> {
+    ctx: RunnerContext,
     conn: Connections<D, M>,
     // validator is used for validate if the result of query equals to expected.
     validator: Validator,
     // normalizer is used to normalize the result text
     normalizer: Normalizer,
     column_type_validator: ColumnTypeValidator<D::ColumnType>,
-    substitution: Option<Substitution>,
+    substitution: bool,
     sort_mode: Option<SortMode>,
     result_mode: Option<ResultMode>,
     /// 0 means never hashing
@@ -542,12 +570,13 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Create a new test runner on the database, with the given connection maker.
     ///
     /// See [`MakeConnection`] for more details.
-    pub fn new(make_conn: M) -> Self {
+    pub fn new(ctx: RunnerContext, make_conn: M) -> Self {
         Runner {
+            ctx,
             validator: default_validator,
             normalizer: default_normalizer,
             column_type_validator: default_column_validator,
-            substitution: None,
+            substitution: false,
             sort_mode: None,
             result_mode: None,
             hash_threshold: 0,
@@ -862,11 +891,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     Control::ResultMode(result_mode) => {
                         self.result_mode = Some(result_mode);
                     }
-                    Control::Substitution(on_off) => match (&mut self.substitution, on_off) {
-                        (s @ None, true) => *s = Some(Substitution::default()),
-                        (s @ Some(_), false) => *s = None,
-                        _ => {}
-                    },
+                    Control::Substitution(on_off) => self.substitution = on_off,
                 }
 
                 RecordOutput::Nothing
@@ -1260,7 +1285,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 .expect("create db failed");
             let target = hosts[idx % hosts.len()].clone();
 
+            let ctx = RunnerContext::new(db_name.clone());
             let mut tester = Runner {
+                ctx,
                 conn: Connections::new(move || {
                     conn_builder(target.clone(), db_name.clone()).map(Ok)
                 }),
@@ -1317,10 +1344,12 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// This is useful for `system` commands: The shell can do the environment variables, and we can
     /// write strings like `\n` without escaping.
     fn may_substitute(&self, input: String, subst_env_vars: bool) -> Result<String, AnyError> {
-        if let Some(substitution) = &self.substitution {
-            substitution
-                .substitute(&input, subst_env_vars)
-                .map_err(|e| Arc::new(e) as AnyError)
+        if self.substitution {
+            Substitution {
+                runner_ctx: &self.ctx,
+            }
+            .substitute(&input, subst_env_vars)
+            .map_err(|e| Arc::new(e) as AnyError)
         } else {
             Ok(input)
         }

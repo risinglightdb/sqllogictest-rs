@@ -1,6 +1,6 @@
 use sqllogictest::{DBOutput, DefaultColumnType};
 
-sqllogictest::harness!(FakeDB::new, "slt/**/*.slt");
+sqllogictest::harness!("fake_db", FakeDB::new, "slt/**/*.slt");
 
 pub struct FakeDB {
     counter: u64,

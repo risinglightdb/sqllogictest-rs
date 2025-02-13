@@ -58,7 +58,8 @@ rusty_fork_test! {
         std::env::set_var("MY_USERNAME", "sqllogictest");
         std::env::set_var("MY_PASSWORD", "rust");
 
-        let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
+        let ctx = sqllogictest::RunnerContext::new("fake_db".to_owned());
+        let mut tester = sqllogictest::Runner::new(ctx, || async { Ok(FakeDB) });
 
         tester.run_file("./substitution/basic.slt").unwrap();
     }
