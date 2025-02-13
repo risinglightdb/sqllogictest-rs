@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+* runner(substitution): support getting the current database name in the test file by using the special variable `$__DATABASE__`. This is useful when running parallel tests in which case database names are generated.
+  ```
+  control substitution on
+
+  system ok
+  psql -d $__DATABASE__ -c "SELECT 1;"
+  ...
+  ```
+* runner: add a new `RunnerContext` parameter to `Runner::new`.
+
 ## [0.27.0] - 2025-02-11
 
 * runner: add `shutdown` method to `DB` and `AsyncDB` trait to allow for graceful shutdown of the database connection. Users are encouraged to call `Runner::shutdown` or `Runner::shutdown_async` after running tests to ensure that the database connections are properly closed.
