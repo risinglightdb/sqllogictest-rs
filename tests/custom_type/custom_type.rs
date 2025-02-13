@@ -66,7 +66,8 @@ impl sqllogictest::DB for FakeDB {
 
 #[test]
 fn test() {
-    let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
+    let ctx = sqllogictest::RunnerContext::new("fake_db".to_owned());
+    let mut tester = sqllogictest::Runner::new(ctx, || async { Ok(FakeDB) });
     tester.with_column_validator(strict_column_validator);
 
     let r = tester.run_file("./custom_type/custom_type.slt");
