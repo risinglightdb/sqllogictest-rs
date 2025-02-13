@@ -1294,7 +1294,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 validator: self.validator,
                 normalizer: self.normalizer,
                 column_type_validator: self.column_type_validator,
-                substitution: self.substitution.clone(),
+                substitution: self.substitution,
                 sort_mode: self.sort_mode,
                 result_mode: self.result_mode,
                 hash_threshold: self.hash_threshold,

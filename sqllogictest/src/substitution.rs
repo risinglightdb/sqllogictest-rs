@@ -3,8 +3,8 @@ use subst::Env;
 use crate::RunnerContext;
 
 /// Substitute environment variables and special variables like `__TEST_DIR__` in SQL.
-#[derive(Default, Clone)]
-pub(crate) struct Substitution {
+#[derive(Clone)]
+pub(crate) struct Substitution<'a> {
     pub(crate) runner_ctx: &'a RunnerContext,
 }
 
@@ -12,7 +12,7 @@ pub(crate) struct Substitution {
 #[error("substitution failed: {0}")]
 pub(crate) struct SubstError(subst::Error);
 
-impl Substitution {
+impl Substitution<'_> {
     pub fn substitute(&self, input: &str, subst_env_vars: bool) -> Result<String, SubstError> {
         if !subst_env_vars {
             Ok(input
