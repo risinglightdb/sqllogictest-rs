@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+* runner: Add `Runner::set_var` method to allow adding runner-local variables for substitution.
+* bin: Add `__DATABASE__` variable for accessing current database name from SLT files.
+
 ## [0.27.0] - 2025-02-11
 
 * runner: add `shutdown` method to `DB` and `AsyncDB` trait to allow for graceful shutdown of the database connection. Users are encouraged to call `Runner::shutdown` or `Runner::shutdown_async` after running tests to ensure that the database connections are properly closed.
