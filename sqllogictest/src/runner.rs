@@ -1,10 +1,10 @@
 //! Sqllogictest runner.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::path::Path;
 use std::process::{Command, ExitStatus, Output};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use std::vec;
 
@@ -16,6 +16,7 @@ use md5::Digest;
 use owo_colors::OwoColorize;
 use rand::Rng;
 use similar::{Change, ChangeTag, TextDiff};
+use tempfile::TempDir;
 
 use crate::parser::*;
 use crate::substitution::Substitution;
@@ -521,6 +522,36 @@ pub fn strict_column_validator<T: ColumnType>(actual: &Vec<T>, expected: &Vec<T>
             .any(|(actual_column, expected_column)| actual_column != expected_column)
 }
 
+#[derive(Default)]
+pub(crate) struct RunnerLocals {
+    /// The temporary directory. Test cases can use `__TEST_DIR__` to refer to this directory.
+    /// Lazily initialized and cleaned up when dropped.
+    test_dir: OnceLock<TempDir>,
+    /// Runtime variables for substitution.
+    variables: BTreeMap<String, String>,
+}
+
+impl RunnerLocals {
+    pub fn test_dir(&self) -> String {
+        let test_dir = self
+            .test_dir
+            .get_or_init(|| TempDir::new().expect("failed to create testdir"));
+        test_dir.path().to_string_lossy().into_owned()
+    }
+
+    fn set_var(&mut self, key: String, value: String) {
+        self.variables.insert(key, value);
+    }
+
+    pub fn get_var(&self, key: &str) -> Option<&String> {
+        self.variables.get(key)
+    }
+
+    pub fn vars(&self) -> &BTreeMap<String, String> {
+        &self.variables
+    }
+}
+
 /// Sqllogictest runner.
 pub struct Runner<D: AsyncDB, M: MakeConnection<Conn = D>> {
     conn: Connections<D, M>,
@@ -529,13 +560,15 @@ pub struct Runner<D: AsyncDB, M: MakeConnection<Conn = D>> {
     // normalizer is used to normalize the result text
     normalizer: Normalizer,
     column_type_validator: ColumnTypeValidator<D::ColumnType>,
-    substitution: Option<Substitution>,
+    substitution_on: bool,
     sort_mode: Option<SortMode>,
     result_mode: Option<ResultMode>,
     /// 0 means never hashing
     hash_threshold: usize,
     /// Labels for condition `skipif` and `onlyif`.
     labels: HashSet<String>,
+    /// Local variables/context for the runner.
+    locals: RunnerLocals,
 }
 
 impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
@@ -547,18 +580,24 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             validator: default_validator,
             normalizer: default_normalizer,
             column_type_validator: default_column_validator,
-            substitution: None,
+            substitution_on: false,
             sort_mode: None,
             result_mode: None,
             hash_threshold: 0,
             labels: HashSet::new(),
             conn: Connections::new(make_conn),
+            locals: RunnerLocals::default(),
         }
     }
 
     /// Add a label for condition `skipif` and `onlyif`.
     pub fn add_label(&mut self, label: &str) {
         self.labels.insert(label.to_string());
+    }
+
+    /// Set a local variable for substitution.
+    pub fn set_var(&mut self, key: String, value: String) {
+        self.locals.set_var(key, value);
     }
 
     pub fn with_normalizer(&mut self, normalizer: Normalizer) {
@@ -862,11 +901,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     Control::ResultMode(result_mode) => {
                         self.result_mode = Some(result_mode);
                     }
-                    Control::Substitution(on_off) => match (&mut self.substitution, on_off) {
-                        (s @ None, true) => *s = Some(Substitution::default()),
-                        (s @ Some(_), false) => *s = None,
-                        _ => {}
-                    },
+                    Control::Substitution(on_off) => self.substitution_on = on_off,
                 }
 
                 RecordOutput::Nothing
@@ -1260,6 +1295,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 .expect("create db failed");
             let target = hosts[idx % hosts.len()].clone();
 
+            let mut locals = RunnerLocals::default();
+            locals.set_var("__DATABASE__".to_owned(), db_name.clone());
+
             let mut tester = Runner {
                 conn: Connections::new(move || {
                     conn_builder(target.clone(), db_name.clone()).map(Ok)
@@ -1267,11 +1305,12 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 validator: self.validator,
                 normalizer: self.normalizer,
                 column_type_validator: self.column_type_validator,
-                substitution: self.substitution.clone(),
+                substitution_on: self.substitution_on,
                 sort_mode: self.sort_mode,
                 result_mode: self.result_mode,
                 hash_threshold: self.hash_threshold,
                 labels: self.labels.clone(),
+                locals,
             };
 
             tasks.push(async move {
@@ -1317,9 +1356,9 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// This is useful for `system` commands: The shell can do the environment variables, and we can
     /// write strings like `\n` without escaping.
     fn may_substitute(&self, input: String, subst_env_vars: bool) -> Result<String, AnyError> {
-        if let Some(substitution) = &self.substitution {
-            substitution
-                .substitute(&input, subst_env_vars)
+        if self.substitution_on {
+            Substitution::new(&self.locals, subst_env_vars)
+                .substitute(&input)
                 .map_err(|e| Arc::new(e) as AnyError)
         } else {
             Ok(input)

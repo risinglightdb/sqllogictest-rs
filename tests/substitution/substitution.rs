@@ -1,5 +1,5 @@
 use rusty_fork::rusty_fork_test;
-use sqllogictest::{DBOutput, DefaultColumnType};
+use sqllogictest::{substitution::well_known, DBOutput, DefaultColumnType};
 
 pub struct FakeDB;
 
@@ -59,6 +59,7 @@ rusty_fork_test! {
         std::env::set_var("MY_PASSWORD", "rust");
 
         let mut tester = sqllogictest::Runner::new(|| async { Ok(FakeDB) });
+        tester.set_var(well_known::DATABASE.to_owned(), "fake_db".to_owned());
 
         tester.run_file("./substitution/basic.slt").unwrap();
     }

@@ -16,6 +16,7 @@ use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
 use rand::distributions::DistString;
 use rand::seq::SliceRandom;
+use sqllogictest::substitution::well_known;
 use sqllogictest::{
     default_column_validator, default_normalizer, default_validator, update_record_with_output,
     AsyncDB, Injected, MakeConnection, Record, Runner,
@@ -466,6 +467,7 @@ async fn run_serial(
         for label in labels {
             runner.add_label(label);
         }
+        runner.set_var(well_known::DATABASE.to_owned(), config.db.clone());
 
         let filename = file.to_string_lossy().to_string();
         let test_case_name = filename.replace(['/', ' ', '.', '-'], "_");
@@ -539,6 +541,7 @@ async fn update_test_files(
 ) -> Result<()> {
     for file in files {
         let mut runner = Runner::new(|| engines::connect(engine, &config));
+        runner.set_var(well_known::DATABASE.to_owned(), config.db.clone());
 
         if let Err(e) = update_test_file(&mut std::io::stdout(), &mut runner, &file, format).await {
             {
@@ -568,6 +571,7 @@ async fn connect_and_run_test_file(
     for label in labels {
         runner.add_label(label);
     }
+    runner.set_var(well_known::DATABASE.to_owned(), config.db.clone());
     let result = run_test_file(out, &mut runner, filename).await;
     runner.shutdown_async().await;
 

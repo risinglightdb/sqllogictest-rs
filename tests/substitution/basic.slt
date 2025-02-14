@@ -29,6 +29,10 @@ path $__TEST_DIR__
 statement ok
 time $__NOW__
 
+# a local variable set before running tester
+statement ok
+check $__DATABASE__
+
 # non existent variables without default values are errors
 statement error No such variable
 check $NONEXISTENT_VARIABLE
