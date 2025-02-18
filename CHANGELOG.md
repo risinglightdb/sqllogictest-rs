@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.27.2] - 2025-02-18
+
+* engines/bin: fix stdin to be closed properly to avoid hangs in the `external` engine.
+
 ## [0.27.1] - 2025-02-17
 
 * runner: Add `Runner::set_var` method to allow adding runner-local variables for substitution.

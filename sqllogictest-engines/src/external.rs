@@ -35,7 +35,7 @@ use tokio_util::codec::{Decoder, FramedRead};
 /// ```
 pub struct ExternalDriver {
     child: Child,
-    stdin: ChildStdin,
+    stdin: Option<ChildStdin>,
     stdout: FramedRead<ChildStdout, JsonDecoder<Output>>,
 }
 
@@ -76,7 +76,7 @@ impl ExternalDriver {
 
         Ok(Self {
             child,
-            stdin,
+            stdin: Some(stdin),
             stdout,
         })
     }
@@ -98,7 +98,12 @@ impl AsyncDB for ExternalDriver {
             sql: sql.to_string(),
         };
         let input = serde_json::to_string(&input)?;
-        self.stdin.write_all(input.as_bytes()).await?;
+        self.stdin
+            .as_mut()
+            .expect("external driver is shutdown")
+            .write_all(input.as_bytes())
+            .await?;
+
         let output = match self.stdout.next().await {
             Some(Ok(output)) => output,
             Some(Err(e)) => return Err(e),
@@ -114,7 +119,7 @@ impl AsyncDB for ExternalDriver {
     }
 
     async fn shutdown(&mut self) {
-        self.stdin.shutdown().await.ok();
+        drop(self.stdin.take());
         self.child.wait().await.ok();
     }
 
