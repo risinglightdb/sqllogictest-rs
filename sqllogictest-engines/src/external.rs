@@ -98,10 +98,11 @@ impl AsyncDB for ExternalDriver {
             sql: sql.to_string(),
         };
         let input = serde_json::to_string(&input)?;
-        match &mut self.stdin {
-            Some(stdin) => stdin.write_all(input.as_bytes()).await?,
-            None => return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into()),
-        };
+        self.stdin
+            .as_mut()
+            .expect("external driver is shutdown")
+            .write_all(input.as_bytes())
+            .await?;
 
         let output = match self.stdout.next().await {
             Some(Ok(output)) => output,
