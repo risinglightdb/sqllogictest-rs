@@ -1,6 +1,7 @@
 mod engines;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{stdout, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -112,6 +113,19 @@ struct Opt {
     /// The engine name is a label by default.
     #[clap(long = "label")]
     labels: Vec<String>,
+
+    /// Parallel job id provided by CI. Automatically configured for Buildkite.
+    ///
+    /// If this (and also `--ci-parallel-job-count`) is provided, only the test cases whose hash
+    /// matches the job id will be run.
+    #[clap(long, env = "BUILDKITE_PARALLEL_JOB")]
+    ci_parallel_job_id: Option<u64>,
+    /// Parallel job count provided by CI. Automatically configured for Buildkite.
+    ///
+    /// If this (and also `--ci-parallel-job-id`) is provided, only the test cases whose hash
+    /// matches the job id will be run.
+    #[clap(long, env = "BUILDKITE_PARALLEL_JOB_COUNT")]
+    ci_parallel_job_count: Option<u64>,
 }
 
 /// Connection configuration.
@@ -167,6 +181,8 @@ pub async fn main() -> Result<()> {
         r#override,
         format,
         labels,
+        ci_parallel_job_count,
+        ci_parallel_job_id,
     } = Opt::from_arg_matches(&matches)
         .map_err(|err| err.exit())
         .unwrap();
@@ -206,16 +222,35 @@ pub async fn main() -> Result<()> {
     }
 
     let glob_patterns = files;
-    let mut files: Vec<PathBuf> = Vec::new();
-    for glob_pattern in glob_patterns.into_iter() {
-        let pathbufs = glob::glob(&glob_pattern).context("failed to read glob pattern")?;
-        for pathbuf in pathbufs.into_iter().try_collect::<_, Vec<_>, _>()? {
-            files.push(pathbuf)
-        }
-    }
+    let mut all_files = Vec::new();
 
-    if files.is_empty() {
-        bail!("no test case found");
+    for glob_pattern in glob_patterns {
+        let mut files: Vec<PathBuf> = glob::glob(&glob_pattern)
+            .context("failed to read glob pattern")?
+            .try_collect()?;
+
+        // Choose files to run based on parallel job count and job id.
+        // Ony do this if there are multiple files, e.g., expanded from an `*`.
+        if files.len() > 1 {
+            if let Some(parallel_job_count) = ci_parallel_job_count {
+                let parallel_job_id = ci_parallel_job_id
+                    .context("parallel job count is specified but job id is not")?;
+
+                let len = files.len();
+                files.retain(|path| {
+                    let mut hasher = DefaultHasher::new();
+                    path.hash(&mut hasher);
+                    hasher.finish() % parallel_job_count == parallel_job_id
+                });
+                let len_after = files.len();
+                eprintln!(
+                    "CI parallel job configured. \
+                     Running {len_after} out of {len} test cases for glob pattern \"{glob_pattern}\"."
+                );
+            }
+        }
+
+        all_files.extend(files);
     }
 
     let config = DBConfig {
@@ -227,7 +262,7 @@ pub async fn main() -> Result<()> {
     };
 
     if r#override || format {
-        return update_test_files(files, &engine, config, format).await;
+        return update_test_files(all_files, &engine, config, format).await;
     }
 
     let mut report = Report::new(junit.clone().unwrap_or_else(|| "sqllogictest".to_string()));
@@ -241,7 +276,7 @@ pub async fn main() -> Result<()> {
             jobs,
             keep_db_on_failure,
             &mut test_suite,
-            files,
+            all_files,
             &engine,
             config,
             &labels,
@@ -252,7 +287,7 @@ pub async fn main() -> Result<()> {
     } else {
         run_serial(
             &mut test_suite,
-            files,
+            all_files,
             &engine,
             config,
             &labels,
