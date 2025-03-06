@@ -158,6 +158,9 @@ struct HashPartitioner {
 
 impl HashPartitioner {
     fn new(count: u64, id: u64) -> Result<Self> {
+        if count == 0 {
+            bail!("partition count must be greater than zero");
+        }
         if id >= count {
             bail!("partition id (zero-based) must be less than count");
         }
