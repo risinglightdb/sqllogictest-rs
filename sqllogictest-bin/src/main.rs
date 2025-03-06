@@ -284,23 +284,20 @@ async fn run_parallel(
     fail_fast: bool,
 ) -> Result<()> {
     let mut create_databases = BTreeMap::new();
-    let mut filenames = BTreeSet::new();
+    let mut test_cases = BTreeSet::new();
     for file in files {
         let filename = file
             .to_str()
             .ok_or_else(|| anyhow!("not a UTF-8 filename"))?;
-        let normalized_filename = filename.replace([' ', '.', '-', '/'], "_");
-        eprintln!("+ Discovered Test: {normalized_filename}");
-        if !filenames.insert(normalized_filename.clone()) {
-            return Err(anyhow!(
-                "duplicated file name found: {}",
-                normalized_filename
-            ));
+        let test_case_name = filename.to_test_case_name();
+        eprintln!("+ Discovered Test: {test_case_name}");
+        if !test_cases.insert(test_case_name.clone()) {
+            return Err(anyhow!("duplicated test case found: {}", test_case_name));
         }
         let random_id: String = rand::distributions::Alphanumeric
             .sample_string(&mut rand::thread_rng(), 8)
             .to_lowercase();
-        let db_name = format!("{normalized_filename}_{random_id}");
+        let db_name = format!("{test_case_name}_{random_id}");
 
         create_databases.insert(db_name, file);
     }
@@ -340,15 +337,16 @@ async fn run_parallel(
 
     eprintln!("{}", style("[TEST IN PROGRESS]").blue().bold());
 
-    let mut failed_case = vec![];
+    let mut failed_cases = vec![];
     let mut failed_db: HashSet<String> = HashSet::new();
-    let mut remaining_files: HashSet<String> = HashSet::from_iter(filenames.clone());
+    let mut remaining_cases: HashSet<String> = HashSet::from_iter(test_cases.clone());
 
     let start = Instant::now();
     let mut connection_refused = false;
     while let Some((db_name, file, res, mut buf)) = stream.next().await {
-        remaining_files.remove(&file);
-        let test_case_name = file.replace(['/', ' ', '.', '-'], "_");
+        let test_case_name = file.to_test_case_name();
+        let removed = remaining_cases.remove(&test_case_name);
+        assert!(removed);
         let mut failed = false;
         let case = match res {
             Ok(duration) => {
@@ -366,7 +364,7 @@ async fn run_parallel(
                 }
                 writeln!(buf, "{}\n\n{}", style("[FAILED]").red().bold(), err)?;
                 writeln!(buf)?;
-                failed_case.push(file.clone());
+                failed_cases.push(test_case_name.clone());
                 failed_db.insert(db_name.clone());
                 let mut status = TestCaseStatus::non_success(NonSuccessKind::Failure);
                 status.set_type("test failure");
@@ -391,9 +389,8 @@ async fn run_parallel(
         }
     }
 
-    for file in remaining_files {
-        println!("{file} is not finished, skipping");
-        let test_case_name = file.replace(['/', ' ', '.', '-'], "_");
+    for test_case_name in remaining_cases {
+        println!("{test_case_name} is not finished, skipping");
         let mut case = TestCase::new(test_case_name, TestCaseStatus::skipped());
         case.set_time(Duration::from_millis(0));
         case.set_timestamp(Local::now());
@@ -441,8 +438,8 @@ async fn run_parallel(
     // Shutdown the connection for managing temporary databases.
     db.shutdown().await;
 
-    if !failed_case.is_empty() {
-        Err(anyhow!("some test case failed:\n{:#?}", failed_case))
+    if !failed_cases.is_empty() {
+        Err(anyhow!("some test case failed:\n{:#?}", failed_cases))
     } else {
         Ok(())
     }
@@ -470,7 +467,7 @@ async fn run_serial(
         runner.set_var(well_known::DATABASE.to_owned(), config.db.clone());
 
         let filename = file.to_string_lossy().to_string();
-        let test_case_name = filename.replace(['/', ' ', '.', '-'], "_");
+        let test_case_name = filename.to_test_case_name();
         let mut failed = false;
         let case = match run_test_file(&mut std::io::stdout(), &mut runner, &file).await {
             Ok(duration) => {
@@ -513,7 +510,7 @@ async fn run_serial(
     }
     for file in files {
         let filename = file.to_string_lossy().to_string();
-        let test_case_name = filename.replace(['/', ' ', '.', '-'], "_");
+        let test_case_name = filename.to_test_case_name();
         let mut case = TestCase::new(test_case_name, TestCaseStatus::skipped());
         case.set_time(Duration::from_millis(0));
         case.set_timestamp(Local::now());
@@ -871,4 +868,12 @@ async fn update_record<M: MakeConnection>(
     }
 
     Ok(())
+}
+
+#[easy_ext::ext]
+impl<T: AsRef<str>> T {
+    /// Normalize the path to the test case name.
+    pub fn to_test_case_name(&self) -> String {
+        self.as_ref().replace([' ', '.', '-', '/'], "_")
+    }
 }
