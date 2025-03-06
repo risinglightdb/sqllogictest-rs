@@ -20,7 +20,7 @@ use rand::seq::SliceRandom;
 use sqllogictest::substitution::well_known;
 use sqllogictest::{
     default_column_validator, default_normalizer, default_validator, update_record_with_output,
-    AsyncDB, Injected, MakeConnection, Record, Runner,
+    AsyncDB, Injected, MakeConnection, Partitioner, Record, Runner,
 };
 use tokio_util::task::AbortOnDropHandle;
 
@@ -114,18 +114,17 @@ struct Opt {
     #[clap(long = "label")]
     labels: Vec<String>,
 
-    /// Parallel job id provided by CI. Automatically configured for Buildkite.
+    /// Partition ID for sharding the test files. When used with `partition_count`,
+    /// divides the test files into shards based on the hash of the file path.
     ///
-    /// If this (and also `--ci-parallel-job-count`) is provided, only the test cases whose hash
-    /// matches the job id will be run.
+    /// Useful for running tests in parallel across multiple CI jobs. Currently
+    /// automatically configured in Buildkite.
     #[clap(long, env = "BUILDKITE_PARALLEL_JOB")]
-    ci_parallel_job_id: Option<u64>,
-    /// Parallel job count provided by CI. Automatically configured for Buildkite.
-    ///
-    /// If this (and also `--ci-parallel-job-id`) is provided, only the test cases whose hash
-    /// matches the job id will be run.
+    partition_id: Option<u64>,
+
+    /// Total number of partitions for test sharding. More details in `partition_id`.
     #[clap(long, env = "BUILDKITE_PARALLEL_JOB_COUNT")]
-    ci_parallel_job_count: Option<u64>,
+    partition_count: Option<u64>,
 }
 
 /// Connection configuration.
@@ -149,6 +148,28 @@ impl DBConfig {
             .choose(&mut rand::thread_rng())
             .map(|(host, port)| (host.as_ref(), *port))
             .unwrap()
+    }
+}
+
+struct HashPartitioner {
+    count: u64,
+    id: u64,
+}
+
+impl HashPartitioner {
+    fn new(count: u64, id: u64) -> Result<Self> {
+        if id >= count {
+            bail!("partition id (zero-based) must be less than count");
+        }
+        Ok(Self { count, id })
+    }
+}
+
+impl Partitioner for HashPartitioner {
+    fn matches(&self, file_name: &str) -> bool {
+        let mut hasher = DefaultHasher::new();
+        file_name.hash(&mut hasher);
+        hasher.finish() % self.count == self.id
     }
 }
 
@@ -181,8 +202,8 @@ pub async fn main() -> Result<()> {
         r#override,
         format,
         labels,
-        ci_parallel_job_count,
-        ci_parallel_job_id,
+        partition_count,
+        partition_id,
     } = Opt::from_arg_matches(&matches)
         .map_err(|err| err.exit())
         .unwrap();
@@ -221,6 +242,13 @@ pub async fn main() -> Result<()> {
         Color::Auto => {}
     }
 
+    let partitioner = if let Some(count) = partition_count {
+        let id = partition_id.context("parallel job count is specified but job id is not")?;
+        Some(HashPartitioner::new(count, id)?)
+    } else {
+        None
+    };
+
     let glob_patterns = files;
     let mut all_files = Vec::new();
 
@@ -229,23 +257,14 @@ pub async fn main() -> Result<()> {
             .context("failed to read glob pattern")?
             .try_collect()?;
 
-        // Choose files to run based on parallel job count and job id.
-        // Ony do this if there are multiple files, e.g., expanded from an `*`.
+        // Test against partitioner only if there are multiple files matched, e.g., expanded from an `*`.
         if files.len() > 1 {
-            if let Some(parallel_job_count) = ci_parallel_job_count {
-                let parallel_job_id = ci_parallel_job_id
-                    .context("parallel job count is specified but job id is not")?;
-
+            if let Some(partitioner) = &partitioner {
                 let len = files.len();
-                files.retain(|path| {
-                    let mut hasher = DefaultHasher::new();
-                    path.hash(&mut hasher);
-                    hasher.finish() % parallel_job_count == parallel_job_id
-                });
+                files.retain(|path| partitioner.matches(path.to_str().unwrap()));
                 let len_after = files.len();
                 eprintln!(
-                    "CI parallel job configured. \
-                     Running {len_after} out of {len} test cases for glob pattern \"{glob_pattern}\"."
+                    "Running {len_after} out of {len} test cases for glob pattern \"{glob_pattern}\" based on partitioning.",
                 );
             }
         }
