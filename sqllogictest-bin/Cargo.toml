@@ -18,6 +18,7 @@ async-trait = "0.1"
 chrono = { version = "0.4" }
 clap = { version = "4", features = ["derive", "env"] }
 console = { version = "0.15" }
+easy-ext = "1"
 futures = { version = "0.3", default-features = false }
 glob = "0.3"
 itertools = "0.13"
