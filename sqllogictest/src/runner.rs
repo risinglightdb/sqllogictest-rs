@@ -522,6 +522,27 @@ pub fn strict_column_validator<T: ColumnType>(actual: &Vec<T>, expected: &Vec<T>
             .any(|(actual_column, expected_column)| actual_column != expected_column)
 }
 
+/// Decide whether a test file should be run. Useful for partitioning tests into multiple
+/// parallel machines to speed up test runs.
+pub trait Partitioner: Send + Sync + 'static {
+    /// Returns true if the given file name matches the partition and should be run.
+    fn matches(&self, file_name: &str) -> bool;
+}
+
+impl<F> Partitioner for F
+where
+    F: Fn(&str) -> bool + Send + Sync + 'static,
+{
+    fn matches(&self, file_name: &str) -> bool {
+        self(file_name)
+    }
+}
+
+/// The default partitioner matches all files.
+pub fn default_partitioner(_file_name: &str) -> bool {
+    true
+}
+
 #[derive(Default)]
 pub(crate) struct RunnerLocals {
     /// The temporary directory. Test cases can use `__TEST_DIR__` to refer to this directory.
@@ -560,6 +581,7 @@ pub struct Runner<D: AsyncDB, M: MakeConnection<Conn = D>> {
     // normalizer is used to normalize the result text
     normalizer: Normalizer,
     column_type_validator: ColumnTypeValidator<D::ColumnType>,
+    partitioner: Arc<dyn Partitioner>,
     substitution_on: bool,
     sort_mode: Option<SortMode>,
     result_mode: Option<ResultMode>,
@@ -580,6 +602,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             validator: default_validator,
             normalizer: default_normalizer,
             column_type_validator: default_column_validator,
+            partitioner: Arc::new(default_partitioner),
             substitution_on: false,
             sort_mode: None,
             result_mode: None,
@@ -609,6 +632,13 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
     pub fn with_column_validator(&mut self, validator: ColumnTypeValidator<D::ColumnType>) {
         self.column_type_validator = validator;
+    }
+
+    /// Set the partitioner for the runner. Only files that match the partitioner will be run.
+    ///
+    /// This only takes effect when running tests in parallel.
+    pub fn with_partitioner(&mut self, partitioner: impl Partitioner + 'static) {
+        self.partitioner = Arc::new(partitioner);
     }
 
     pub fn with_hash_threshold(&mut self, hash_threshold: usize) {
@@ -1281,13 +1311,18 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     {
         let files = glob::glob(glob).expect("failed to read glob pattern");
         let mut tasks = vec![];
-        // let conn_builder = Arc::new(conn_builder);
 
         for (idx, file) in files.enumerate() {
             // for every slt file, we create a database against table conflict
             let file = file.unwrap();
-            let db_name = file.to_str().expect("not a UTF-8 filename");
-            let db_name = db_name.replace([' ', '.', '-', '/'], "_");
+            let filename = file.to_str().expect("not a UTF-8 filename");
+
+            // Skip files that don't match the partitioner.
+            if !self.partitioner.matches(filename) {
+                continue;
+            }
+
+            let db_name = filename.replace([' ', '.', '-', '/'], "_");
 
             self.conn
                 .run_default(&format!("CREATE DATABASE {db_name};"))
@@ -1305,6 +1340,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 validator: self.validator,
                 normalizer: self.normalizer,
                 column_type_validator: self.column_type_validator,
+                partitioner: self.partitioner.clone(),
                 substitution_on: self.substitution_on,
                 sort_mode: self.sort_mode,
                 result_mode: self.result_mode,

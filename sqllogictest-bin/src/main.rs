@@ -1,6 +1,7 @@
 mod engines;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{stdout, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -19,7 +20,7 @@ use rand::seq::SliceRandom;
 use sqllogictest::substitution::well_known;
 use sqllogictest::{
     default_column_validator, default_normalizer, default_validator, update_record_with_output,
-    AsyncDB, Injected, MakeConnection, Record, Runner,
+    AsyncDB, Injected, MakeConnection, Partitioner, Record, Runner,
 };
 use tokio_util::task::AbortOnDropHandle;
 
@@ -31,6 +32,10 @@ pub enum Color {
     Always,
     Never,
 }
+
+// Env keys for partitioning.
+const PARTITION_ID_ENV_KEY: &str = "SLT_PARTITION_ID";
+const PARTITION_COUNT_ENV_KEY: &str = "SLT_PARTITION_COUNT";
 
 #[derive(Parser, Debug, Clone)]
 #[clap(about, version, author)]
@@ -112,6 +117,18 @@ struct Opt {
     /// The engine name is a label by default.
     #[clap(long = "label")]
     labels: Vec<String>,
+
+    /// Partition ID for sharding the test files. When used with `partition_count`,
+    /// divides the test files into shards based on the hash of the file path.
+    ///
+    /// Useful for running tests in parallel across multiple CI jobs. Currently
+    /// automatically configured in Buildkite.
+    #[clap(long, env = PARTITION_ID_ENV_KEY)]
+    partition_id: Option<u64>,
+
+    /// Total number of partitions for test sharding. More details in `partition_id`.
+    #[clap(long, env = PARTITION_COUNT_ENV_KEY)]
+    partition_count: Option<u64>,
 }
 
 /// Connection configuration.
@@ -138,9 +155,61 @@ impl DBConfig {
     }
 }
 
+struct HashPartitioner {
+    count: u64,
+    id: u64,
+}
+
+impl HashPartitioner {
+    fn new(count: u64, id: u64) -> Result<Self> {
+        if count == 0 {
+            bail!("partition count must be greater than zero");
+        }
+        if id >= count {
+            bail!("partition id (zero-based) must be less than count");
+        }
+        Ok(Self { count, id })
+    }
+}
+
+impl Partitioner for HashPartitioner {
+    fn matches(&self, file_name: &str) -> bool {
+        let mut hasher = DefaultHasher::new();
+        file_name.hash(&mut hasher);
+        hasher.finish() % self.count == self.id
+    }
+}
+
+#[allow(clippy::needless_return)]
+fn import_partition_config_from_ci() {
+    if std::env::var_os(PARTITION_ID_ENV_KEY).is_some()
+        || std::env::var_os(PARTITION_COUNT_ENV_KEY).is_some()
+    {
+        // Ignore if already set.
+        return;
+    }
+
+    // Buildkite
+    {
+        const ID: &str = "BUILDKITE_PARALLEL_JOB";
+        const COUNT: &str = "BUILDKITE_PARALLEL_JOB_COUNT";
+
+        if let (Some(id), Some(count)) = (std::env::var_os(ID), std::env::var_os(COUNT)) {
+            std::env::set_var(PARTITION_ID_ENV_KEY, id);
+            std::env::set_var(PARTITION_COUNT_ENV_KEY, count);
+            eprintln!("Imported partition config from Buildkite.");
+            return;
+        }
+    }
+
+    // TODO: more CI providers
+}
+
 #[tokio::main]
 pub async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
+
+    import_partition_config_from_ci();
 
     let cli = Opt::command().disable_help_flag(true).arg(
         Arg::new("help")
@@ -167,6 +236,8 @@ pub async fn main() -> Result<()> {
         r#override,
         format,
         labels,
+        partition_count,
+        partition_id,
     } = Opt::from_arg_matches(&matches)
         .map_err(|err| err.exit())
         .unwrap();
@@ -205,17 +276,34 @@ pub async fn main() -> Result<()> {
         Color::Auto => {}
     }
 
-    let glob_patterns = files;
-    let mut files: Vec<PathBuf> = Vec::new();
-    for glob_pattern in glob_patterns.into_iter() {
-        let pathbufs = glob::glob(&glob_pattern).context("failed to read glob pattern")?;
-        for pathbuf in pathbufs.into_iter().try_collect::<_, Vec<_>, _>()? {
-            files.push(pathbuf)
-        }
-    }
+    let partitioner = if let Some(count) = partition_count {
+        let id = partition_id.context("parallel job count is specified but job id is not")?;
+        Some(HashPartitioner::new(count, id)?)
+    } else {
+        None
+    };
 
-    if files.is_empty() {
-        bail!("no test case found");
+    let glob_patterns = files;
+    let mut all_files = Vec::new();
+
+    for glob_pattern in glob_patterns {
+        let mut files: Vec<PathBuf> = glob::glob(&glob_pattern)
+            .context("failed to read glob pattern")?
+            .try_collect()?;
+
+        // Test against partitioner only if there are multiple files matched, e.g., expanded from an `*`.
+        if files.len() > 1 {
+            if let Some(partitioner) = &partitioner {
+                let len = files.len();
+                files.retain(|path| partitioner.matches(path.to_str().unwrap()));
+                let len_after = files.len();
+                eprintln!(
+                    "Running {len_after} out of {len} test cases for glob pattern \"{glob_pattern}\" based on partitioning.",
+                );
+            }
+        }
+
+        all_files.extend(files);
     }
 
     let config = DBConfig {
@@ -227,7 +315,7 @@ pub async fn main() -> Result<()> {
     };
 
     if r#override || format {
-        return update_test_files(files, &engine, config, format).await;
+        return update_test_files(all_files, &engine, config, format).await;
     }
 
     let mut report = Report::new(junit.clone().unwrap_or_else(|| "sqllogictest".to_string()));
@@ -241,7 +329,7 @@ pub async fn main() -> Result<()> {
             jobs,
             keep_db_on_failure,
             &mut test_suite,
-            files,
+            all_files,
             &engine,
             config,
             &labels,
@@ -252,7 +340,7 @@ pub async fn main() -> Result<()> {
     } else {
         run_serial(
             &mut test_suite,
-            files,
+            all_files,
             &engine,
             config,
             &labels,
