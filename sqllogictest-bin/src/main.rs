@@ -33,6 +33,10 @@ pub enum Color {
     Never,
 }
 
+// Env keys for partitioning.
+const PARTITION_ID_ENV_KEY: &str = "SLT_PARTITION_ID";
+const PARTITION_COUNT_ENV_KEY: &str = "SLT_PARTITION_COUNT";
+
 #[derive(Parser, Debug, Clone)]
 #[clap(about, version, author)]
 struct Opt {
@@ -119,11 +123,11 @@ struct Opt {
     ///
     /// Useful for running tests in parallel across multiple CI jobs. Currently
     /// automatically configured in Buildkite.
-    #[clap(long, env = "BUILDKITE_PARALLEL_JOB")]
+    #[clap(long, env = PARTITION_ID_ENV_KEY)]
     partition_id: Option<u64>,
 
     /// Total number of partitions for test sharding. More details in `partition_id`.
-    #[clap(long, env = "BUILDKITE_PARALLEL_JOB_COUNT")]
+    #[clap(long, env = PARTITION_COUNT_ENV_KEY)]
     partition_count: Option<u64>,
 }
 
@@ -176,9 +180,36 @@ impl Partitioner for HashPartitioner {
     }
 }
 
+#[allow(clippy::needless_return)]
+fn import_partition_config_from_ci() {
+    if std::env::var_os(PARTITION_ID_ENV_KEY).is_some()
+        || std::env::var_os(PARTITION_COUNT_ENV_KEY).is_some()
+    {
+        // Ignore if already set.
+        return;
+    }
+
+    // Buildkite
+    {
+        const ID: &str = "BUILDKITE_PARALLEL_JOB";
+        const COUNT: &str = "BUILDKITE_PARALLEL_JOB_COUNT";
+
+        if let (Some(id), Some(count)) = (std::env::var_os(ID), std::env::var_os(COUNT)) {
+            std::env::set_var(PARTITION_ID_ENV_KEY, id);
+            std::env::set_var(PARTITION_COUNT_ENV_KEY, count);
+            eprintln!("Imported partition config from Buildkite.");
+            return;
+        }
+    }
+
+    // TODO: more CI providers
+}
+
 #[tokio::main]
 pub async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
+
+    import_partition_config_from_ci();
 
     let cli = Opt::command().disable_help_flag(true).arg(
         Arg::new("help")
