@@ -12,6 +12,7 @@ use clap::{Arg, ArgAction, CommandFactory, FromArgMatches, Parser, ValueEnum};
 use console::style;
 use engines::{EngineConfig, EngineType};
 use fs_err::{File, OpenOptions};
+use futures::future::Either;
 use futures::StreamExt;
 use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
@@ -403,7 +404,7 @@ async fn run_parallel(
         }
     }
 
-    let mut stream = futures::stream::iter(create_databases)
+    let test_result_stream = futures::stream::iter(create_databases)
         .map(|(db_name, filename)| {
             let mut config = config.clone();
             config.db.clone_from(&db_name);
@@ -425,6 +426,13 @@ async fn run_parallel(
         })
         .buffer_unordered(jobs);
 
+    let ctrl_c_stream = futures::stream::once(tokio::signal::ctrl_c()).boxed();
+
+    let mut stream = futures::stream::select(
+        test_result_stream.map(Either::Left),
+        ctrl_c_stream.map(Either::Right),
+    );
+
     eprintln!("{}", style("[TEST IN PROGRESS]").blue().bold());
 
     let mut failed_cases = vec![];
@@ -433,7 +441,12 @@ async fn run_parallel(
 
     let start = Instant::now();
     let mut connection_refused = false;
-    while let Some((db_name, file, res, mut buf)) = stream.next().await {
+    while let Some(next) = stream.next().await {
+        let Either::Left((db_name, file, res, mut buf)) = next else {
+            eprintln!("Ctrl-C received, skipping remaining test cases");
+            break;
+        };
+
         let test_case_name = file.to_test_case_name();
         let removed = remaining_cases.remove(&test_case_name);
         assert!(removed);
@@ -479,7 +492,7 @@ async fn run_parallel(
         }
     }
 
-    for test_case_name in remaining_cases {
+    for test_case_name in &remaining_cases {
         println!("{test_case_name} is not finished, skipping");
         let mut case = TestCase::new(test_case_name, TestCaseStatus::skipped());
         case.set_time(Duration::from_millis(0));
@@ -529,7 +542,9 @@ async fn run_parallel(
     db.shutdown().await;
 
     if !failed_cases.is_empty() {
-        Err(anyhow!("some test case failed:\n{:#?}", failed_cases))
+        Err(anyhow!("some test cases failed:\n{:#?}", failed_cases))
+    } else if !remaining_cases.is_empty() {
+        Err(anyhow!("some test cases skipped"))
     } else {
         Ok(())
     }

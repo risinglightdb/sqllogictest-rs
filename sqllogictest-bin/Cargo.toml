@@ -33,6 +33,7 @@ tokio = { version = "1", features = [
     "macros",
     "fs",
     "process",
+    "signal",
 ] }
 tokio-util = { version = "0.7.12", features = ["rt"] }
 fs-err = "3.0.0"
