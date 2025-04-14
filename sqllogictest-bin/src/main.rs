@@ -451,15 +451,13 @@ async fn run_parallel(
 
     while let Some((db_name, file, res, buf)) = stream.next().await {
         let test_case_name = file.to_test_case_name();
+        let case = res.to_junit(&test_case_name, junit.as_deref().unwrap_or_default());
+        test_suite.add_test_case(case);
 
-        let case = match res {
-            RunResult::Ok(duration) => {
-                let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
-                case.set_time(duration);
-                case.set_timestamp(Local::now());
-                case.set_classname(junit.as_deref().unwrap_or_default());
-                case
-            }
+        tokio::task::block_in_place(|| stdout().write_all(&buf))?;
+
+        match res {
+            RunResult::Ok(_) => {}
             RunResult::Err(e) => {
                 if format!("{:?}", e).contains("Connection refused") {
                     connection_refused = true;
@@ -472,27 +470,9 @@ async fn run_parallel(
 
                 failed_cases.push(test_case_name.clone());
                 failed_db.insert(db_name.clone());
-                let mut status = TestCaseStatus::non_success(NonSuccessKind::Failure);
-                status.set_type("test failure");
-                let mut case = TestCase::new(test_case_name, status);
-                case.set_system_err(e.to_string());
-                case.set_time(Duration::from_millis(0));
-                case.set_system_out("");
-                case.set_timestamp(Local::now());
-                case.set_classname(junit.as_deref().unwrap_or_default());
-                case
             }
-            RunResult::Skipped | RunResult::Cancelled => {
-                // TODO: what status should we use for cancelled tests?
-                let mut case = TestCase::new(test_case_name, TestCaseStatus::skipped());
-                case.set_time(Duration::from_millis(0));
-                case.set_timestamp(Local::now());
-                case.set_classname(junit.as_deref().unwrap_or_default());
-                case
-            }
+            RunResult::Skipped | RunResult::Cancelled => {}
         };
-        test_suite.add_test_case(case);
-        tokio::task::block_in_place(|| stdout().write_all(&buf))?;
     }
 
     eprintln!(
@@ -534,7 +514,7 @@ async fn run_parallel(
     if !failed_cases.is_empty() {
         Err(anyhow!("some test cases failed:\n{:#?}", failed_cases))
     } else if cancel.is_cancelled() {
-        Err(anyhow!("some test cases cancelled"))
+        Err(anyhow!("some test cases skipped or cancelled"))
     } else {
         Ok(())
     }
@@ -552,10 +532,9 @@ async fn run_serial(
     cancel: CancellationToken,
 ) -> Result<()> {
     let mut failed_cases = vec![];
-    let mut skipped_case = vec![];
-    let mut files = files.into_iter();
     let mut connection_refused = false;
-    for file in &mut files {
+
+    for file in files {
         let test_case_name = file.to_string_lossy().to_test_case_name();
 
         let res = connect_and_run_test_file(
@@ -568,62 +547,31 @@ async fn run_serial(
         )
         .await;
 
-        let mut failed = false;
+        let case = res.to_junit(&test_case_name, junit.as_deref().unwrap_or_default());
+        test_suite.add_test_case(case);
 
-        let case = match res {
-            RunResult::Ok(duration) => {
-                let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
-                case.set_time(duration);
-                case.set_timestamp(Local::now());
-                case.set_classname(junit.as_deref().unwrap_or_default());
-                case
-            }
+        match res {
+            RunResult::Ok(_) => {}
             RunResult::Err(e) => {
-                failed = true;
-                let err = format!("{:?}", e);
-                if err.contains("Connection refused") {
+                if format!("{:?}", e).contains("Connection refused") {
                     connection_refused = true;
+                    println!("Connection refused. The server may be down.");
                 }
-                failed_cases.push(test_case_name.clone());
-                let mut status = TestCaseStatus::non_success(NonSuccessKind::Failure);
-                status.set_type("test failure");
-                let mut case = TestCase::new(test_case_name, status);
-                case.set_timestamp(Local::now());
-                case.set_classname(junit.as_deref().unwrap_or_default());
-                case.set_system_err(e.to_string());
-                case.set_time(Duration::from_millis(0));
-                case.set_system_out("");
-                case
-            }
-            _ => todo!(),
-        };
+                if fail_fast || connection_refused {
+                    println!("Cancelling remaining tests...");
+                    cancel.cancel();
+                }
 
-        test_suite.add_test_case(case);
-        if connection_refused {
-            eprintln!("Connection refused. The server may be down. Exiting...");
-            break;
-        }
-        if fail_fast && failed {
-            println!("early exit after failure...");
-            break;
-        }
-    }
-    for file in files {
-        let filename = file.to_string_lossy().to_string();
-        let test_case_name = filename.to_test_case_name();
-        let mut case = TestCase::new(test_case_name, TestCaseStatus::skipped());
-        case.set_time(Duration::from_millis(0));
-        case.set_timestamp(Local::now());
-        case.set_classname(junit.as_deref().unwrap_or_default());
-        test_suite.add_test_case(case);
-        skipped_case.push(filename.clone());
-    }
-    if !skipped_case.is_empty() {
-        println!("some test case skipped:\n{:#?}", skipped_case);
+                failed_cases.push(test_case_name.clone());
+            }
+            RunResult::Skipped | RunResult::Cancelled => {}
+        };
     }
 
     if !failed_cases.is_empty() {
         Err(anyhow!("some test case failed:\n{:#?}", failed_cases))
+    } else if cancel.is_cancelled() {
+        Err(anyhow!("some test cases skipped or cancelled"))
     } else {
         Ok(())
     }
@@ -673,6 +621,41 @@ impl From<Result<Duration>> for RunResult {
     }
 }
 
+impl RunResult {
+    /// Convert the result to a JUnit test case.
+    fn to_junit(&self, test_case_name: &str, junit: &str) -> TestCase {
+        match self {
+            RunResult::Ok(duration) => {
+                let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
+                case.set_time(*duration);
+                case.set_timestamp(Local::now());
+                case.set_classname(junit);
+                case
+            }
+            RunResult::Err(e) => {
+                let mut status = TestCaseStatus::non_success(NonSuccessKind::Failure);
+                status.set_type("test failure");
+
+                let mut case = TestCase::new(test_case_name, status);
+                case.set_system_err(e.to_string());
+                case.set_time(Duration::from_millis(0));
+                case.set_system_out("");
+                case.set_timestamp(Local::now());
+                case.set_classname(junit);
+                case
+            }
+            RunResult::Skipped | RunResult::Cancelled => {
+                // TODO: what status should we use for cancelled tests?
+                let mut case = TestCase::new(test_case_name, TestCaseStatus::skipped());
+                case.set_time(Duration::from_millis(0));
+                case.set_timestamp(Local::now());
+                case.set_classname(junit);
+                case
+            }
+        }
+    }
+}
+
 async fn connect_and_run_test_file(
     out: &mut impl std::io::Write,
     filename: PathBuf,
@@ -681,6 +664,7 @@ async fn connect_and_run_test_file(
     labels: &[String],
     cancel: CancellationToken,
 ) -> RunResult {
+    // If the test is already cancelled, skip it.
     if cancel.is_cancelled() {
         writeln!(
             out,
