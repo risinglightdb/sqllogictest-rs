@@ -521,6 +521,7 @@ async fn run_parallel(
 }
 
 // Run test one be one
+#[allow(clippy::too_many_arguments)]
 async fn run_serial(
     test_suite: &mut TestSuite,
     files: Vec<PathBuf>,
@@ -605,11 +606,17 @@ async fn flush(out: &mut impl std::io::Write) -> std::io::Result<()> {
     tokio::task::block_in_place(|| out.flush())
 }
 
+/// The result of running a test file.
 enum RunResult {
+    /// The test file ran successfully in the given duration.
     Ok(Duration),
+    /// The test file failed with an error.
     Err(anyhow::Error),
-    Skipped,
+    /// The test file was cancelled during execution, typically due to a Ctrl-C.
     Cancelled,
+    /// The test file was skipped because it was cancelled before execution, typically
+    /// due to a Ctrl-C or a failure with `--fail-fast`.
+    Skipped,
 }
 
 impl From<Result<Duration>> for RunResult {
@@ -664,9 +671,13 @@ async fn connect_and_run_test_file(
     labels: &[String],
     cancel: CancellationToken,
 ) -> RunResult {
-    // If the test is already cancelled, skip it.
-    // TODO: shall we wait for all running cases to be cancelled before fast skipping?
+    static RUNNING_TESTS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
+    // If the run is already cancelled, skip it.
     if cancel.is_cancelled() {
+        // Ensure that all running tests are cancelled before we return `Skipped`.
+        let _ = RUNNING_TESTS.write().await;
+
         writeln!(
             out,
             "{: <60} .. {}",
@@ -676,6 +687,9 @@ async fn connect_and_run_test_file(
         .unwrap();
         return RunResult::Skipped;
     }
+
+    // Hold until the current test is finished or cancelled.
+    let _running = RUNNING_TESTS.read().await;
 
     let mut runner = Runner::new(|| engines::connect(engine, &config));
     for label in labels {
