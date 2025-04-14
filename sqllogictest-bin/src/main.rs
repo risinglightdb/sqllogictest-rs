@@ -331,9 +331,13 @@ pub async fn main() -> Result<()> {
     tokio::spawn({
         let cancel = cancel.clone();
         async move {
-            tokio::signal::ctrl_c().await.unwrap();
-            eprintln!("Ctrl-C received, cancelling...");
-            cancel.cancel();
+            match tokio::signal::ctrl_c().await {
+                Ok(_) => {
+                    eprintln!("Ctrl-C received, cancelling...");
+                    cancel.cancel();
+                }
+                Err(err) => eprintln!("Failed to listen for Ctrl-C signal: {}", err),
+            }
         }
     });
 
