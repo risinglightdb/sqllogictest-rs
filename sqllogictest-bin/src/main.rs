@@ -472,6 +472,7 @@ async fn run_parallel(
                 case
             }
             RunResult::Skipped | RunResult::Cancelled => {
+                // TODO: what status should we use for cancelled tests?
                 let mut case = TestCase::new(test_case_name, TestCaseStatus::skipped());
                 case.set_time(Duration::from_millis(0));
                 case.set_timestamp(Local::now());
@@ -487,10 +488,6 @@ async fn run_parallel(
         "\n All test cases finished in {} ms",
         start.elapsed().as_millis()
     );
-
-    // If `fail_fast`, there could be some ongoing cases (then active connections)
-    // in the stream. Abort them before dropping temporary databases.
-    drop(stream);
 
     if connection_refused {
         eprintln!("Skip dropping databases due to connection refused: {db_names:?}");
@@ -689,17 +686,17 @@ async fn connect_and_run_test_file(
     }
     runner.set_var(well_known::DATABASE.to_owned(), config.db.clone());
 
-    let result = tokio::select! {
-        biased;
-        _ = cancel.cancelled() => {
-            RunResult::Cancelled
-        }
-        result = run_test_file(out, &mut runner, filename) => {
+    let result = match cancel
+        .run_until_cancelled(run_test_file(out, &mut runner, filename))
+        .await
+    {
+        Some(result) => {
             if let Err(err) = &result {
                 writeln!(out, "{}\n\n{}\n", style("[FAILED]").red().bold(), err).unwrap();
             }
             result.into()
         }
+        None => RunResult::Cancelled,
     };
 
     runner.shutdown_async().await;
