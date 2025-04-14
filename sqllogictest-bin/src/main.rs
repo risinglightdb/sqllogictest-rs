@@ -327,6 +327,16 @@ pub async fn main() -> Result<()> {
     let mut test_suite = TestSuite::new("sqllogictest");
     test_suite.set_timestamp(Local::now());
 
+    let cancel = CancellationToken::new();
+    tokio::spawn({
+        let cancel = cancel.clone();
+        async move {
+            tokio::signal::ctrl_c().await.unwrap();
+            eprintln!("Ctrl-C received, cancelling...");
+            cancel.cancel();
+        }
+    });
+
     let result = if let Some(jobs) = jobs {
         run_parallel(
             jobs,
@@ -338,6 +348,7 @@ pub async fn main() -> Result<()> {
             &labels,
             junit.clone(),
             fail_fast,
+            cancel,
         )
         .await
     } else {
@@ -349,6 +360,7 @@ pub async fn main() -> Result<()> {
             &labels,
             junit.clone(),
             fail_fast,
+            cancel,
         )
         .await
     };
@@ -373,9 +385,8 @@ async fn run_parallel(
     labels: &[String],
     junit: Option<String>,
     fail_fast: bool,
+    cancel: CancellationToken,
 ) -> Result<()> {
-    let cancel = CancellationToken::new();
-
     let mut create_databases = BTreeMap::new();
     let mut test_cases = BTreeSet::new();
     for file in files {
@@ -538,6 +549,7 @@ async fn run_serial(
     labels: &[String],
     junit: Option<String>,
     fail_fast: bool,
+    cancel: CancellationToken,
 ) -> Result<()> {
     let mut failed_cases = vec![];
     let mut skipped_case = vec![];
@@ -552,7 +564,7 @@ async fn run_serial(
             engine,
             config.clone(),
             labels,
-            CancellationToken::new(),
+            cancel.clone(),
         )
         .await;
 
