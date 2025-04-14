@@ -475,10 +475,7 @@ async fn run_parallel(
         };
     }
 
-    eprintln!(
-        "\n All test cases finished in {} ms",
-        start.elapsed().as_millis()
-    );
+    eprintln!("\n Finished in {} ms", start.elapsed().as_millis());
 
     if connection_refused {
         eprintln!("Skip dropping databases due to connection refused: {db_names:?}");
@@ -697,17 +694,31 @@ async fn connect_and_run_test_file(
     }
     runner.set_var(well_known::DATABASE.to_owned(), config.db.clone());
 
+    let begin = Instant::now();
+
     // Note: we don't use `CancellationToken::run_until_cancelled` here because it always
     // poll the wrapped future first, while we want cancellation to be more responsive.
     let result = tokio::select! {
         biased;
         _ = cancel.cancelled() => {
-            writeln!(out, "{}", style("[CANCELLED]").yellow().bold()).unwrap();
+            writeln!(
+                out,
+                "{} after {} ms",
+                style("[CANCELLED]").yellow().bold(),
+                begin.elapsed().as_millis(),
+            )
+            .unwrap();
             RunResult::Cancelled
         }
         result = run_test_file(out, &mut runner, filename) => {
             if let Err(err) = &result {
-                writeln!(out, "{}\n\n{}\n", style("[FAILED]").red().bold(), err).unwrap();
+                writeln!(
+                    out,
+                    "{} after {} ms\n\n{:?}\n",
+                    style("[FAILED]").red().bold(),
+                    begin.elapsed().as_millis(),
+                    err,
+                ).unwrap();
             }
             result.into()
         }
