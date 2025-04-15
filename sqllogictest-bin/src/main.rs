@@ -454,21 +454,22 @@ async fn run_parallel(
     let start = Instant::now();
 
     while let Some((db_name, file, res, buf)) = stream.next().await {
+        stdout().write_all(&buf)?;
+        stdout().flush()?;
+
         let test_case_name = file.to_test_case_name();
         let case = res.to_junit(&test_case_name, junit.as_deref().unwrap_or_default());
         test_suite.add_test_case(case);
-
-        tokio::task::block_in_place(|| stdout().write_all(&buf))?;
 
         match res {
             RunResult::Ok(_) => {}
             RunResult::Err(e) => {
                 if format!("{:?}", e).contains("Connection refused") {
                     connection_refused = true;
-                    println!("Connection refused. The server may be down.");
+                    eprintln!("Connection refused. The server may be down.");
                 }
                 if fail_fast || connection_refused {
-                    println!("Cancelling remaining tests...");
+                    eprintln!("Cancelling remaining tests...");
                     cancel.cancel();
                 }
 
@@ -540,7 +541,7 @@ async fn run_serial(
         let test_case_name = file.to_string_lossy().to_test_case_name();
 
         let res = connect_and_run_test_file(
-            &mut std::io::stdout(),
+            &mut stdout(),
             file,
             engine,
             config.clone(),
@@ -548,6 +549,7 @@ async fn run_serial(
             cancel.clone(),
         )
         .await;
+        stdout().flush()?;
 
         let case = res.to_junit(&test_case_name, junit.as_deref().unwrap_or_default());
         test_suite.add_test_case(case);
@@ -557,10 +559,10 @@ async fn run_serial(
             RunResult::Err(e) => {
                 if format!("{:?}", e).contains("Connection refused") {
                     connection_refused = true;
-                    println!("Connection refused. The server may be down.");
+                    eprintln!("Connection refused. The server may be down.");
                 }
                 if fail_fast || connection_refused {
-                    println!("Cancelling remaining tests...");
+                    eprintln!("Cancelling remaining tests...");
                     cancel.cancel();
                 }
 
