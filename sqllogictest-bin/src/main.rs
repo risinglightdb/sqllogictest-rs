@@ -67,6 +67,8 @@ struct Opt {
 
     /// Whether to enable parallel test. The `db` option will be used to create databases, and one
     /// database will be created for each test file.
+    ///
+    /// You can use `$__DATABASE__` in the test file to get the current database.
     #[clap(long, short)]
     jobs: Option<usize>,
     /// When using `-j`, whether to keep the temporary database when a test case fails.
