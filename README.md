@@ -180,6 +180,7 @@ Besides, there're some special variables supported:
 - `$__TEST_DIR__`: the path to a temporary directory specific to the current test case. 
   This can be helpful if you need to manipulate some external resources during the test.
 - `$__NOW__`: the current Unix timestamp in nanoseconds.
+- `$__DATABASE__`: the name of the current database.
 
 ```
 control substitution on
