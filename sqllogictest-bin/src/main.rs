@@ -22,6 +22,7 @@ use sqllogictest::{
     default_column_validator, default_normalizer, default_validator, update_record_with_output,
     AsyncDB, Injected, MakeConnection, Partitioner, Record, Runner,
 };
+use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
 
 #[derive(Default, Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -326,6 +327,20 @@ pub async fn main() -> Result<()> {
     let mut test_suite = TestSuite::new("sqllogictest");
     test_suite.set_timestamp(Local::now());
 
+    let cancel = CancellationToken::new();
+    tokio::spawn({
+        let cancel = cancel.clone();
+        async move {
+            match tokio::signal::ctrl_c().await {
+                Ok(_) => {
+                    eprintln!("Ctrl-C received, cancelling...");
+                    cancel.cancel();
+                }
+                Err(err) => eprintln!("Failed to listen for Ctrl-C signal: {}", err),
+            }
+        }
+    });
+
     let result = if let Some(jobs) = jobs {
         run_parallel(
             jobs,
@@ -337,6 +352,7 @@ pub async fn main() -> Result<()> {
             &labels,
             junit.clone(),
             fail_fast,
+            cancel,
         )
         .await
     } else {
@@ -348,6 +364,7 @@ pub async fn main() -> Result<()> {
             &labels,
             junit.clone(),
             fail_fast,
+            cancel,
         )
         .await
     };
@@ -372,6 +389,7 @@ async fn run_parallel(
     labels: &[String],
     junit: Option<String>,
     fail_fast: bool,
+    cancel: CancellationToken,
 ) -> Result<()> {
     let mut create_databases = BTreeMap::new();
     let mut test_cases = BTreeSet::new();
@@ -410,12 +428,14 @@ async fn run_parallel(
             let file = filename.to_string_lossy().to_string();
             let engine = engine.clone();
             let labels = labels.to_vec();
+            let cancel = cancel.clone();
             async move {
                 let (buf, res) = AbortOnDropHandle::new(tokio::spawn(async move {
                     let mut buf = vec![];
-                    let res =
-                        connect_and_run_test_file(&mut buf, filename, &engine, config, &labels)
-                            .await;
+                    let res = connect_and_run_test_file(
+                        &mut buf, filename, &engine, config, &labels, cancel,
+                    )
+                    .await;
                     (buf, res)
                 }))
                 .await
@@ -429,73 +449,38 @@ async fn run_parallel(
 
     let mut failed_cases = vec![];
     let mut failed_db: HashSet<String> = HashSet::new();
-    let mut remaining_cases: HashSet<String> = HashSet::from_iter(test_cases.clone());
 
-    let start = Instant::now();
     let mut connection_refused = false;
-    while let Some((db_name, file, res, mut buf)) = stream.next().await {
+    let start = Instant::now();
+
+    while let Some((db_name, file, res, buf)) = stream.next().await {
+        stdout().write_all(&buf)?;
+        stdout().flush()?;
+
         let test_case_name = file.to_test_case_name();
-        let removed = remaining_cases.remove(&test_case_name);
-        assert!(removed);
-        let mut failed = false;
-        let case = match res {
-            Ok(duration) => {
-                let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
-                case.set_time(duration);
-                case.set_timestamp(Local::now());
-                case.set_classname(junit.as_deref().unwrap_or_default());
-                case
-            }
-            Err(e) => {
-                failed = true;
-                let err = format!("{:?}", e);
-                if err.contains("Connection refused") {
+        let case = res.to_junit(&test_case_name, junit.as_deref().unwrap_or_default());
+        test_suite.add_test_case(case);
+
+        match res {
+            RunResult::Ok(_) => {}
+            RunResult::Err(e) => {
+                if format!("{:?}", e).contains("Connection refused") {
                     connection_refused = true;
+                    eprintln!("Connection refused. The server may be down.");
                 }
-                writeln!(buf, "{}\n\n{}", style("[FAILED]").red().bold(), err)?;
-                writeln!(buf)?;
+                if fail_fast || connection_refused {
+                    eprintln!("Cancelling remaining tests...");
+                    cancel.cancel();
+                }
+
                 failed_cases.push(test_case_name.clone());
                 failed_db.insert(db_name.clone());
-                let mut status = TestCaseStatus::non_success(NonSuccessKind::Failure);
-                status.set_type("test failure");
-                let mut case = TestCase::new(test_case_name, status);
-                case.set_system_err(e.to_string());
-                case.set_time(Duration::from_millis(0));
-                case.set_system_out("");
-                case.set_timestamp(Local::now());
-                case.set_classname(junit.as_deref().unwrap_or_default());
-                case
             }
+            RunResult::Skipped | RunResult::Cancelled => {}
         };
-        test_suite.add_test_case(case);
-        tokio::task::block_in_place(|| stdout().write_all(&buf))?;
-        if connection_refused {
-            eprintln!("Connection refused. The server may be down. Exiting...");
-            break;
-        }
-        if fail_fast && failed {
-            println!("early exit after failure...");
-            break;
-        }
     }
 
-    for test_case_name in remaining_cases {
-        println!("{test_case_name} is not finished, skipping");
-        let mut case = TestCase::new(test_case_name, TestCaseStatus::skipped());
-        case.set_time(Duration::from_millis(0));
-        case.set_timestamp(Local::now());
-        case.set_classname(junit.as_deref().unwrap_or_default());
-        test_suite.add_test_case(case);
-    }
-
-    eprintln!(
-        "\n All test cases finished in {} ms",
-        start.elapsed().as_millis()
-    );
-
-    // If `fail_fast`, there could be some ongoing cases (then active connections)
-    // in the stream. Abort them before dropping temporary databases.
-    drop(stream);
+    eprintln!("\n Finished in {} ms", start.elapsed().as_millis());
 
     if connection_refused {
         eprintln!("Skip dropping databases due to connection refused: {db_names:?}");
@@ -529,13 +514,16 @@ async fn run_parallel(
     db.shutdown().await;
 
     if !failed_cases.is_empty() {
-        Err(anyhow!("some test case failed:\n{:#?}", failed_cases))
+        Err(anyhow!("some test cases failed:\n{:#?}", failed_cases))
+    } else if cancel.is_cancelled() {
+        Err(anyhow!("some test cases skipped or cancelled"))
     } else {
         Ok(())
     }
 }
 
 // Run test one be one
+#[allow(clippy::too_many_arguments)]
 async fn run_serial(
     test_suite: &mut TestSuite,
     files: Vec<PathBuf>,
@@ -544,76 +532,50 @@ async fn run_serial(
     labels: &[String],
     junit: Option<String>,
     fail_fast: bool,
+    cancel: CancellationToken,
 ) -> Result<()> {
-    let mut failed_case = vec![];
-    let mut skipped_case = vec![];
-    let mut files = files.into_iter();
+    let mut failed_cases = vec![];
     let mut connection_refused = false;
-    for file in &mut files {
-        let mut runner = Runner::new(|| engines::connect(engine, &config));
-        for label in labels {
-            runner.add_label(label);
-        }
-        runner.set_var(well_known::DATABASE.to_owned(), config.db.clone());
 
-        let filename = file.to_string_lossy().to_string();
-        let test_case_name = filename.to_test_case_name();
-        let mut failed = false;
-        let case = match run_test_file(&mut std::io::stdout(), &mut runner, &file).await {
-            Ok(duration) => {
-                let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
-                case.set_time(duration);
-                case.set_timestamp(Local::now());
-                case.set_classname(junit.as_deref().unwrap_or_default());
-                case
-            }
-            Err(e) => {
-                failed = true;
-                let err = format!("{:?}", e);
-                if err.contains("Connection refused") {
-                    connection_refused = true;
-                }
-                println!("{}\n\n{}", style("[FAILED]").red().bold(), err);
-                println!();
-                failed_case.push(filename.clone());
-                let mut status = TestCaseStatus::non_success(NonSuccessKind::Failure);
-                status.set_type("test failure");
-                let mut case = TestCase::new(test_case_name, status);
-                case.set_timestamp(Local::now());
-                case.set_classname(junit.as_deref().unwrap_or_default());
-                case.set_system_err(e.to_string());
-                case.set_time(Duration::from_millis(0));
-                case.set_system_out("");
-                case
-            }
-        };
-        runner.shutdown_async().await;
-        test_suite.add_test_case(case);
-        if connection_refused {
-            eprintln!("Connection refused. The server may be down. Exiting...");
-            break;
-        }
-        if fail_fast && failed {
-            println!("early exit after failure...");
-            break;
-        }
-    }
     for file in files {
-        let filename = file.to_string_lossy().to_string();
-        let test_case_name = filename.to_test_case_name();
-        let mut case = TestCase::new(test_case_name, TestCaseStatus::skipped());
-        case.set_time(Duration::from_millis(0));
-        case.set_timestamp(Local::now());
-        case.set_classname(junit.as_deref().unwrap_or_default());
+        let test_case_name = file.to_string_lossy().to_test_case_name();
+
+        let res = connect_and_run_test_file(
+            &mut stdout(),
+            file,
+            engine,
+            config.clone(),
+            labels,
+            cancel.clone(),
+        )
+        .await;
+        stdout().flush()?;
+
+        let case = res.to_junit(&test_case_name, junit.as_deref().unwrap_or_default());
         test_suite.add_test_case(case);
-        skipped_case.push(filename.clone());
-    }
-    if !skipped_case.is_empty() {
-        println!("some test case skipped:\n{:#?}", skipped_case);
+
+        match res {
+            RunResult::Ok(_) => {}
+            RunResult::Err(e) => {
+                if format!("{:?}", e).contains("Connection refused") {
+                    connection_refused = true;
+                    eprintln!("Connection refused. The server may be down.");
+                }
+                if fail_fast || connection_refused {
+                    eprintln!("Cancelling remaining tests...");
+                    cancel.cancel();
+                }
+
+                failed_cases.push(test_case_name.clone());
+            }
+            RunResult::Skipped | RunResult::Cancelled => {}
+        };
     }
 
-    if !failed_case.is_empty() {
-        Err(anyhow!("some test case failed:\n{:#?}", failed_case))
+    if !failed_cases.is_empty() {
+        Err(anyhow!("some test case failed:\n{:#?}", failed_cases))
+    } else if cancel.is_cancelled() {
+        Err(anyhow!("some test cases skipped or cancelled"))
     } else {
         Ok(())
     }
@@ -647,19 +609,127 @@ async fn flush(out: &mut impl std::io::Write) -> std::io::Result<()> {
     tokio::task::block_in_place(|| out.flush())
 }
 
+/// The result of running a test file.
+enum RunResult {
+    /// The test file ran successfully in the given duration.
+    Ok(Duration),
+    /// The test file failed with an error.
+    Err(anyhow::Error),
+    /// The test file was cancelled during execution, typically due to a Ctrl-C.
+    Cancelled,
+    /// The test file was skipped because it was cancelled before execution, typically
+    /// due to a Ctrl-C or a failure with `--fail-fast`.
+    Skipped,
+}
+
+impl From<Result<Duration>> for RunResult {
+    fn from(res: Result<Duration>) -> Self {
+        match res {
+            Ok(duration) => RunResult::Ok(duration),
+            Err(e) => RunResult::Err(e),
+        }
+    }
+}
+
+impl RunResult {
+    /// Convert the result to a JUnit test case.
+    fn to_junit(&self, test_case_name: &str, junit: &str) -> TestCase {
+        match self {
+            RunResult::Ok(duration) => {
+                let mut case = TestCase::new(test_case_name, TestCaseStatus::success());
+                case.set_time(*duration);
+                case.set_timestamp(Local::now());
+                case.set_classname(junit);
+                case
+            }
+            RunResult::Err(e) => {
+                let mut status = TestCaseStatus::non_success(NonSuccessKind::Failure);
+                status.set_type("test failure");
+
+                let mut case = TestCase::new(test_case_name, status);
+                case.set_system_err(e.to_string());
+                case.set_time(Duration::from_millis(0));
+                case.set_system_out("");
+                case.set_timestamp(Local::now());
+                case.set_classname(junit);
+                case
+            }
+            RunResult::Skipped | RunResult::Cancelled => {
+                // TODO: what status should we use for cancelled tests?
+                let mut case = TestCase::new(test_case_name, TestCaseStatus::skipped());
+                case.set_time(Duration::from_millis(0));
+                case.set_timestamp(Local::now());
+                case.set_classname(junit);
+                case
+            }
+        }
+    }
+}
+
 async fn connect_and_run_test_file(
     out: &mut impl std::io::Write,
     filename: PathBuf,
     engine: &EngineConfig,
     config: DBConfig,
     labels: &[String],
-) -> Result<Duration> {
+    cancel: CancellationToken,
+) -> RunResult {
+    static RUNNING_TESTS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
+    // If the run is already cancelled, skip it.
+    if cancel.is_cancelled() {
+        // Ensure that all running tests are cancelled before we return `Skipped`.
+        let _ = RUNNING_TESTS.write().await;
+
+        writeln!(
+            out,
+            "{: <60} .. {}",
+            filename.to_string_lossy(),
+            style("[SKIPPED]").dim().bold(),
+        )
+        .unwrap();
+        return RunResult::Skipped;
+    }
+
+    // Hold until the current test is finished or cancelled.
+    let _running = RUNNING_TESTS.read().await;
+
     let mut runner = Runner::new(|| engines::connect(engine, &config));
     for label in labels {
         runner.add_label(label);
     }
     runner.set_var(well_known::DATABASE.to_owned(), config.db.clone());
-    let result = run_test_file(out, &mut runner, filename).await;
+
+    let begin = Instant::now();
+
+    // Note: we don't use `CancellationToken::run_until_cancelled` here because it always
+    // poll the wrapped future first, while we want cancellation to be more responsive.
+    let result = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => {
+            writeln!(
+                out,
+                "{} after {} ms",
+                style("[CANCELLED]").yellow().bold(),
+                begin.elapsed().as_millis(),
+            )
+            .unwrap();
+            RunResult::Cancelled
+        }
+        result = run_test_file(out, &mut runner, filename) => {
+            if let Err(err) = &result {
+                writeln!(
+                    out,
+                    "{} after {} ms\n\n{:?}\n",
+                    style("[FAILED]").red().bold(),
+                    begin.elapsed().as_millis(),
+                    err,
+                ).unwrap();
+            }
+            result.into()
+        }
+    };
+
     runner.shutdown_async().await;
 
     result
@@ -673,15 +743,15 @@ async fn run_test_file<T: std::io::Write, M: MakeConnection>(
     filename: impl AsRef<Path>,
 ) -> Result<Duration> {
     let filename = filename.as_ref();
-    let records =
-        tokio::task::block_in_place(|| sqllogictest::parse_file(filename).map_err(|e| anyhow!(e)))
-            .context("failed to parse sqllogictest file")?;
-
-    let mut begin_times = vec![];
-    let mut did_pop = false;
 
     write!(out, "{: <60} .. ", filename.to_string_lossy())?;
     flush(out).await?;
+
+    let records = tokio::task::block_in_place(|| sqllogictest::parse_file(filename))
+        .context("failed to parse sqllogictest file")?;
+
+    let mut begin_times = vec![];
+    let mut did_pop = false;
 
     begin_times.push(Instant::now());
 
