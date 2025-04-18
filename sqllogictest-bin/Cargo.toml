@@ -1,6 +1,6 @@
 [package]
 name = "sqllogictest-bin"
-version = { workspace = true }
+version = "0.28.1" # this might be newer than the library (workspace) version
 edition = { workspace = true }
 homepage = { workspace = true }
 keywords = { workspace = true }

@@ -1920,7 +1920,7 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest-bin"
-version = "0.28.0"
+version = "0.28.1"
 dependencies = [
  "anyhow",
  "async-trait",
