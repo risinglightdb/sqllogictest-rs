@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+* bin: Support graceful shutdown. When receiving a `Ctrl-C`, the program will cancel all running test cases, log cancelled and skipped test cases, drop temporary databases (if in parallel mode), close database connections, and finally exit with a non-zero code.
+
 ## [0.28.0] - 2025-03-06
 
 * runner: Add `Partitioner` and `Runner::with_partitioner` to enable partitioning of test cases, allowing only a subset of the glob result to be executed. This can be helpful for running tests in parallel in CI.
