@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.28.1] - 2025-04-18
+
 * bin: Support graceful shutdown. When receiving a `Ctrl-C`, the program will cancel all running test cases, log cancelled and skipped test cases, drop temporary databases (if in parallel mode), close database connections, and finally exit with a non-zero code.
 
 ## [0.28.0] - 2025-03-06
