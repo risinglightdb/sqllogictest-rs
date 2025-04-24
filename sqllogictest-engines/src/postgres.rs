@@ -53,6 +53,14 @@ impl<P> Postgres<P> {
     /// Shutdown the Postgres connection.
     async fn shutdown(&mut self) {
         if let Some((client, connection)) = self.conn.take() {
+            if let Err(e) = client
+                .cancel_token()
+                .cancel_query(tokio_postgres::NoTls)
+                .await
+            {
+                log::warn!("Failed to cancel query during shutdown: {:?}", e);
+            }
+
             drop(client);
             connection.await.ok();
         }
