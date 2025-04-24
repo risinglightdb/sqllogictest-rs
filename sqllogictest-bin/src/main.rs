@@ -2,7 +2,7 @@ mod engines;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::{stdout, Read, Seek, SeekFrom, Write};
+use std::io::{stdout, Read, Seek, SeekFrom, Stdout, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -430,17 +430,20 @@ async fn run_parallel(
             let labels = labels.to_vec();
             let cancel = cancel.clone();
             async move {
-                let (buf, res) = AbortOnDropHandle::new(tokio::spawn(async move {
-                    let mut buf = vec![];
-                    let res = connect_and_run_test_file(
-                        &mut buf, filename, &engine, config, &labels, cancel,
+                let res = AbortOnDropHandle::new(tokio::spawn(async move {
+                    connect_and_run_test_file(
+                        Vec::new(),
+                        filename,
+                        &engine,
+                        config,
+                        &labels,
+                        cancel,
                     )
-                    .await;
-                    (buf, res)
+                    .await
                 }))
                 .await
                 .unwrap();
-                (db_name, file, res, buf)
+                (db_name, file, res)
             }
         })
         .buffer_unordered(jobs);
@@ -453,10 +456,7 @@ async fn run_parallel(
     let mut connection_refused = false;
     let start = Instant::now();
 
-    while let Some((db_name, file, res, buf)) = stream.next().await {
-        stdout().write_all(&buf)?;
-        stdout().flush()?;
-
+    while let Some((db_name, file, res)) = stream.next().await {
         let test_case_name = file.to_test_case_name();
         let case = res.to_junit(&test_case_name, junit.as_deref().unwrap_or_default());
         test_suite.add_test_case(case);
@@ -541,7 +541,7 @@ async fn run_serial(
         let test_case_name = file.to_string_lossy().to_test_case_name();
 
         let res = connect_and_run_test_file(
-            &mut stdout(),
+            stdout(),
             file,
             engine,
             config.clone(),
@@ -666,8 +666,29 @@ impl RunResult {
     }
 }
 
+trait Output: Write {
+    fn finish(&mut self);
+}
+
+/// In serial mode, we directly write to stdout.
+impl Output for Stdout {
+    fn finish(&mut self) {
+        self.flush().unwrap();
+    }
+}
+
+/// In parallel mode, we write to a buffer and flush it to stdout at the end
+/// to avoid interleaving output from different parallelism.
+impl Output for Vec<u8> {
+    fn finish(&mut self) {
+        let mut stdout = stdout();
+        stdout.write_all(&self).unwrap();
+        stdout.flush().unwrap();
+    }
+}
+
 async fn connect_and_run_test_file(
-    out: &mut impl std::io::Write,
+    mut out: impl Output,
     filename: PathBuf,
     engine: &EngineConfig,
     config: DBConfig,
@@ -716,7 +737,7 @@ async fn connect_and_run_test_file(
             .unwrap();
             RunResult::Cancelled
         }
-        result = run_test_file(out, &mut runner, filename) => {
+        result = run_test_file(&mut out, &mut runner, filename) => {
             if let Err(err) = &result {
                 writeln!(
                     out,
@@ -730,6 +751,7 @@ async fn connect_and_run_test_file(
         }
     };
 
+    out.finish();
     runner.shutdown_async().await;
 
     result
