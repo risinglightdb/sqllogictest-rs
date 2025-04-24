@@ -682,7 +682,7 @@ impl Output for Stdout {
 impl Output for Vec<u8> {
     fn finish(&mut self) {
         let mut stdout = stdout();
-        stdout.write_all(&self).unwrap();
+        stdout.write_all(self).unwrap();
         stdout.flush().unwrap();
     }
 }
