@@ -341,6 +341,13 @@ pub async fn main() -> Result<()> {
         }
     });
 
+    let run_config = RunConfig {
+        labels,
+        junit: junit.clone(),
+        fail_fast,
+        cancel,
+    };
+
     let result = if let Some(jobs) = jobs {
         run_parallel(
             jobs,
@@ -349,24 +356,11 @@ pub async fn main() -> Result<()> {
             all_files,
             &engine,
             config,
-            &labels,
-            junit.clone(),
-            fail_fast,
-            cancel,
+            run_config,
         )
         .await
     } else {
-        run_serial(
-            &mut test_suite,
-            all_files,
-            &engine,
-            config,
-            &labels,
-            junit.clone(),
-            fail_fast,
-            cancel,
-        )
-        .await
+        run_serial(&mut test_suite, all_files, &engine, config, run_config).await
     };
 
     report.add_test_suite(test_suite);
@@ -378,7 +372,13 @@ pub async fn main() -> Result<()> {
     result
 }
 
-#[allow(clippy::too_many_arguments)]
+struct RunConfig {
+    labels: Vec<String>,
+    junit: Option<String>,
+    fail_fast: bool,
+    cancel: CancellationToken,
+}
+
 async fn run_parallel(
     jobs: usize,
     keep_db_on_failure: bool,
@@ -386,10 +386,12 @@ async fn run_parallel(
     files: Vec<PathBuf>,
     engine: &EngineConfig,
     config: DBConfig,
-    labels: &[String],
-    junit: Option<String>,
-    fail_fast: bool,
-    cancel: CancellationToken,
+    RunConfig {
+        labels,
+        junit,
+        fail_fast,
+        cancel,
+    }: RunConfig,
 ) -> Result<()> {
     let mut create_databases = BTreeMap::new();
     let mut test_cases = BTreeSet::new();
@@ -427,7 +429,7 @@ async fn run_parallel(
             config.db.clone_from(&db_name);
             let file = filename.to_string_lossy().to_string();
             let engine = engine.clone();
-            let labels = labels.to_vec();
+            let labels = labels.clone();
             let cancel = cancel.clone();
             async move {
                 let res = AbortOnDropHandle::new(tokio::spawn(async move {
@@ -529,10 +531,12 @@ async fn run_serial(
     files: Vec<PathBuf>,
     engine: &EngineConfig,
     config: DBConfig,
-    labels: &[String],
-    junit: Option<String>,
-    fail_fast: bool,
-    cancel: CancellationToken,
+    RunConfig {
+        labels,
+        junit,
+        fail_fast,
+        cancel,
+    }: RunConfig,
 ) -> Result<()> {
     let mut failed_cases = vec![];
     let mut connection_refused = false;
@@ -545,7 +549,7 @@ async fn run_serial(
             file,
             engine,
             config.clone(),
-            labels,
+            &labels,
             cancel.clone(),
         )
         .await;
