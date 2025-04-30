@@ -2,7 +2,7 @@ mod engines;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::{stdout, Read, Seek, SeekFrom, Stdout, Write};
+use std::io::{self, stdout, Read, Seek, SeekFrom, Stdout, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -592,7 +592,7 @@ async fn update_test_files(
         let mut runner = Runner::new(|| engines::connect(engine, &config));
         runner.set_var(well_known::DATABASE.to_owned(), config.db.clone());
 
-        if let Err(e) = update_test_file(&mut std::io::stdout(), &mut runner, &file, format).await {
+        if let Err(e) = update_test_file(&mut io::stdout(), &mut runner, &file, format).await {
             {
                 println!("{}\n\n{:?}", style("[FAILED]").red().bold(), e);
                 println!();
@@ -605,7 +605,7 @@ async fn update_test_files(
     Ok(())
 }
 
-async fn flush(out: &mut impl std::io::Write) -> std::io::Result<()> {
+async fn flush(out: &mut impl io::Write) -> io::Result<()> {
     tokio::task::block_in_place(|| out.flush())
 }
 
@@ -667,23 +667,23 @@ impl RunResult {
 }
 
 trait Output: Write {
-    fn finish(&mut self);
+    fn finish(&mut self) -> io::Result<()>;
 }
 
 /// In serial mode, we directly write to stdout.
 impl Output for Stdout {
-    fn finish(&mut self) {
-        self.flush().unwrap();
+    fn finish(&mut self) -> io::Result<()> {
+        self.flush()
     }
 }
 
 /// In parallel mode, we write to a buffer and flush it to stdout at the end
 /// to avoid interleaving output from different parallelism.
 impl Output for Vec<u8> {
-    fn finish(&mut self) {
+    fn finish(&mut self) -> io::Result<()> {
         let mut stdout = stdout();
-        stdout.write_all(self).unwrap();
-        stdout.flush().unwrap();
+        stdout.write_all(self)?;
+        stdout.flush()
     }
 }
 
@@ -751,7 +751,7 @@ async fn connect_and_run_test_file(
         }
     };
 
-    out.finish();
+    out.finish().unwrap();
     runner.shutdown_async().await;
 
     result
@@ -759,7 +759,7 @@ async fn connect_and_run_test_file(
 
 /// Different from [`Runner::run_file_async`], we re-implement it here to print some progress
 /// information.
-async fn run_test_file<T: std::io::Write, M: MakeConnection>(
+async fn run_test_file<T: io::Write, M: MakeConnection>(
     out: &mut T,
     runner: &mut Runner<M::Conn, M>,
     filename: impl AsRef<Path>,
@@ -828,7 +828,7 @@ async fn run_test_file<T: std::io::Write, M: MakeConnection>(
     Ok(duration)
 }
 
-fn finish_test_file<T: std::io::Write>(
+fn finish_test_file<T: io::Write>(
     out: &mut T,
     time_stack: &mut Vec<Instant>,
     did_pop: &mut bool,
@@ -864,7 +864,7 @@ fn finish_test_file<T: std::io::Write>(
 
 /// Different from [`sqllogictest::update_test_file`], we re-implement it here to print some
 /// progress information.
-async fn update_test_file<T: std::io::Write, M: MakeConnection>(
+async fn update_test_file<T: io::Write, M: MakeConnection>(
     out: &mut T,
     runner: &mut Runner<M::Conn, M>,
     filename: impl AsRef<Path>,
@@ -884,7 +884,7 @@ async fn update_test_file<T: std::io::Write, M: MakeConnection>(
 
     begin_times.push(Instant::now());
 
-    fn create_outfile(filename: impl AsRef<Path>) -> std::io::Result<(PathBuf, File)> {
+    fn create_outfile(filename: impl AsRef<Path>) -> io::Result<(PathBuf, File)> {
         let filename = filename.as_ref();
         let outfilename = filename.file_name().unwrap().to_str().unwrap().to_owned() + ".temp";
         let outfilename = filename.parent().unwrap().join(outfilename);
@@ -902,7 +902,7 @@ async fn update_test_file<T: std::io::Write, M: MakeConnection>(
         filename: &String,
         outfilename: &PathBuf,
         outfile: &mut File,
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         // check whether outfile ends with multiple newlines, which happens if
         // - the last record is statement/query
         // - the original file ends with multiple newlines
