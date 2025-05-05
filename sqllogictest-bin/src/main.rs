@@ -986,6 +986,8 @@ async fn update_test_file<T: std::io::Write, M: MakeConnection>(
         &filename.to_string_lossy(),
     )?;
 
+    writeln!(out)?;
+
     let Item {
         filename,
         outfilename,
