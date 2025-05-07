@@ -681,7 +681,7 @@ impl Output for Stdout {
 /// to avoid interleaving output from different parallelism.
 impl Output for Vec<u8> {
     fn finish(&mut self) -> io::Result<()> {
-        let mut stdout = stdout();
+        let mut stdout = stdout().lock();
         stdout.write_all(self)?;
         stdout.flush()
     }
