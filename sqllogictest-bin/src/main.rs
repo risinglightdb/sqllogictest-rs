@@ -2,7 +2,7 @@ mod engines;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::{stdout, Read, Seek, SeekFrom, Write};
+use std::io::{self, stdout, Read, Seek, SeekFrom, Stdout, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -430,17 +430,20 @@ async fn run_parallel(
             let labels = labels.to_vec();
             let cancel = cancel.clone();
             async move {
-                let (buf, res) = AbortOnDropHandle::new(tokio::spawn(async move {
-                    let mut buf = vec![];
-                    let res = connect_and_run_test_file(
-                        &mut buf, filename, &engine, config, &labels, cancel,
+                let res = AbortOnDropHandle::new(tokio::spawn(async move {
+                    connect_and_run_test_file(
+                        Vec::new(),
+                        filename,
+                        &engine,
+                        config,
+                        &labels,
+                        cancel,
                     )
-                    .await;
-                    (buf, res)
+                    .await
                 }))
                 .await
                 .unwrap();
-                (db_name, file, res, buf)
+                (db_name, file, res)
             }
         })
         .buffer_unordered(jobs);
@@ -453,10 +456,7 @@ async fn run_parallel(
     let mut connection_refused = false;
     let start = Instant::now();
 
-    while let Some((db_name, file, res, buf)) = stream.next().await {
-        stdout().write_all(&buf)?;
-        stdout().flush()?;
-
+    while let Some((db_name, file, res)) = stream.next().await {
         let test_case_name = file.to_test_case_name();
         let case = res.to_junit(&test_case_name, junit.as_deref().unwrap_or_default());
         test_suite.add_test_case(case);
@@ -541,7 +541,7 @@ async fn run_serial(
         let test_case_name = file.to_string_lossy().to_test_case_name();
 
         let res = connect_and_run_test_file(
-            &mut stdout(),
+            stdout(),
             file,
             engine,
             config.clone(),
@@ -592,7 +592,7 @@ async fn update_test_files(
         let mut runner = Runner::new(|| engines::connect(engine, &config));
         runner.set_var(well_known::DATABASE.to_owned(), config.db.clone());
 
-        if let Err(e) = update_test_file(&mut std::io::stdout(), &mut runner, &file, format).await {
+        if let Err(e) = update_test_file(&mut io::stdout(), &mut runner, &file, format).await {
             {
                 println!("{}\n\n{:?}", style("[FAILED]").red().bold(), e);
                 println!();
@@ -605,7 +605,7 @@ async fn update_test_files(
     Ok(())
 }
 
-async fn flush(out: &mut impl std::io::Write) -> std::io::Result<()> {
+async fn flush(out: &mut impl io::Write) -> io::Result<()> {
     tokio::task::block_in_place(|| out.flush())
 }
 
@@ -666,14 +666,43 @@ impl RunResult {
     }
 }
 
+trait Output: Write {
+    fn finish(&mut self) -> io::Result<()>;
+}
+
+/// In serial mode, we directly write to stdout.
+impl Output for Stdout {
+    fn finish(&mut self) -> io::Result<()> {
+        self.flush()
+    }
+}
+
+/// In parallel mode, we write to a buffer and flush it to stdout at the end
+/// to avoid interleaving output from different parallelism.
+impl Output for Vec<u8> {
+    fn finish(&mut self) -> io::Result<()> {
+        let mut stdout = stdout().lock();
+        stdout.write_all(self)?;
+        stdout.flush()
+    }
+}
+
 async fn connect_and_run_test_file(
-    out: &mut impl std::io::Write,
+    out: impl Output,
     filename: PathBuf,
     engine: &EngineConfig,
     config: DBConfig,
     labels: &[String],
     cancel: CancellationToken,
 ) -> RunResult {
+    struct OutputGuard<O: Output>(O);
+    impl<O: Output> Drop for OutputGuard<O> {
+        fn drop(&mut self) {
+            self.0.finish().unwrap();
+        }
+    }
+    let mut out = OutputGuard(out);
+
     static RUNNING_TESTS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
     // If the run is already cancelled, skip it.
@@ -682,7 +711,7 @@ async fn connect_and_run_test_file(
         let _ = RUNNING_TESTS.write().await;
 
         writeln!(
-            out,
+            out.0,
             "{: <60} .. {}",
             filename.to_string_lossy(),
             style("[SKIPPED]").dim().bold(),
@@ -708,7 +737,7 @@ async fn connect_and_run_test_file(
         biased;
         _ = cancel.cancelled() => {
             writeln!(
-                out,
+                out.0,
                 "{} after {} ms",
                 style("[CANCELLED]").yellow().bold(),
                 begin.elapsed().as_millis(),
@@ -716,10 +745,10 @@ async fn connect_and_run_test_file(
             .unwrap();
             RunResult::Cancelled
         }
-        result = run_test_file(out, &mut runner, filename) => {
+        result = run_test_file(&mut out.0, &mut runner, filename) => {
             if let Err(err) = &result {
                 writeln!(
-                    out,
+                    out.0,
                     "{} after {} ms\n\n{:?}\n",
                     style("[FAILED]").red().bold(),
                     begin.elapsed().as_millis(),
@@ -730,6 +759,7 @@ async fn connect_and_run_test_file(
         }
     };
 
+    drop(out); // flush the output before shutting down the runner
     runner.shutdown_async().await;
 
     result
@@ -737,7 +767,7 @@ async fn connect_and_run_test_file(
 
 /// Different from [`Runner::run_file_async`], we re-implement it here to print some progress
 /// information.
-async fn run_test_file<T: std::io::Write, M: MakeConnection>(
+async fn run_test_file<T: io::Write, M: MakeConnection>(
     out: &mut T,
     runner: &mut Runner<M::Conn, M>,
     filename: impl AsRef<Path>,
@@ -806,7 +836,7 @@ async fn run_test_file<T: std::io::Write, M: MakeConnection>(
     Ok(duration)
 }
 
-fn finish_test_file<T: std::io::Write>(
+fn finish_test_file<T: io::Write>(
     out: &mut T,
     time_stack: &mut Vec<Instant>,
     did_pop: &mut bool,
@@ -842,7 +872,7 @@ fn finish_test_file<T: std::io::Write>(
 
 /// Different from [`sqllogictest::update_test_file`], we re-implement it here to print some
 /// progress information.
-async fn update_test_file<T: std::io::Write, M: MakeConnection>(
+async fn update_test_file<T: io::Write, M: MakeConnection>(
     out: &mut T,
     runner: &mut Runner<M::Conn, M>,
     filename: impl AsRef<Path>,
@@ -862,7 +892,7 @@ async fn update_test_file<T: std::io::Write, M: MakeConnection>(
 
     begin_times.push(Instant::now());
 
-    fn create_outfile(filename: impl AsRef<Path>) -> std::io::Result<(PathBuf, File)> {
+    fn create_outfile(filename: impl AsRef<Path>) -> io::Result<(PathBuf, File)> {
         let filename = filename.as_ref();
         let outfilename = filename.file_name().unwrap().to_str().unwrap().to_owned() + ".temp";
         let outfilename = filename.parent().unwrap().join(outfilename);
@@ -880,7 +910,7 @@ async fn update_test_file<T: std::io::Write, M: MakeConnection>(
         filename: &String,
         outfilename: &PathBuf,
         outfile: &mut File,
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         // check whether outfile ends with multiple newlines, which happens if
         // - the last record is statement/query
         // - the original file ends with multiple newlines
