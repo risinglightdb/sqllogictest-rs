@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.28.2] - 2025-05-07
+
 * engines: Enhance graceful shutdown by canceling ongoing queries when shutting down postgres connections. This improves the behavior when receiving a `Ctrl-C` signal by ensuring that any long-running queries are properly canceled before the connection is closed.
+* bin: In parallel mode, the output of a test case will be printed promptly before shutting down the database connection.
 
 ## [0.28.1] - 2025-04-18
 
