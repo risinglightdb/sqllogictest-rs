@@ -688,13 +688,21 @@ impl Output for Vec<u8> {
 }
 
 async fn connect_and_run_test_file(
-    mut out: impl Output,
+    out: impl Output,
     filename: PathBuf,
     engine: &EngineConfig,
     config: DBConfig,
     labels: &[String],
     cancel: CancellationToken,
 ) -> RunResult {
+    struct OutputGuard<O: Output>(O);
+    impl<O: Output> Drop for OutputGuard<O> {
+        fn drop(&mut self) {
+            self.0.finish().unwrap();
+        }
+    }
+    let mut out = OutputGuard(out);
+
     static RUNNING_TESTS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
     // If the run is already cancelled, skip it.
@@ -703,7 +711,7 @@ async fn connect_and_run_test_file(
         let _ = RUNNING_TESTS.write().await;
 
         writeln!(
-            out,
+            out.0,
             "{: <60} .. {}",
             filename.to_string_lossy(),
             style("[SKIPPED]").dim().bold(),
@@ -729,7 +737,7 @@ async fn connect_and_run_test_file(
         biased;
         _ = cancel.cancelled() => {
             writeln!(
-                out,
+                out.0,
                 "{} after {} ms",
                 style("[CANCELLED]").yellow().bold(),
                 begin.elapsed().as_millis(),
@@ -737,10 +745,10 @@ async fn connect_and_run_test_file(
             .unwrap();
             RunResult::Cancelled
         }
-        result = run_test_file(&mut out, &mut runner, filename) => {
+        result = run_test_file(&mut out.0, &mut runner, filename) => {
             if let Err(err) = &result {
                 writeln!(
-                    out,
+                    out.0,
                     "{} after {} ms\n\n{:?}\n",
                     style("[FAILED]").red().bold(),
                     begin.elapsed().as_millis(),
@@ -751,7 +759,7 @@ async fn connect_and_run_test_file(
         }
     };
 
-    out.finish().unwrap();
+    drop(out); // flush the output before shutting down the runner
     runner.shutdown_async().await;
 
     result
