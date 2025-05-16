@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.28.3] - 2025-05-16
+
+* bin: Add `--shutdown-timeout` to set a timeout for shutting down the database connections after a test file is finished. By default, this is unspecified, meaning to wait forever.
+
 ## [0.28.2] - 2025-05-07
 
 * engines: Enhance graceful shutdown by canceling ongoing queries when shutting down postgres connections. This improves the behavior when receiving a `Ctrl-C` signal by ensuring that any long-running queries are properly canceled before the connection is closed.
