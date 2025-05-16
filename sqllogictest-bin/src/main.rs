@@ -133,14 +133,10 @@ struct Opt {
     #[clap(long, env = PARTITION_COUNT_ENV_KEY)]
     partition_count: Option<u64>,
 
-    /// Timeout in seconds for shutting down the connections to the database.
-    /// `0` means to wait forever.
-    #[clap(
-        long = "shutdown-timeout",
-        default_value = "10",
-        env = "SLT_SHUTDOWN_TIMEOUT"
-    )]
-    shutdown_timeout_secs: u64,
+    /// Timeout in seconds for shutting down the connections to the database after a
+    /// test file is finished. By default, this is unspecified, meaning to wait forever.
+    #[clap(long = "shutdown-timeout", env = "SLT_SHUTDOWN_TIMEOUT")]
+    shutdown_timeout_secs: Option<u64>,
 }
 
 /// Connection configuration.
@@ -356,7 +352,7 @@ pub async fn main() -> Result<()> {
         junit: junit.clone(),
         fail_fast,
         cancel,
-        shutdown_timeout_secs,
+        shutdown_timeout: shutdown_timeout_secs.map(Duration::from_secs),
     };
 
     let result = if let Some(jobs) = jobs {
@@ -388,7 +384,7 @@ struct RunConfig {
     junit: Option<String>,
     fail_fast: bool,
     cancel: CancellationToken,
-    shutdown_timeout_secs: u64,
+    shutdown_timeout: Option<Duration>,
 }
 
 async fn run_parallel(
@@ -403,7 +399,7 @@ async fn run_parallel(
         junit,
         fail_fast,
         cancel,
-        shutdown_timeout_secs,
+        shutdown_timeout,
     }: RunConfig,
 ) -> Result<()> {
     let mut create_databases = BTreeMap::new();
@@ -453,7 +449,7 @@ async fn run_parallel(
                         config,
                         &labels,
                         cancel,
-                        shutdown_timeout_secs,
+                        shutdown_timeout,
                     )
                     .await
                 }))
@@ -550,7 +546,7 @@ async fn run_serial(
         junit,
         fail_fast,
         cancel,
-        shutdown_timeout_secs,
+        shutdown_timeout,
     }: RunConfig,
 ) -> Result<()> {
     let mut failed_cases = vec![];
@@ -566,7 +562,7 @@ async fn run_serial(
             config.clone(),
             &labels,
             cancel.clone(),
-            shutdown_timeout_secs,
+            shutdown_timeout,
         )
         .await;
         stdout().flush()?;
@@ -714,7 +710,7 @@ async fn connect_and_run_test_file(
     config: DBConfig,
     labels: &[String],
     cancel: CancellationToken,
-    shutdown_timeout_secs: u64,
+    shutdown_timeout: Option<Duration>,
 ) -> RunResult {
     struct OutputGuard<O: Output>(O);
     impl<O: Output> Drop for OutputGuard<O> {
@@ -782,10 +778,10 @@ async fn connect_and_run_test_file(
 
     drop(out); // flush the output before shutting down the runner
 
-    match shutdown_timeout_secs {
-        0 => runner.shutdown_async().await,
-        secs => {
-            if tokio::time::timeout(Duration::from_secs(secs), runner.shutdown_async())
+    match shutdown_timeout {
+        None => runner.shutdown_async().await,
+        Some(timeout) => {
+            if tokio::time::timeout(timeout, runner.shutdown_async())
                 .await
                 .is_err()
             {
