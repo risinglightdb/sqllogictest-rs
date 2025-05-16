@@ -73,6 +73,19 @@ SELECT * FROM foo;
 4 5
 ```
 
+### Extension: Ignore volatile parts of output
+
+You can use `<slt:ignore>` to skip the volatile parts of the output. This is helpful for e.g., testing the format
+of `EXPLAIN`-like statements.
+
+```text
+query T
+EXPLAIN SELECT * FROM foo;
+----
+Seq Scan on t  (cost=<slt:ignore> rows=<slt:ignore> width=<slt:ignore>)
+   Filter: (x > 1)  
+```
+
 ### Extension: Run a query/statement that should fail with the expacted error message
 
 The syntax:
