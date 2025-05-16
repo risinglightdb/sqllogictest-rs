@@ -487,6 +487,44 @@ pub fn default_validator(
     actual: &[Vec<String>],
     expected: &[String],
 ) -> bool {
+    // Support ignore marker <slt:ignore> to skip volatile parts of output.
+    const IGNORE_MARKER: &str = "<slt:ignore>";
+    let contains_ignore_marker = expected.iter().any(|line| line.contains(IGNORE_MARKER));
+
+    // Normalize expected lines.
+    // If ignore marker present, perform fragment-based matching on the full snapshot.
+    if contains_ignore_marker {
+        // If ignore marker present, perform fragment-based matching on the full snapshot.
+        // The actual results might contain \n, and may not be a normal "row", which is not suitable to normalize.
+        let expected_results = expected;
+        let actual_rows = actual
+            .iter()
+            .map(|strs| strs.iter().join(" "))
+            .collect_vec();
+
+        let expected_snapshot = expected_results.join("\n");
+        let actual_snapshot = actual_rows.join("\n");
+        let fragments: Vec<&str> = expected_snapshot.split(IGNORE_MARKER).collect();
+        let mut pos = 0;
+        for frag in fragments {
+            if frag.is_empty() {
+                continue;
+            }
+            if let Some(idx) = actual_snapshot[pos..].find(frag) {
+                pos += idx + frag.len();
+            } else {
+                tracing::error!(
+                    "mismatch at: {}\nexpected: {}\nactual: {}",
+                    pos,
+                    frag,
+                    &actual_snapshot[pos..]
+                );
+                return false;
+            }
+        }
+        return true;
+    }
+
     let expected_results = expected.iter().map(normalizer).collect_vec();
     // Default, we compare normalized results. Whitespace characters are ignored.
     let normalized_rows = actual
@@ -2293,5 +2331,37 @@ Caused by:
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "TestError: {}", self.0)
         }
+    }
+
+    #[test]
+    fn test_default_validator_ignore_simple() {
+        let normalizer = default_normalizer;
+        let actual = vec![vec!["foo".to_string(), "bar".to_string()]];
+        let expected = vec!["foo<slt:ignore>bar".to_string()];
+        assert!(default_validator(normalizer, &actual, &expected));
+    }
+
+    #[test]
+    fn test_default_validator_ignore_multiple_fragments() {
+        let normalizer = default_normalizer;
+        let actual = vec![vec![
+            "one".to_string(),
+            "two".to_string(),
+            "three".to_string(),
+        ]];
+        let expected = vec!["one<slt:ignore>three".to_string()];
+        assert!(default_validator(normalizer, &actual, &expected));
+    }
+
+    #[test]
+    fn test_default_validator_ignore_fail() {
+        let normalizer = default_normalizer;
+        let actual = vec![vec![
+            "alpha".to_string(),
+            "beta".to_string(),
+            "gamma".to_string(),
+        ]];
+        let expected = vec!["alpha<slt:ignore>delta".to_string()];
+        assert!(!default_validator(normalizer, &actual, &expected));
     }
 }

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+* runner: Add `<slt:ignore>` to skip the volatile parts of the output.
+
 ## [0.28.3] - 2025-05-16
 
 * bin: Add `--shutdown-timeout` to set a timeout for shutting down the database connections after a test file is finished. By default, this is unspecified, meaning to wait forever.
