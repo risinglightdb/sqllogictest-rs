@@ -1530,7 +1530,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         );
                         continue;
                     }
-                    let record_output = self.apply_record(record.clone()).await;
+                    let record_output = self.run_async(record.clone()).await?;
                     let record = update_record_with_output(
                         &record,
                         &record_output,
