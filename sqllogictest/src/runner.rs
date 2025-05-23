@@ -959,18 +959,11 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         &mut self,
         record: Record<D::ColumnType>,
     ) -> Result<RecordOutput<D::ColumnType>, TestError> {
-        let retry = match &record {
-            Record::Statement { retry, .. } => retry.clone(),
-            Record::Query { retry, .. } => retry.clone(),
-            Record::System { retry, .. } => retry.clone(),
-            _ => None,
-        };
-        if retry.is_none() {
+        // The parser ensures that `retry.attempts` must be > 0.
+        let Some(retry) = record.retry_config() else {
             return self.run_async_no_retry(record).await;
-        }
+        };
 
-        // Retry for `retry.attempts` times. The parser ensures that `retry.attempts` must > 0.
-        let retry = retry.unwrap();
         let mut last_error = None;
         for _ in 0..retry.attempts {
             let result = self.run_async_no_retry(record.clone()).await;
@@ -1530,7 +1523,18 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         );
                         continue;
                     }
-                    let record_output = self.apply_record(record.clone()).await;
+
+                    // If a retry configuration is specified, it is safe run the record with retries
+                    let record_output = if record.retry_config().is_some() {
+                        // Exhaust all possible retries first before applying the record
+                        match self.run_async(record.clone()).await {
+                            Ok(record_output) => record_output,
+                            Err(_) => self.apply_record(record.clone()).await,
+                        }
+                    } else {
+                        self.apply_record(record.clone()).await
+                    };
+
                     let record = update_record_with_output(
                         &record,
                         &record_output,
