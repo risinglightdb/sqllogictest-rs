@@ -296,12 +296,14 @@ pub enum TestErrorKind {
         actual_stdout: String,
     },
     // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
-    #[error("{kind} is expected to fail with error:\n\t{expected_err}\nbut got error:\n\t{err}\n[SQL] {sql}")]
+    #[error("{kind} is expected to fail with error:\n\t{expected_err}\nbut got error:\n\t{}{err}\n[SQL] {sql}", .actual_sqlstate.as_ref().map(|s| format!("(sqlstate {s}) ")).unwrap_or_default())]
     ErrorMismatch {
         sql: String,
         err: AnyError,
         expected_err: String,
         kind: RecordKind,
+        /// The actual SQL state when the expected error was a SqlState type
+        actual_sqlstate: Option<String>,
     },
     #[error("statement is expected to affect {expected} rows, but actually {actual}\n[SQL] {sql}")]
     StatementResultMismatch {
@@ -369,12 +371,16 @@ impl Display for TestErrorKindDisplay<'_> {
                 err,
                 expected_err,
                 kind,
-            } => write!(
-                f,
-                "{kind} is expected to fail with error:\n\t{}\nbut got error:\n\t{}\n[SQL] {sql}",
-                expected_err.bright_green(),
-                err.bright_red(),
-            ),
+                actual_sqlstate,
+            } => {
+                write!(
+                    f,
+                    "{kind} is expected to fail with error:\n\t{}\nbut got error:\n\t{}{}\n[SQL] {sql}",
+                    expected_err.bright_green(),
+                    actual_sqlstate.as_ref().map(|s| format!("(sqlstate {s}) ")).unwrap_or_default(),
+                    err.bright_red(),
+                )
+            }
             TestErrorKind::QueryResultMismatch {
                 sql,
                 expected,
@@ -1135,6 +1141,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             err: Arc::clone(e),
                             expected_err: expected_error.to_string(),
                             kind: RecordKind::Statement,
+                            actual_sqlstate: sqlstate,
                         }
                         .at(loc));
                     }
@@ -1177,6 +1184,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                                 err: Arc::clone(e),
                                 expected_err: expected_error.to_string(),
                                 kind: RecordKind::Query,
+                                actual_sqlstate: sqlstate,
                             }
                             .at(loc));
                         }
