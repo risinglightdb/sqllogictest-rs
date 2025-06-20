@@ -98,6 +98,11 @@ pub trait AsyncDB {
     async fn run_command(mut command: Command) -> std::io::Result<std::process::Output> {
         command.output()
     }
+
+    /// Extract the SQL state from the error.
+    fn error_sql_state(_err: &Self::Error) -> Option<String> {
+        None
+    }
 }
 
 /// The database to be tested.
@@ -116,6 +121,11 @@ pub trait DB {
     /// Engine name of current database.
     fn engine_name(&self) -> &str {
         ""
+    }
+
+    /// Extract the SQL state from the error.
+    fn error_sql_state(_err: &Self::Error) -> Option<String> {
+        None
     }
 }
 
@@ -138,6 +148,10 @@ where
 
     fn engine_name(&self) -> &str {
         D::engine_name(self)
+    }
+
+    fn error_sql_state(err: &Self::Error) -> Option<String> {
+        D::error_sql_state(err)
     }
 }
 
