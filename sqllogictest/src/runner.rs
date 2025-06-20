@@ -1126,7 +1126,10 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 }
                 (None, StatementExpect::Ok) => {}
                 (Some(e), StatementExpect::Error(expected_error)) => {
-                    if !expected_error.is_match(&e.to_string()) {
+                    let sqlstate = e
+                        .downcast_ref::<D::Error>()
+                        .and_then(|concrete_err| D::error_sql_state(concrete_err));
+                    if !expected_error.is_match(&e.to_string(), sqlstate.as_deref()) {
                         return Err(TestErrorKind::ErrorMismatch {
                             sql,
                             err: Arc::clone(e),
@@ -1165,7 +1168,10 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         .at(loc));
                     }
                     (Some(e), QueryExpect::Error(expected_error)) => {
-                        if !expected_error.is_match(&e.to_string()) {
+                        let sqlstate = e
+                            .downcast_ref::<D::Error>()
+                            .and_then(|concrete_err| D::error_sql_state(concrete_err));
+                        if !expected_error.is_match(&e.to_string(), sqlstate.as_deref()) {
                             return Err(TestErrorKind::ErrorMismatch {
                                 sql,
                                 err: Arc::clone(e),
@@ -1715,7 +1721,7 @@ pub fn update_record_with_output<T: ColumnType>(
             }),
             // Error match
             (Some(e), StatementExpect::Error(expected_error))
-                if expected_error.is_match(&e.to_string()) =>
+                if expected_error.is_match(&e.to_string(), None) =>
             {
                 None
             }
@@ -1752,7 +1758,7 @@ pub fn update_record_with_output<T: ColumnType>(
         ) => match (error, expected) {
             // Error match
             (Some(e), QueryExpect::Error(expected_error))
-                if expected_error.is_match(&e.to_string()) =>
+                if expected_error.is_match(&e.to_string(), None) =>
             {
                 None
             }

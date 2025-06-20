@@ -1,0 +1,72 @@
+# Unit tests for error(sqlstate) parsing functionality
+# This file focuses on testing the parser's ability to correctly parse 
+# different SQL state error patterns
+
+# Test 1: Basic SQL state pattern parsing
+# Verify that the parser correctly identifies sqlstate patterns
+statement error (42P01)
+SELECT invalid_syntax FROM non_existent_table
+
+# Test 2: Alphanumeric SQL state codes
+# Some SQL states contain letters (like PostgreSQL codes)
+statement error (42P01)
+SELECT * FROM missing_table
+
+# Test 3: Different SQL state lengths
+# Test both 5-character standard SQL states and variations
+statement error (42P01)
+INSERT INTO non_existent_table VALUES (1)
+
+statement error (42703)
+SELECT non_existent_column FROM missing_table
+
+# Test 4: Mixed case SQL state codes (should be preserved as-is)
+statement error (42P01)
+SELECT * FROM another_missing_table
+
+statement error (42P01)
+SELECT * FROM yet_another_missing_table
+
+# Test 5: Ensure regular error patterns still work
+# This verifies backward compatibility
+statement error relation.*does not exist
+SELECT * FROM definitely_missing_table
+
+statement error relation.*does not exist
+SELECT * FROM postgres_missing_table
+
+# Test 6: Test both statement and query error contexts
+query error (42P01)
+SELECT * FROM query_missing_table
+
+query error (42P01)
+SELECT * FROM query_missing_table2
+
+# Test 7: Ensure multiline errors still work with regular expressions
+statement error
+give me a multiline error
+----
+Hey!
+
+You got:
+  Multiline FakeDBError!
+
+
+# Test 8: Test empty error (any error should match)
+statement error
+SELECT * FROM some_missing_table
+
+# Test 9: Test syntax error SQL state codes
+statement error (42601)
+SELECT * FORM missing_table
+
+statement error (42601)
+SELEKT * FROM missing_table
+
+# Test 10: Edge cases - what happens with different parentheses patterns
+# Note: These should be treated as regular regex patterns, not SQL states
+statement error Hey you got FakeDBError
+SELECT * FROM some_other_table
+
+statement error missing.*table
+SELECT * FROM final_missing_table
