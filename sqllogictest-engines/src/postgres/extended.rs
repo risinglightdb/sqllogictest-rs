@@ -148,11 +148,35 @@ fn bool_to_str(value: &bool) -> &'static str {
     }
 }
 
+fn varchar_array_to_str(value: &str) -> String {
+    if value.is_empty() || value.contains(' ') {
+        format!("\"{}\"", value)
+    } else {
+        value.to_string()
+    }
+}
+
 fn varchar_to_str(value: &str) -> String {
     if value.is_empty() {
         "(empty)".to_string()
     } else {
         value.to_string()
+    }
+}
+
+fn bytea_to_str(value: &[u8]) -> String {
+    if value.is_empty() {
+        return "(empty)".to_string();
+    }
+    let is_printable_ascii = value.iter().all(|&b| b >= 32 && b <= 126 && b != 92);
+    if is_printable_ascii {
+        String::from_utf8_lossy(value).into_owned()
+    } else {
+        let mut result = String::from("\\x");
+        for &b in value {
+            result.push_str(&format!("{:02x}", b));
+        }
+        result
     }
 }
 
@@ -256,11 +280,11 @@ impl sqllogictest::AsyncDB for Postgres<Extended> {
                     Type::TIMESTAMP_ARRAY => {
                         array_process!(row, row_vec, idx, NaiveDateTime);
                     }
-                    Type::VARCHAR_ARRAY | Type::TEXT_ARRAY => {
-                        array_process!(row, row_vec, idx, String, varchar_to_str);
+                    Type::VARCHAR_ARRAY | Type::TEXT_ARRAY | Type::BPCHAR_ARRAY => {
+                        array_process!(row, row_vec, idx, &str, varchar_array_to_str);
                     }
-                    Type::VARCHAR | Type::TEXT => {
-                        single_process!(row, row_vec, idx, String, varchar_to_str);
+                    Type::VARCHAR | Type::TEXT | Type::BPCHAR => {
+                        single_process!(row, row_vec, idx, &str, varchar_to_str);
                     }
                     Type::FLOAT4 => {
                         single_process!(row, row_vec, idx, f32, float4_to_str);
@@ -286,6 +310,18 @@ impl sqllogictest::AsyncDB for Postgres<Extended> {
                     }
                     Type::TIMESTAMPTZ_ARRAY => {
                         array_process!(self, row, row_vec, idx, DateTime<chrono::Utc>, TIMESTAMPTZ);
+                    }
+                    Type::BYTEA_ARRAY => {
+                        array_process!(row, row_vec, idx, &[u8], bytea_to_str);
+                    }
+                    Type::BYTEA => {
+                        single_process!(row, row_vec, idx, &[u8], bytea_to_str);
+                    }
+                    Type::JSON_ARRAY | Type::JSONB_ARRAY => {
+                        array_process!(row, row_vec, idx, serde_json::Value);
+                    }
+                    Type::JSON | Type::JSONB => {
+                        single_process!(row, row_vec, idx, serde_json::Value);
                     }
                     _ => {
                         todo!("Don't support {} type now.", column.type_().name())
