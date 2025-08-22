@@ -256,7 +256,7 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 expected,
                 retry,
             } => {
-                write!(f, "query ")?;
+                write!(f, "query")?;
                 match expected {
                     QueryExpect::Results {
                         types,
@@ -264,7 +264,10 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                         label,
                         ..
                     } => {
-                        write!(f, "{}", types.iter().map(|c| c.to_char()).join(""))?;
+                        let types_str = types.iter().map(|c| c.to_char()).join("");
+                        if !types_str.is_empty() {
+                            write!(f, " {}", types_str)?;
+                        }
                         if let Some(sort_mode) = sort_mode {
                             write!(f, " {}", sort_mode.as_str())?;
                         }
@@ -272,7 +275,10 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                             write!(f, " {label}")?;
                         }
                     }
-                    QueryExpect::Error(err) => err.fmt_inline(f)?,
+                    QueryExpect::Error(err) => {
+                        write!(f, " ")?;
+                        err.fmt_inline(f)?
+                    },
                 }
                 if let Some(retry) = retry {
                     write!(
