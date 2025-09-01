@@ -11,6 +11,7 @@ use chrono::Local;
 use clap::{Arg, ArgAction, CommandFactory, FromArgMatches, Parser, ValueEnum};
 use console::style;
 use engines::{EngineConfig, EngineType};
+use fancy_regex::Regex;
 use fs_err::{File, OpenOptions};
 use futures::StreamExt;
 use itertools::Itertools;
@@ -137,6 +138,9 @@ struct Opt {
     /// test file is finished. By default, this is unspecified, meaning to wait forever.
     #[clap(long = "shutdown-timeout", env = "SLT_SHUTDOWN_TIMEOUT")]
     shutdown_timeout_secs: Option<u64>,
+
+    #[clap(long)]
+    filter: Option<String>,
 }
 
 /// Connection configuration.
@@ -247,6 +251,7 @@ pub async fn main() -> Result<()> {
         partition_count,
         partition_id,
         shutdown_timeout_secs,
+        filter,
     } = Opt::from_arg_matches(&matches)
         .map_err(|err| err.exit())
         .unwrap();
@@ -295,10 +300,23 @@ pub async fn main() -> Result<()> {
     let glob_patterns = files;
     let mut all_files = Vec::new();
 
+    let re = filter
+        .map(|s| Regex::new(&s))
+        .transpose()
+        .context("invalid regex")?;
+
     for glob_pattern in glob_patterns {
         let mut files: Vec<PathBuf> = glob::glob(&glob_pattern)
             .context("failed to read glob pattern")?
             .try_collect()?;
+
+        if let Some(re) = &re {
+            files.retain(|path| {
+                re.is_match(&path.to_string_lossy())
+                    .context("invalid regex")
+                    .unwrap()
+            });
+        }
 
         // Test against partitioner only if there are multiple files matched, e.g., expanded from an `*`.
         if files.len() > 1 {
