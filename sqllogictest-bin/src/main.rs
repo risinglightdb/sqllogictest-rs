@@ -139,8 +139,9 @@ struct Opt {
     #[clap(long = "shutdown-timeout", env = "SLT_SHUTDOWN_TIMEOUT")]
     shutdown_timeout_secs: Option<u64>,
 
+    /// Skip tests that matches the given regex.
     #[clap(long)]
-    filter: Option<String>,
+    skip: Option<String>,
 }
 
 /// Connection configuration.
@@ -251,7 +252,7 @@ pub async fn main() -> Result<()> {
         partition_count,
         partition_id,
         shutdown_timeout_secs,
-        filter,
+        skip,
     } = Opt::from_arg_matches(&matches)
         .map_err(|err| err.exit())
         .unwrap();
@@ -300,7 +301,7 @@ pub async fn main() -> Result<()> {
     let glob_patterns = files;
     let mut all_files = Vec::new();
 
-    let re = filter
+    let re = skip
         .map(|s| Regex::new(&s))
         .transpose()
         .context("invalid regex")?;
@@ -312,7 +313,7 @@ pub async fn main() -> Result<()> {
 
         if let Some(re) = &re {
             files.retain(|path| {
-                re.is_match(&path.to_string_lossy())
+                !re.is_match(&path.to_string_lossy())
                     .context("invalid regex")
                     .unwrap()
             });
