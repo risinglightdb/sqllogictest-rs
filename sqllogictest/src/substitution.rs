@@ -15,7 +15,7 @@ pub(crate) struct Substitution<'a> {
 }
 
 impl Substitution<'_> {
-    pub fn new(runner_locals: &RunnerLocals, subst_env_vars: bool) -> Substitution {
+    pub fn new(runner_locals: &RunnerLocals, subst_env_vars: bool) -> Substitution<'_> {
         Substitution {
             runner_locals,
             subst_env_vars,

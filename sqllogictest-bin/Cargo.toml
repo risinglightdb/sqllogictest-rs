@@ -21,6 +21,7 @@ console = { version = "0.15" }
 easy-ext = "1"
 futures = { version = "0.3", default-features = false }
 glob = "0.3"
+fancy-regex = "0.16"
 itertools = "0.13"
 quick-junit = { version = "0.5" }
 rand = "0.8"
