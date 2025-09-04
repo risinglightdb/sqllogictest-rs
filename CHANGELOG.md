@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.28.4] - 2025-09-04
+
+* bin: support skip files with regex
 * runner: Add `<slt:ignore>` to skip the volatile parts of the output.
 
 ## [0.28.3] - 2025-05-16
