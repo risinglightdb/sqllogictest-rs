@@ -61,7 +61,7 @@ jobs:
         - os: macos-latest
           rust: stable
           target: aarch64-apple-darwin
-        - os: windows-2019
+        - os: windows-2022
           rust: stable
           target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
@@ -101,7 +101,7 @@ jobs:
         staging="${{ env.CRATE_NAME }}-${{ needs.create-release.outputs.release_version }}-${{ matrix.target }}"
         mkdir -p "$staging"
         cp {README.md,LICENSE-*,CHANGELOG.md} "$staging/"
-        if [ "${{ matrix.os }}" = "windows-2019" ]; then
+        if [ "${{ matrix.os }}" = "windows-2022" ]; then
           cp "target/${{ matrix.target }}/release/${{ env.BIN_NAME }}.exe" "$staging/"
           cd "$staging"
           7z a "../$staging.zip" .
