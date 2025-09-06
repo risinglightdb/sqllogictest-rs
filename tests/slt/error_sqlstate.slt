@@ -1,0 +1,160 @@
+# Test file for error(sqlstate) syntax support
+# This file tests the parsing and matching of SQL state error codes
+# in both statement and query contexts using the enhanced FakeDB
+
+# Test 1: Table not found error (SQL state 42P01)
+# This tests the most common error case
+statement error (42P01)
+SELECT * FROM non_existent_table
+
+query error (42P01)
+SELECT * FROM missing_table
+
+# Test 2: Column not found error (SQL state 42703)
+statement error (42703)
+SELECT non_existent_column FROM some_table
+
+query error (42703)
+SELECT missing_column FROM another_table
+
+# Test 3: Syntax error (SQL state 42601)
+statement error (42601)
+SELECT * FORM some_table
+
+query error (42601)
+SELEKT * FROM some_table
+
+# Test 4: Division by zero error (SQL state 22012)
+statement error (22012)
+SELECT 1/0
+
+query error (22012)
+SELECT id/0 FROM some_table
+
+# Test 5: Duplicate key error (SQL state 23505)
+# Simulate duplicate key constraint violations
+statement error (23505)
+INSERT INTO table_with_duplicate VALUES (1)
+
+query error (23505)
+INSERT INTO table_with_UNIQUE_constraint VALUES (1)
+
+# Test 6: Test backward compatibility - ensure regular error matching still works
+statement error Hey you got FakeDBError
+SELECT * FROM any_table
+
+statement error relation.*does not exist
+SELECT * FROM missing_table
+
+# Test 7: Test both inline and multiline error formats work alongside sqlstate
+statement error (42P01)
+SELECT * FROM another_missing_table
+
+statement error
+give me a multiline error
+----
+Hey!
+
+You got:
+  Multiline FakeDBError!
+
+
+# Test 8: Test empty error (any error should match)
+statement error
+SELECT * FROM some_table
+
+query error
+SELECT anything FROM anywhere
+
+# Test 9: Verify parsing of different SQL state formats
+# Test case preservation
+statement error (42P01)
+SELECT * FROM missing_table
+
+statement error (42P01)
+SELECT * FROM missing_table
+
+statement error (42703)
+SELECT missing_column FROM table
+
+# Test 10: Test complex SQL with SQL state matching
+statement error (42601)
+SELECT col1, col2 FORM table WHERE id = 1
+
+query error (42601)
+SELEKT COUNT(*) FROM table GROUP BY col1
+
+# Test 11: Test division by zero in different contexts
+statement error (22012)
+SELECT price/0 FROM products
+
+query error (22012)
+SELECT quantity/0 AS invalid FROM inventory
+
+# Test 12: Multiple table references with missing table error
+statement error (42P01)
+SELECT t1.id, t2.name FROM missing_table t1 JOIN other_table t2 ON t1.id = t2.id
+
+query error (42P01)
+SELECT * FROM (SELECT * FROM non_existent_table) AS subquery
+
+# Test 13: Test that SQL state matching is exact
+# This should match the SQL state exactly, not partially
+statement error (42P01)
+SELECT * FROM missing_table WHERE id = 1
+
+# These should NOT match because they don't contain the right patterns
+statement error Hey you got FakeDBError
+SELECT * FROM some_existing_table
+
+statement error Hey you got FakeDBError
+INSERT INTO real_table VALUES (1)
+
+# Test 14: Verify normal operations still work
+statement ok
+create table test_table (id int)
+
+statement ok
+insert into test_table values (1)
+
+statement ok
+drop table test_table
+
+# Test 15: Test description operation error (from original harness)
+statement error The operation \(describe\) is not supported
+desc table some_table
+
+query error The operation \(describe\) is not supported
+desc table another_table
+
+# Test 16: Test that multiple SQL patterns work correctly
+statement error (42703)
+SELECT missing_column, another_missing_column FROM table
+
+statement error (42601)
+SELEKT * FORM table WHERE col = 'value'
+
+# Test 17: Ensure the SQL state pattern parsing is robust
+# Test with extra whitespace and different formats
+statement error (42P01)
+SELECT * FROM missing_table
+
+# This should be treated as regex, not SQL state (invalid format)
+statement error missing.*table
+SELECT * FROM missing_table
+
+# Test 18: Final verification that all error types work
+statement error (42P01)
+SELECT * FROM final_missing_table
+
+query error (42703)
+SELECT final_missing_column FROM table
+
+statement error (42601)
+FINAL INVALID SYNTAX FORM
+
+query error (22012)
+SELECT final/0 FROM table
+
+statement error (23505)
+INSERT final duplicate key violation

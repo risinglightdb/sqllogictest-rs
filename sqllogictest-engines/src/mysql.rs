@@ -81,4 +81,12 @@ impl sqllogictest::AsyncDB for MySql {
     async fn run_command(command: Command) -> std::io::Result<std::process::Output> {
         tokio::process::Command::from(command).output().await
     }
+
+    fn error_sql_state(err: &Self::Error) -> Option<String> {
+        if let mysql_async::Error::Server(err) = err {
+            Some(err.state.clone())
+        } else {
+            None
+        }
+    }
 }

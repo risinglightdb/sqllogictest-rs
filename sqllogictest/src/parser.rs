@@ -377,12 +377,28 @@ pub enum ExpectedError {
     /// The actual error message that's exactly the same as the expected one is considered as a
     /// match.
     Multiline(String),
+    /// An expected SQL state code.
+    ///
+    /// The actual SQL state that matches the expected one is considered as a match.
+    SqlState(String),
 }
 
 impl ExpectedError {
     /// Parses an inline regex variant from tokens.
     fn parse_inline_tokens(tokens: &[&str]) -> Result<Self, ParseErrorKind> {
-        Self::new_inline(tokens.join(" "))
+        let joined = tokens.join(" ");
+
+        // Check if this is a sqlstate error pattern: error(sqlstate)
+        if let Some(captures) = regex::Regex::new(r"^\(([^)]+)\)$")
+            .unwrap()
+            .captures(&joined)
+        {
+            if let Some(sqlstate) = captures.get(1) {
+                return Ok(Self::SqlState(sqlstate.as_str().to_string()));
+            }
+        }
+
+        Self::new_inline(joined)
     }
 
     /// Creates an inline expected error message from a regex string.
@@ -406,8 +422,10 @@ impl ExpectedError {
     /// Unparses the expected message after `statement`.
     fn fmt_inline(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "error")?;
-        if let Self::Inline(regex) = self {
-            write!(f, " {regex}")?;
+        match self {
+            Self::Inline(regex) => write!(f, " {regex}")?,
+            Self::SqlState(sqlstate) => write!(f, " ({sqlstate})")?,
+            Self::Empty | Self::Multiline(_) => {}
         }
         Ok(())
     }
@@ -423,11 +441,14 @@ impl ExpectedError {
     }
 
     /// Returns whether the given error message matches the expected one.
-    pub fn is_match(&self, err: &str) -> bool {
+    pub fn is_match(&self, err: &str, sqlstate: Option<&str>) -> bool {
         match self {
             Self::Empty => true,
             Self::Inline(regex) => regex.is_match(err),
             Self::Multiline(results) => results.trim() == err.trim(),
+            Self::SqlState(expected_state) => {
+                sqlstate.map_or(false, |state| state == expected_state)
+            }
         }
     }
 
@@ -460,6 +481,7 @@ impl std::fmt::Display for ExpectedError {
             ExpectedError::Empty => write!(f, "(any)"),
             ExpectedError::Inline(regex) => write!(f, "(regex) {}", regex),
             ExpectedError::Multiline(results) => write!(f, "(multiline) {}", results.trim()),
+            ExpectedError::SqlState(sqlstate) => write!(f, "(sqlstate) {}", sqlstate),
         }
     }
 }
@@ -470,6 +492,7 @@ impl PartialEq for ExpectedError {
             (Self::Empty, Self::Empty) => true,
             (Self::Inline(l0), Self::Inline(r0)) => l0.as_str() == r0.as_str(),
             (Self::Multiline(l0), Self::Multiline(r0)) => l0 == r0,
+            (Self::SqlState(l0), Self::SqlState(r0)) => l0 == r0,
             _ => false,
         }
     }
