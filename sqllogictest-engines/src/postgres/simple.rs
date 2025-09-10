@@ -77,4 +77,8 @@ impl sqllogictest::AsyncDB for Postgres<Simple> {
     async fn run_command(command: Command) -> std::io::Result<std::process::Output> {
         tokio::process::Command::from(command).output().await
     }
+
+    fn error_sql_state(err: &Self::Error) -> Option<String> {
+        err.code().map(|s| s.code().to_owned())
+    }
 }

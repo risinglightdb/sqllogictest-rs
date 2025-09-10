@@ -73,17 +73,17 @@ pub(crate) async fn connect(
         EngineConfig::MySql => Engines::MySql(
             MySql::connect(config.into())
                 .await
-                .map_err(|e| EnginesError(e.into()))?,
+                .map_err(EnginesError::without_state)?,
         ),
         EngineConfig::Postgres => Engines::Postgres(
             PostgresSimple::connect(config.into())
                 .await
-                .map_err(|e| EnginesError(e.into()))?,
+                .map_err(EnginesError::without_state)?,
         ),
         EngineConfig::PostgresExtended => Engines::PostgresExtended(
             PostgresExtended::connect(config.into())
                 .await
-                .map_err(|e| EnginesError(e.into()))?,
+                .map_err(EnginesError::without_state)?,
         ),
         EngineConfig::External(cmd_tmpl) => {
             let (host, port) = config.random_addr();
@@ -98,24 +98,36 @@ pub(crate) async fn connect(
             Engines::External(
                 ExternalDriver::connect(cmd)
                     .await
-                    .map_err(|e| EnginesError(e.into()))?,
+                    .map_err(EnginesError::without_state)?,
             )
         }
     })
 }
 
 #[derive(Debug)]
-pub(crate) struct EnginesError(anyhow::Error);
+pub(crate) struct EnginesError {
+    error: anyhow::Error,
+    sqlstate: Option<String>,
+}
+
+impl EnginesError {
+    fn without_state(error: impl Into<anyhow::Error>) -> Self {
+        Self {
+            error: error.into(),
+            sqlstate: None,
+        }
+    }
+}
 
 impl Display for EnginesError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        self.error.fmt(f)
     }
 }
 
 impl std::error::Error for EnginesError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.0.source()
+        self.error.source()
     }
 }
 
@@ -130,6 +142,10 @@ macro_rules! dispatch_engines {
     }};
 }
 
+fn error_sql_state<E: AsyncDB>(_engine: &E, error: &E::Error) -> Option<String> {
+    E::error_sql_state(error)
+}
+
 #[async_trait]
 impl AsyncDB for Engines {
     type Error = EnginesError;
@@ -137,9 +153,10 @@ impl AsyncDB for Engines {
 
     async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, Self::Error> {
         dispatch_engines!(self, e, {
-            e.run(sql)
-                .await
-                .map_err(|e| EnginesError(anyhow::Error::from(e)))
+            e.run(sql).await.map_err(|error| EnginesError {
+                sqlstate: error_sql_state(e, &error),
+                error: anyhow::Error::from(error),
+            })
         })
     }
 
@@ -157,5 +174,9 @@ impl AsyncDB for Engines {
 
     async fn shutdown(&mut self) {
         dispatch_engines!(self, e, { e.shutdown().await })
+    }
+
+    fn error_sql_state(err: &Self::Error) -> Option<String> {
+        err.sqlstate.clone()
     }
 }
