@@ -278,7 +278,7 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                     QueryExpect::Error(err) => {
                         write!(f, " ")?;
                         err.fmt_inline(f)?
-                    },
+                    }
                 }
                 if let Some(retry) = retry {
                     write!(
