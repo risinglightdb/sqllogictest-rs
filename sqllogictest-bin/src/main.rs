@@ -402,6 +402,10 @@ async fn run_parallel(
         shutdown_timeout,
     }: RunConfig,
 ) -> Result<()> {
+    // Because PostgreSQL database names are < 64
+    const MAX_DATABASE_NAME_LEN: usize = 63;
+    const RANDOM_LEN: usize = 8;
+
     let mut create_databases = BTreeMap::new();
     let mut test_cases = BTreeSet::new();
     for file in files {
@@ -409,14 +413,23 @@ async fn run_parallel(
             .to_str()
             .ok_or_else(|| anyhow!("not a UTF-8 filename"))?;
         let test_case_name = filename.to_test_case_name();
+
         eprintln!("+ Discovered Test: {test_case_name}");
         if !test_cases.insert(test_case_name.clone()) {
             return Err(anyhow!("duplicated test case found: {}", test_case_name));
         }
+
+        let mut test_case_prefix = test_case_name;
+
+        if test_case_prefix.len() > MAX_DATABASE_NAME_LEN - RANDOM_LEN - 1 {
+            test_case_prefix =
+                test_case_prefix[..MAX_DATABASE_NAME_LEN - RANDOM_LEN - 1].to_string();
+        }
+
         let random_id: String = rand::distributions::Alphanumeric
-            .sample_string(&mut rand::thread_rng(), 8)
+            .sample_string(&mut rand::thread_rng(), RANDOM_LEN)
             .to_lowercase();
-        let db_name = format!("{test_case_name}_{random_id}");
+        let db_name = format!("{test_case_prefix}_{random_id}");
 
         create_databases.insert(db_name, file);
     }
@@ -966,7 +979,13 @@ async fn update_test_file<T: io::Write, M: MakeConnection>(
             }
         }
 
-        fs_err::rename(outfilename, filename)?;
+        let metadata = fs_err::symlink_metadata(filename)?;
+        if metadata.is_symlink() {
+            fs_err::copy(outfilename, filename)?;
+            fs_err::remove_file(outfilename)?;
+        } else {
+            fs_err::rename(outfilename, filename)?;
+        }
 
         Ok(())
     }
