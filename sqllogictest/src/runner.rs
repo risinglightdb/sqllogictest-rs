@@ -916,8 +916,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 match sort_mode {
                     None | Some(SortMode::NoSort) => {}
                     Some(SortMode::RowSort) => {
-                        // TODO(mkornaukhov) for now we assume that we use **only Postgres<Simple>**.
-                        // According to it's protocol, there should always be the first row contaning column names.
+                        // TODO(mkornaukhov) for now we assume that we use **only Postgres<>** protocols.
+                        // There always must be the first row contaning column names.
                         // This code may break out in case of other protocol, it should be fixed.
                         // Possible problems:
                         // * Panic in case of empty `rows`

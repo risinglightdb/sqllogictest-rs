@@ -16,6 +16,7 @@ futures = { version = "0.3", default-features = false }
 log = "0.4"
 mysql_async = { version = "0.34.2", default-features = false, features = ["minimal"] }
 pg_interval = "0.4"
+postgres_array = "0.11.1"
 postgres-types = { version = "0.2.8", features = ["derive", "with-chrono-0_4", "with-serde_json-1"] }
 rust_decimal = { version = "1.36.0", features = ["tokio-pg"] }
 serde = { version = "1", features = ["derive"] }
