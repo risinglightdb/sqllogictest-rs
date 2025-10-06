@@ -12,27 +12,65 @@ use sqllogictest::{DBOutput, DefaultColumnType};
 
 use super::{Extended, Postgres, Result};
 
+// Inspired by postgres_type::Array implementation of Display trait
+fn print_array<T: std::fmt::Display>(
+    arr: &postgres_array::Array<Option<T>>,
+    fmt: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    print_array_helper(0, &arr.dimensions(), &mut arr.iter(), fmt)
+}
+
+fn print_array_helper<'a, T: std::fmt::Display + 'a, I: Iterator<Item = &'a Option<T>>>(
+    depth: usize,
+    dims: &[postgres_array::Dimension],
+    data: &mut I,
+    fmt: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    if dims.is_empty() {
+        return write!(fmt, "{{}}");
+    }
+
+    if depth == dims.len() {
+        return match data.next().unwrap() {
+            Some(value) => write!(fmt, "{}", value),
+            None => write!(fmt, "NULL"),
+        };
+    }
+
+    write!(fmt, "{{")?;
+    for i in 0..dims[depth].len {
+        if i != 0 {
+            write!(fmt, ",")?;
+        }
+        print_array_helper(depth + 1, dims, data, fmt)?;
+    }
+    write!(fmt, "}}")
+}
+
+struct ArrayFmt<'a, T>(&'a postgres_array::Array<Option<T>>);
+
+impl<'a, T: std::fmt::Display> std::fmt::Display for ArrayFmt<'a, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        print_array(self.0, f)
+    }
+}
+
+// It's required to use postgres_array::Array instead of Vec.
+// See: https://github.com/rust-postgres/rust-postgres/issues/1186
 macro_rules! array_process {
     ($row:ident, $row_vec:ident, $idx:ident, $t:ty) => {
-        let value: Option<Vec<Option<$t>>> = $row.get($idx);
+        let value: Option<postgres_array::Array<Option<$t>>> = $row.get($idx);
         match value {
             Some(value) => {
+                let dimensions: Vec<postgres_array::Dimension> = value.dimensions().into();
+                let data: Vec<Option<String>> = value
+                    .into_iter()
+                    .map(|opt| opt.map(|v| format!("{}", v)))
+                    .collect();
+                let value = postgres_array::Array::from_parts(data, dimensions);
+                let value = ArrayFmt(&value);
                 let mut output = String::new();
-                write!(output, "{{").unwrap();
-                for (i, v) in value.iter().enumerate() {
-                    match v {
-                        Some(v) => {
-                            write!(output, "{}", v).unwrap();
-                        }
-                        None => {
-                            write!(output, "NULL").unwrap();
-                        }
-                    }
-                    if i < value.len() - 1 {
-                        write!(output, ",").unwrap();
-                    }
-                }
-                write!(output, "}}").unwrap();
+                write!(output, "{value}").unwrap();
                 $row_vec.push(output);
             }
             None => {
@@ -41,25 +79,18 @@ macro_rules! array_process {
         }
     };
     ($row:ident, $row_vec:ident, $idx:ident, $t:ty, $convert:ident) => {
-        let value: Option<Vec<Option<$t>>> = $row.get($idx);
+        let value: Option<postgres_array::Array<Option<$t>>> = $row.get($idx);
         match value {
             Some(value) => {
+                let dimensions: Vec<postgres_array::Dimension> = value.dimensions().into();
+                let data: Vec<Option<String>> = value
+                    .into_iter()
+                    .map(|opt| opt.map(|v| $convert(&v).to_string()))
+                    .collect();
+                let value = postgres_array::Array::from_parts(data, dimensions);
+                let value = ArrayFmt(&value);
                 let mut output = String::new();
-                write!(output, "{{").unwrap();
-                for (i, v) in value.iter().enumerate() {
-                    match v {
-                        Some(v) => {
-                            write!(output, "{}", $convert(v)).unwrap();
-                        }
-                        None => {
-                            write!(output, "NULL").unwrap();
-                        }
-                    }
-                    if i < value.len() - 1 {
-                        write!(output, ",").unwrap();
-                    }
-                }
-                write!(output, "}}").unwrap();
+                write!(output, "{value}").unwrap();
                 $row_vec.push(output);
             }
             None => {
@@ -68,29 +99,29 @@ macro_rules! array_process {
         }
     };
     ($self:ident, $row:ident, $row_vec:ident, $idx:ident, $t:ty, $ty_name:expr) => {
-        let value: Option<Vec<Option<$t>>> = $row.get($idx);
+        let value: Option<postgres_array::Array<Option<$t>>> = $row.get($idx);
         match value {
             Some(value) => {
-                let mut output = String::new();
-                write!(output, "{{").unwrap();
-                for (i, v) in value.iter().enumerate() {
+                let dimensions: Vec<postgres_array::Dimension> = value.dimensions().into();
+                let mut data = Vec::<Option<String>>::new();
+                for v in value.iter() {
                     match v {
                         Some(v) => {
                             let sql = format!("select ($1::{})::varchar", stringify!($ty_name));
                             let tmp_rows = $self.client().query(&sql, &[&v]).await.unwrap();
                             let value: &str = tmp_rows.get(0).unwrap().get(0);
                             assert!(value.len() > 0);
-                            write!(output, "{}", value).unwrap();
+                            data.push(Some(value.to_string()));
                         }
                         None => {
-                            write!(output, "NULL").unwrap();
+                            data.push(Some("NULL".to_string()));
                         }
                     }
-                    if i < value.len() - 1 {
-                        write!(output, ",").unwrap();
-                    }
                 }
-                write!(output, "}}").unwrap();
+                let value = postgres_array::Array::from_parts(data, dimensions);
+                let value = ArrayFmt(&value);
+                let mut output = String::new();
+                write!(output, "{value}").unwrap();
                 $row_vec.push(output);
             }
             None => {
@@ -219,6 +250,10 @@ impl sqllogictest::AsyncDB for Postgres<Extended> {
             .await?;
 
         pin_mut!(rows);
+
+        let column_names_row: Vec<String> =
+            stmt.columns().iter().map(|s| s.name().into()).collect();
+        output.push(column_names_row);
 
         while let Some(row) = rows.next().await {
             let row = row?;
