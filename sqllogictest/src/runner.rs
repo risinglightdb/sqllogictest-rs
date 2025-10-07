@@ -922,7 +922,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         // Possible problems:
                         // * Panic in case of empty `rows`
                         // * Incorrect sort in case of absence of column name row
-                        assert!(rows.len() > 0, "At least 1 row is expected");
+                        assert!(!rows.is_empty(), "At least 1 row is expected");
                         rows[1..].sort_unstable();
                     }
                     Some(SortMode::ValueSort) => {
