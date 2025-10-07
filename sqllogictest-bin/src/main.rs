@@ -809,6 +809,27 @@ async fn connect_and_run_test_file(
     result
 }
 
+// TODO make more abstract for 'foreach'
+#[derive(Clone, Debug)]
+struct LoopContext {
+    var_name: String,
+    cur_value: i64,
+    end_value: i64,
+    record_id: usize, // record_id of loop record
+}
+
+impl LoopContext {
+    fn next_iteration(&mut self) -> bool {
+        self.cur_value += 1;
+
+        if self.cur_value == self.end_value {
+            return false;
+        }
+        tracing::info!("CUR_VALUE = {}", self.cur_value);
+        true
+    }
+}
+
 /// Different from [`Runner::run_file_async`], we re-implement it here to print some progress
 /// information.
 async fn run_test_file<T: io::Write, M: MakeConnection>(
@@ -829,7 +850,12 @@ async fn run_test_file<T: io::Write, M: MakeConnection>(
 
     begin_times.push(Instant::now());
 
-    for record in records {
+    let mut record_id = 0;
+
+    let mut loop_ctx_stack = Vec::<LoopContext>::new();
+
+    while record_id < records.len() {
+        let record = &records[record_id];
         if let Record::Halt { .. } = record {
             break;
         }
@@ -856,14 +882,52 @@ async fn run_test_file<T: io::Write, M: MakeConnection>(
             _ => {}
         }
 
-        runner
-            .run_async(record)
+        // check if res is inside loop
+        // kind of stack required
+        let res = runner
+            .run_async(record.clone())
             .await
             .map_err(|e| anyhow!("{}", e.display(console::colors_enabled())))
             .context(format!(
                 "failed to run `{}`",
                 style(filename.to_string_lossy()).bold()
             ))?;
+
+        match res {
+            sqllogictest::RecordOutput::StartingLoop {
+                var_name,
+                begin,
+                end,
+            } => {
+                runner.set_var(var_name.clone(), begin.to_string());
+
+                let new_loop_ctx = LoopContext {
+                    var_name,
+                    cur_value: begin,
+                    end_value: end,
+                    record_id,
+                };
+                loop_ctx_stack.push(new_loop_ctx);
+                record_id += 1;
+            }
+            sqllogictest::RecordOutput::EndLoop => {
+                tracing::info!("record_id before end_loop: {record_id}");
+                let mut last = loop_ctx_stack.pop().expect("endloop without loop");
+                if last.next_iteration() {
+                    record_id = last.record_id + 1; // Next after the loop record
+                    runner.set_var(last.var_name.clone(), last.cur_value.to_string());
+
+                    loop_ctx_stack.push(last);
+                } else {
+                    runner.unset_var(&last.var_name);
+                    record_id += 1;
+                }
+                tracing::info!("record_id after end_loop: {record_id}");
+            }
+            _ => {
+                record_id += 1;
+            }
+        }
     }
 
     let duration = begin_times[0].elapsed();

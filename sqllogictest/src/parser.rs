@@ -196,6 +196,14 @@ pub enum Record<T: ColumnType> {
     Newline,
     /// Internally injected record which should not occur in the test file.
     Injected(Injected),
+    /// Loop
+    Loop {
+        var_name: String,
+        begin: i64,
+        end: i64,
+    },
+    EndLoop(),
+    // TODO add foreach
 }
 
 impl<T: ColumnType> Record<T> {
@@ -361,8 +369,20 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 }
                 Ok(())
             }
-            Record::Newline => Ok(()), // Display doesn't end with newline
+            Record::Newline => Ok(()),
             Record::Injected(p) => panic!("unexpected injected record: {p:?}"),
+            Record::Loop {
+                var_name,
+                begin,
+                end,
+            } => {
+                write!(f, "loop {} {} {}", var_name, begin, end)?;
+                Ok(())
+            }
+            Record::EndLoop() => {
+                write!(f, "endloop")?;
+                Ok(())
+            }
         }
     }
 }
@@ -960,6 +980,23 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     })?,
                 });
             }
+            ["loop", var_name, begin, end] => {
+                let var_name = var_name.to_string();
+                let begin: i64 = begin.parse().map_err(|_| {
+                    ParseErrorKind::InvalidNumber(begin.to_string()).at(loc.clone())
+                })?;
+                let end: i64 = end
+                    .parse()
+                    .map_err(|_| ParseErrorKind::InvalidNumber(end.to_string()).at(loc.clone()))?;
+                records.push(Record::Loop {
+                    var_name,
+                    begin,
+                    end,
+                });
+            }
+            ["endloop"] => {
+                records.push(Record::EndLoop());
+            }
             _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
         }
     }
@@ -1310,7 +1347,9 @@ select * from foo;
                     | Record::Comment(_)
                     | Record::Control(_)
                     | Record::Newline
-                    | Record::Injected(_) => {}
+                    | Record::Injected(_)
+                    | Record::Loop { .. }
+                    | Record::EndLoop() => {}
                 };
                 record
             })
