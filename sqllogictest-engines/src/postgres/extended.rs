@@ -17,7 +17,7 @@ fn print_array<T: std::fmt::Display>(
     arr: &postgres_array::Array<Option<T>>,
     fmt: &mut std::fmt::Formatter<'_>,
 ) -> std::fmt::Result {
-    print_array_helper(0, &arr.dimensions(), &mut arr.iter(), fmt)
+    print_array_helper(0, arr.dimensions(), &mut arr.iter(), fmt)
 }
 
 fn print_array_helper<'a, T: std::fmt::Display + 'a, I: Iterator<Item = &'a Option<T>>>(
@@ -199,7 +199,7 @@ fn bytea_to_str(value: &[u8]) -> String {
     if value.is_empty() {
         return "(empty)".to_string();
     }
-    let is_printable_ascii = value.iter().all(|&b| b >= 32 && b <= 126 && b != 92);
+    let is_printable_ascii = value.iter().all(|&b| (32..=126).contains(&b) && b != 92);
     if is_printable_ascii {
         String::from_utf8_lossy(value).into_owned()
     } else {

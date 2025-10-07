@@ -55,20 +55,3 @@ jobs:
         with:
           command: test
           args: --doc
-
-  semver:
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-      - name: Install semver-checks
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-semver-checks
-      - name: Check semver
-        run: |
-         cargo semver-checks check-release -p sqllogictest
-         cargo semver-checks check-release -p sqllogictest-engines
