@@ -1,3 +1,4 @@
+mod error;
 mod extended;
 mod simple;
 
@@ -5,7 +6,7 @@ use std::marker::PhantomData;
 
 use tokio::task::JoinHandle;
 
-type Result<T> = std::result::Result<T, tokio_postgres::Error>;
+type Result<T> = std::result::Result<T, error::PgDriverError>;
 
 /// Marker type for the Postgres simple query protocol.
 pub struct Simple;

@@ -4,11 +4,13 @@ use std::time::Duration;
 use async_trait::async_trait;
 use sqllogictest::{DBOutput, DefaultColumnType};
 
+use crate::postgres::error::PgDriverError;
+
 use super::{Postgres, Result, Simple};
 
 #[async_trait]
 impl sqllogictest::AsyncDB for Postgres<Simple> {
-    type Error = tokio_postgres::error::Error;
+    type Error = PgDriverError;
     type ColumnType = DefaultColumnType;
 
     async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>> {
