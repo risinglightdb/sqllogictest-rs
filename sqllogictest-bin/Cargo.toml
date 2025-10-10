@@ -13,21 +13,22 @@ name = "sqllogictest"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = { version = "1" }
-async-trait = "0.1"
-chrono = { version = "0.4" }
-clap = { version = "4", features = ["derive", "env"] }
-console = { version = "0.15" }
-easy-ext = "1"
-futures = { version = "0.3", default-features = false }
-glob = "0.3"
-fancy-regex = "0.16"
-itertools = "0.13"
-quick-junit = { version = "0.5" }
-rand = "0.8"
-sqllogictest = { path = "../sqllogictest", version = "0.29" }
-sqllogictest-engines = { path = "../sqllogictest-engines", version = "0.29" }
-tokio = { version = "1", features = [
+sqllogictest = { path = "../sqllogictest", version = "0.28" }
+sqllogictest-engines = { path = "../sqllogictest-engines", version = "0.28" }
+
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+console = { workspace = true }
+easy-ext = { workspace = true }
+fs-err = { workspace = true }
+futures = { workspace = true, default-features = false }
+glob = { workspace = true }
+itertools = { workspace = true }
+quick-junit = { workspace = true }
+rand = { workspace = true }
+tokio = { workspace = true, features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -36,7 +37,6 @@ tokio = { version = "1", features = [
     "process",
     "signal",
 ] }
-tokio-util = { version = "0.7.12", features = ["rt"] }
-fs-err = "3.0.0"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing = "0.1"
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

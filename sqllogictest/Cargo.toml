@@ -9,23 +9,23 @@ repository = { workspace = true }
 description = "Sqllogictest parser and runner."
 
 [dependencies]
-async-trait = "0.1"
-educe = "0.6"
-fs-err = "3"
-futures = "0.3"
-glob = "0.3"
-humantime = "2"
-itertools = "0.13"
-libtest-mimic = "0.8"
-md-5 = "0.10"
-owo-colors = "4"
-regex = "1"
-similar = "2"
-subst = "0.3"
-tempfile = "3"
-thiserror = "2"
-tracing = "0.1"
-rand = "0.8.5"
+async-trait = { workspace = true }
+educe = { workspace = true }
+fs-err = { workspace = true }
+futures = { workspace = true }
+glob = { workspace = true }
+humantime = { workspace = true }
+itertools = { workspace = true }
+libtest-mimic = { workspace = true }
+md-5 = { workspace = true }
+owo-colors = { workspace = true }
+regex = { workspace = true }
+similar = { workspace = true }
+subst = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = "1"

@@ -9,21 +9,28 @@ repository = { workspace = true }
 description = "Sqllogictest built-in engines."
 
 [dependencies]
-async-trait = "0.1"
-bytes = "1"
-chrono = { version = "0.4" }
-futures = { version = "0.3", default-features = false }
-log = "0.4"
-mysql_async = { version = "0.34.2", default-features = false, features = ["minimal"] }
-pg_interval = "0.4"
-postgres_array = "0.11.1"
-postgres-types = { version = "0.2.8", features = ["derive", "with-chrono-0_4", "with-serde_json-1"] }
-rust_decimal = { version = "1.36.0", features = ["tokio-pg"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sqllogictest = { path = "../sqllogictest", version = "0.29" }
-thiserror = "2"
-tokio = { version = "1", features = [
+sqllogictest = { path = "../sqllogictest", version = "0.28" }
+
+async-trait = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true, default-features = false }
+log = { workspace = true }
+mysql_async = { workspace = true, default-features = false, features = [
+    "minimal",
+] }
+pg_interval = { workspace = true }
+postgres_array = { workspace = true }
+postgres-types = { workspace = true, features = [
+    "derive",
+    "with-chrono-0_4",
+    "with-serde_json-1",
+] }
+rust_decimal = { workspace = true, features = ["tokio-pg"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -31,5 +38,5 @@ tokio = { version = "1", features = [
     "fs",
     "process",
 ] }
-tokio-postgres = { version = "=0.7.15" }
-tokio-util = { version = "0.7", features = ["codec"] }
+tokio-postgres = { workspace = true }
+tokio-util = { workspace = true, features = ["codec"] }
