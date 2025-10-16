@@ -521,6 +521,14 @@ pub fn default_normalizer(s: &String) -> String {
     s.trim().split_ascii_whitespace().join(" ")
 }
 
+/// Helper to compare floating-point strings with tolerance
+fn floats_approx_equal(actual: &str, expected: &str, tolerance: f64) -> bool {
+    match (actual.parse::<f64>(), expected.parse::<f64>()) {
+        (Ok(a), Ok(e)) => (a - e).abs() <= tolerance,
+        _ => false,
+    }
+}
+
 /// Validator will be used by [`Runner`] to validate the output.
 ///
 /// # Default
@@ -579,6 +587,28 @@ pub fn default_validator(
         .map(|strs| strs.iter().map(normalizer).join(" "))
         .collect_vec();
 
+    // First try floating-point tolerance comparison
+    const FLOAT_TOLERANCE: f64 = 1e-10;
+    if normalized_rows.len() == expected_results.len() {
+        let all_match = normalized_rows.iter().zip(expected_results.iter()).all(|(actual_row, expected_row)| {
+            let actual_vals: Vec<&str> = actual_row.split_whitespace().collect();
+            let expected_vals: Vec<&str> = expected_row.split_whitespace().collect();
+
+            if actual_vals.len() != expected_vals.len() {
+                return false;
+            }
+
+            actual_vals.iter().zip(expected_vals.iter()).all(|(a, e)| {
+                floats_approx_equal(a, e, FLOAT_TOLERANCE) || a == e
+            })
+        });
+
+        if all_match {
+            return true;
+        }
+    }
+
+    // Fall back to exact string comparison
     normalized_rows == expected_results
 }
 

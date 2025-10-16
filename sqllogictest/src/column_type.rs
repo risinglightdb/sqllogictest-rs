@@ -20,8 +20,8 @@ pub enum DefaultColumnType {
     Text,
     Integer,
     FloatingPoint,
-    Boolean,
     Any,
+    Boolean,
 }
 
 impl ColumnType for DefaultColumnType {
