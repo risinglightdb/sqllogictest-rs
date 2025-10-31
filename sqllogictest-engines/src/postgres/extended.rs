@@ -76,7 +76,8 @@ fn print_array_helper<'a, T: std::fmt::Display + 'a, I: Iterator<Item = &'a Opti
                 if array_item_need_escape_and_quote(&item) {
                     item = escape_and_quote(&item);
                 }
-                write!(fmt, "{}", item)
+                assert!(!item.is_empty());
+                fmt.write_str(&item)
             }
             None => write!(fmt, "NULL"),
         };
@@ -200,12 +201,20 @@ macro_rules! array_process {
     };
 }
 
+fn placeholder_if_empty(value: String) -> String {
+    if value.is_empty() {
+        "(empty)".into()
+    } else {
+        value
+    }
+}
+
 macro_rules! single_process {
     ($row:ident, $row_vec:ident, $idx:ident, $t:ty) => {
         let value: Option<$t> = $row.get($idx);
         match value {
             Some(value) => {
-                $row_vec.push(value.to_string());
+                $row_vec.push(placeholder_if_empty(value.to_string()));
             }
             None => {
                 $row_vec.push("NULL".to_string());
@@ -216,7 +225,7 @@ macro_rules! single_process {
         let value: Option<$t> = $row.get($idx);
         match value {
             Some(value) => {
-                $row_vec.push($convert(&value).to_string());
+                $row_vec.push(placeholder_if_empty($convert(&value).to_string()));
             }
             None => {
                 $row_vec.push("NULL".to_string());
@@ -231,7 +240,7 @@ macro_rules! single_process {
                 let tmp_rows = $self.client().query(&sql, &[&value]).await.unwrap();
                 let value: &str = tmp_rows.get(0).unwrap().get(0);
                 assert!(value.len() > 0);
-                $row_vec.push(value.to_string());
+                $row_vec.push(placeholder_if_empty(value.to_string()));
             }
             None => {
                 $row_vec.push("NULL".to_string());
@@ -248,26 +257,7 @@ fn bool_to_str(value: &bool) -> &'static str {
     }
 }
 
-fn varchar_array_to_str(value: &str) -> String {
-    if value.is_empty() || value.contains(' ') {
-        format!("\"{}\"", value)
-    } else {
-        value.to_string()
-    }
-}
-
-fn varchar_to_str(value: &str) -> String {
-    if value.is_empty() {
-        "(empty)".to_string()
-    } else {
-        value.to_string()
-    }
-}
-
 fn bytea_to_str(value: &[u8]) -> String {
-    if value.is_empty() {
-        return "(empty)".to_string();
-    }
     let is_printable_ascii = value.iter().all(|&b| (32..=126).contains(&b) && b != 92);
     if is_printable_ascii {
         String::from_utf8_lossy(value).into_owned()
@@ -333,71 +323,75 @@ impl sqllogictest::AsyncDB for Postgres<Extended> {
                     Type::INT2 => {
                         single_process!(row, row_vec, idx, i16);
                     }
-                    Type::INT4 => {
-                        single_process!(row, row_vec, idx, i32);
-                    }
-                    Type::INT8 => {
-                        single_process!(row, row_vec, idx, i64);
-                    }
-                    Type::NUMERIC => {
-                        single_process!(row, row_vec, idx, Decimal);
-                    }
-                    Type::DATE => {
-                        single_process!(row, row_vec, idx, NaiveDate);
-                    }
-                    Type::TIME => {
-                        single_process!(row, row_vec, idx, NaiveTime);
-                    }
-                    Type::TIMESTAMP => {
-                        single_process!(row, row_vec, idx, NaiveDateTime);
-                    }
-                    Type::BOOL => {
-                        single_process!(row, row_vec, idx, bool, bool_to_str);
-                    }
                     Type::INT2_ARRAY => {
                         array_process!(row, row_vec, idx, i16);
+                    }
+                    Type::INT4 => {
+                        single_process!(row, row_vec, idx, i32);
                     }
                     Type::INT4_ARRAY => {
                         array_process!(row, row_vec, idx, i32);
                     }
+                    Type::INT8 => {
+                        single_process!(row, row_vec, idx, i64);
+                    }
                     Type::INT8_ARRAY => {
                         array_process!(row, row_vec, idx, i64);
                     }
-                    Type::BOOL_ARRAY => {
-                        array_process!(row, row_vec, idx, bool, bool_to_str);
-                    }
-                    Type::FLOAT4_ARRAY => {
-                        array_process!(row, row_vec, idx, f32, float4_to_str);
-                    }
-                    Type::FLOAT8_ARRAY => {
-                        array_process!(row, row_vec, idx, f64, float8_to_str);
+                    Type::NUMERIC => {
+                        single_process!(row, row_vec, idx, Decimal);
                     }
                     Type::NUMERIC_ARRAY => {
                         array_process!(row, row_vec, idx, Decimal);
                     }
+                    Type::DATE => {
+                        single_process!(row, row_vec, idx, NaiveDate);
+                    }
                     Type::DATE_ARRAY => {
                         array_process!(row, row_vec, idx, NaiveDate);
+                    }
+                    Type::TIME => {
+                        single_process!(row, row_vec, idx, NaiveTime);
                     }
                     Type::TIME_ARRAY => {
                         array_process!(row, row_vec, idx, NaiveTime);
                     }
+
+                    Type::TIMESTAMP => {
+                        single_process!(row, row_vec, idx, NaiveDateTime);
+                    }
                     Type::TIMESTAMP_ARRAY => {
                         array_process!(row, row_vec, idx, NaiveDateTime);
                     }
-                    Type::VARCHAR_ARRAY | Type::TEXT_ARRAY | Type::BPCHAR_ARRAY => {
-                        array_process!(row, row_vec, idx, &str, varchar_array_to_str);
+                    Type::BOOL => {
+                        single_process!(row, row_vec, idx, bool, bool_to_str);
                     }
-                    Type::VARCHAR | Type::TEXT | Type::BPCHAR => {
-                        single_process!(row, row_vec, idx, &str, varchar_to_str);
+                    Type::BOOL_ARRAY => {
+                        array_process!(row, row_vec, idx, bool, bool_to_str);
                     }
                     Type::FLOAT4 => {
                         single_process!(row, row_vec, idx, f32, float4_to_str);
                     }
+                    Type::FLOAT4_ARRAY => {
+                        array_process!(row, row_vec, idx, f32, float4_to_str);
+                    }
                     Type::FLOAT8 => {
                         single_process!(row, row_vec, idx, f64, float8_to_str);
                     }
+                    Type::FLOAT8_ARRAY => {
+                        array_process!(row, row_vec, idx, f64, float8_to_str);
+                    }
+                    Type::VARCHAR | Type::TEXT | Type::BPCHAR => {
+                        single_process!(row, row_vec, idx, &str);
+                    }
+                    Type::VARCHAR_ARRAY | Type::TEXT_ARRAY | Type::BPCHAR_ARRAY => {
+                        array_process!(row, row_vec, idx, &str);
+                    }
                     Type::INTERVAL => {
                         single_process!(self, row, row_vec, idx, Interval, INTERVAL);
+                    }
+                    Type::INTERVAL_ARRAY => {
+                        array_process!(self, row, row_vec, idx, Interval, INTERVAL);
                     }
                     Type::TIMESTAMPTZ => {
                         single_process!(
@@ -409,29 +403,26 @@ impl sqllogictest::AsyncDB for Postgres<Extended> {
                             TIMESTAMPTZ
                         );
                     }
-                    Type::INTERVAL_ARRAY => {
-                        array_process!(self, row, row_vec, idx, Interval, INTERVAL);
-                    }
                     Type::TIMESTAMPTZ_ARRAY => {
                         array_process!(self, row, row_vec, idx, DateTime<chrono::Utc>, TIMESTAMPTZ);
-                    }
-                    Type::BYTEA_ARRAY => {
-                        array_process!(row, row_vec, idx, &[u8], bytea_to_str);
                     }
                     Type::BYTEA => {
                         single_process!(row, row_vec, idx, &[u8], bytea_to_str);
                     }
-                    Type::JSON_ARRAY => {
-                        array_process!(row, row_vec, idx, JsonPreservedValue);
-                    }
-                    Type::JSONB_ARRAY => {
-                        array_process!(row, row_vec, idx, serde_json::Value);
+                    Type::BYTEA_ARRAY => {
+                        array_process!(row, row_vec, idx, &[u8], bytea_to_str);
                     }
                     Type::JSON => {
                         single_process!(row, row_vec, idx, JsonPreservedValue);
                     }
+                    Type::JSON_ARRAY => {
+                        array_process!(row, row_vec, idx, JsonPreservedValue);
+                    }
                     Type::JSONB => {
                         single_process!(row, row_vec, idx, serde_json::Value);
+                    }
+                    Type::JSONB_ARRAY => {
+                        array_process!(row, row_vec, idx, serde_json::Value);
                     }
                     _ => {
                         todo!("Don't support {} type now.", column.type_().name())
