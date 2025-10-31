@@ -1,3 +1,4 @@
+use std::fmt;
 use std::fmt::Write;
 use std::process::Command;
 use std::time::Duration;
@@ -6,7 +7,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
 use futures::{pin_mut, StreamExt};
 use pg_interval::Interval;
-use postgres_types::{ToSql, Type};
+use postgres_types::{accepts, FromSql, ToSql, Type};
 use rust_decimal::Decimal;
 use sqllogictest::{DBOutput, DefaultColumnType};
 
@@ -22,6 +23,41 @@ fn print_array<T: std::fmt::Display>(
     print_array_helper(0, arr.dimensions(), &mut arr.iter(), fmt)
 }
 
+// See https://www.postgresql.org/docs/current/arrays.html#ARRAYS-IO
+// The array output routine will put double quotes around element value if it
+// * is empty string
+// * equals to NULL (case insensitive)
+// Or contains
+// * curly braces
+// * delimiter characters(comma)
+// * double quotes
+// * backslashes
+// * space
+// It'is used (although it's simple protocol specific) to not duplicate tests for simple and extended protocols.
+pub fn array_item_need_escape_and_quote(data: &str) -> bool {
+    if data.is_empty() || data.eq_ignore_ascii_case("null") {
+        return true;
+    }
+
+    data.chars()
+        .any(|c| matches!(c, '{' | '}' | ',' | '"' | '\\') || c.is_ascii_whitespace())
+}
+
+pub fn escape_and_quote(input: &str) -> String {
+    debug_assert!(array_item_need_escape_and_quote(input));
+    let mut response = String::with_capacity(input.len());
+    response.push('"');
+
+    for c in input.chars() {
+        if matches!(c, '"' | '\\') {
+            response.push('\\');
+        }
+        response.push(c);
+    }
+    response.push('"');
+    response
+}
+
 fn print_array_helper<'a, T: std::fmt::Display + 'a, I: Iterator<Item = &'a Option<T>>>(
     depth: usize,
     dims: &[postgres_array::Dimension],
@@ -34,7 +70,14 @@ fn print_array_helper<'a, T: std::fmt::Display + 'a, I: Iterator<Item = &'a Opti
 
     if depth == dims.len() {
         return match data.next().unwrap() {
-            Some(value) => write!(fmt, "{}", value),
+            Some(value) => {
+                let mut item = String::new();
+                write!(item, "{}", value)?;
+                if array_item_need_escape_and_quote(&item) {
+                    item = escape_and_quote(&item);
+                }
+                write!(fmt, "{}", item)
+            }
             None => write!(fmt, "NULL"),
         };
     }
@@ -54,6 +97,30 @@ struct ArrayFmt<'a, T>(&'a postgres_array::Array<Option<T>>);
 impl<'a, T: std::fmt::Display> std::fmt::Display for ArrayFmt<'a, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         print_array(self.0, f)
+    }
+}
+
+#[derive(Debug)]
+struct JsonPreservedValue {
+    payload: String,
+}
+
+impl<'a> FromSql<'a> for JsonPreservedValue {
+    fn from_sql(
+        _ty: &Type,
+        raw: &'a [u8],
+    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        Ok(JsonPreservedValue {
+            payload: std::str::from_utf8(raw)?.to_string(),
+        })
+    }
+
+    accepts!(JSON);
+}
+
+impl fmt::Display for JsonPreservedValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.payload)
     }
 }
 
@@ -354,10 +421,16 @@ impl sqllogictest::AsyncDB for Postgres<Extended> {
                     Type::BYTEA => {
                         single_process!(row, row_vec, idx, &[u8], bytea_to_str);
                     }
-                    Type::JSON_ARRAY | Type::JSONB_ARRAY => {
+                    Type::JSON_ARRAY => {
+                        array_process!(row, row_vec, idx, JsonPreservedValue);
+                    }
+                    Type::JSONB_ARRAY => {
                         array_process!(row, row_vec, idx, serde_json::Value);
                     }
-                    Type::JSON | Type::JSONB => {
+                    Type::JSON => {
+                        single_process!(row, row_vec, idx, JsonPreservedValue);
+                    }
+                    Type::JSONB => {
                         single_process!(row, row_vec, idx, serde_json::Value);
                     }
                     _ => {
