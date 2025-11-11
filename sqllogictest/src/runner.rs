@@ -686,6 +686,47 @@ pub struct Runner<D: AsyncDB, M: MakeConnection<Conn = D>> {
     locals: RunnerLocals,
 }
 
+fn split_as_overridden(rows: &Vec<Vec<String>>) -> Vec<Vec<String>> {
+    let mut result: Vec<Vec<String>> = Vec::with_capacity(rows.len());
+
+    for row in rows {
+        let has_newline = row.iter().any(|s| s.contains("\n"));
+
+        if !has_newline {
+            result.push(row.clone());
+            continue;
+        }
+
+        let mut new_row = Vec::with_capacity(row.len());
+
+        for column in row {
+            if column.contains("\n") {
+                let parts: Vec<&str> = column.split('\n').collect();
+
+                new_row.push(parts[0].to_string());
+                result.push(new_row);
+
+                // Middle parts (if any) become complete rows with just that part
+                for part in &parts[1..parts.len() - 1] {
+                    result.push(vec![part.to_string()]);
+                }
+
+                // Last part starts a new row
+                new_row = vec![parts[parts.len() - 1].to_string()];
+            } else {
+                // No newline, add to current row
+                new_row.push(column.clone());
+            }
+        }
+
+        // Push the last row if it's not empty
+        if !new_row.is_empty() {
+            result.push(new_row);
+        }
+    }
+    result
+}
+
 impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Create a new test runner on the database, with the given connection maker.
     ///
@@ -1322,6 +1363,12 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             }
                             .at(loc));
                         }
+
+                        // Just to reproduce logics of writing to file.
+                        // When we write a string that contains '\\', 'n' substring to formatter, new line will be written.
+                        // Without this manipulation the following situation may happen:
+                        // run --override -> run without override -> query result mismatch
+                        let rows = split_as_overridden(rows);
 
                         let actual_results = match self.result_mode {
                             Some(ResultMode::ValueWise) => rows

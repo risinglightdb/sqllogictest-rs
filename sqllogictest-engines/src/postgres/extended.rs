@@ -258,16 +258,13 @@ fn bool_to_str(value: &bool) -> &'static str {
 }
 
 fn bytea_to_str(value: &[u8]) -> String {
-    let is_printable_ascii = value.iter().all(|&b| (32..=126).contains(&b) && b != 92);
-    if is_printable_ascii {
-        String::from_utf8_lossy(value).into_owned()
-    } else {
-        let mut result = String::from("\\x");
-        for &b in value {
-            result.push_str(&format!("{:02x}", b));
-        }
-        result
+    // It assumes that 'BYTEA_OUTPUT' variable is set to 'hex' (default value)
+    let mut result = String::with_capacity("\\x".len() + 2 * value.len());
+    result.push_str("\\x");
+    for &b in value {
+        result.push_str(&format!("{:02x}", b));
     }
+    result
 }
 
 fn float4_to_str(value: &f32) -> String {
