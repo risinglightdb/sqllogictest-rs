@@ -46,7 +46,7 @@ pub enum RecordOutput<T: ColumnType> {
     /// The output of a `query`.
     Query {
         types: Vec<T>,
-        rows: Vec<Vec<String>>,
+        rows: Vec<Vec<String>>, // inner vector - columns items
         error: Option<AnyError>,
     },
     /// The output of a `statement`.
@@ -686,45 +686,18 @@ pub struct Runner<D: AsyncDB, M: MakeConnection<Conn = D>> {
     locals: RunnerLocals,
 }
 
-fn split_as_overridden(rows: &Vec<Vec<String>>) -> Vec<Vec<String>> {
-    let mut result: Vec<Vec<String>> = Vec::with_capacity(rows.len());
+fn escape(mut rows: Vec<Vec<String>>) -> Vec<Vec<String>> {
+    rows.iter_mut().for_each(|row| {
+        row.iter_mut().for_each(|cell| {
+            *cell = cell.replace("\\", "\\\\");
 
-    for row in rows {
-        let has_newline = row.iter().any(|s| s.contains("\n"));
-
-        if !has_newline {
-            result.push(row.clone());
-            continue;
-        }
-
-        let mut new_row = Vec::with_capacity(row.len());
-
-        for column in row {
-            if column.contains("\n") {
-                let parts: Vec<&str> = column.split('\n').collect();
-
-                new_row.push(parts[0].to_string());
-                result.push(new_row);
-
-                // Middle parts (if any) become complete rows with just that part
-                for part in &parts[1..parts.len() - 1] {
-                    result.push(vec![part.to_string()]);
-                }
-
-                // Last part starts a new row
-                new_row = vec![parts[parts.len() - 1].to_string()];
-            } else {
-                // No newline, add to current row
-                new_row.push(column.clone());
-            }
-        }
-
-        // Push the last row if it's not empty
-        if !new_row.is_empty() {
-            result.push(new_row);
-        }
-    }
-    result
+            *cell = cell
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t")
+        });
+    });
+    rows
 }
 
 impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
@@ -869,7 +842,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     Ok(out) => match out {
                         DBOutput::Rows { types, rows } => RecordOutput::Query {
                             types,
-                            rows,
+                            rows: escape(rows),
                             error: None,
                         },
                         DBOutput::StatementComplete(count) => {
@@ -1063,7 +1036,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 RecordOutput::Query {
                     error: None,
                     types,
-                    rows,
+                    rows: escape(rows),
                 }
             }
             Record::Sleep { duration, .. } => {
@@ -1363,12 +1336,6 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             }
                             .at(loc));
                         }
-
-                        // Just to reproduce logics of writing to file.
-                        // When we write a string that contains '\\', 'n' substring to formatter, new line will be written.
-                        // Without this manipulation the following situation may happen:
-                        // run --override -> run without override -> query result mismatch
-                        let rows = split_as_overridden(rows);
 
                         let actual_results = match self.result_mode {
                             Some(ResultMode::ValueWise) => rows

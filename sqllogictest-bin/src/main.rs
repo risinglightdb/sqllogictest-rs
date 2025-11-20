@@ -345,8 +345,16 @@ pub async fn main() -> Result<()> {
     };
 
     if r#override || format {
-        return update_test_files(all_files, &engine, config, format, jobs, keep_db_on_failure)
-            .await;
+        return update_test_files(
+            all_files,
+            &engine,
+            config,
+            format,
+            jobs,
+            keep_db_on_failure,
+            labels,
+        )
+        .await;
     }
 
     let mut report = Report::new(junit.clone().unwrap_or_else(|| "sqllogictest".to_string()));
@@ -650,6 +658,7 @@ async fn update_test_files(
     format: bool,
     jobs: Option<usize>,
     keep_db_on_failure: bool,
+    labels: Vec<String>,
 ) -> Result<()> {
     let mut db = engines::connect(engine, &config).await?;
     let test_databases = if jobs.is_some() {
@@ -684,8 +693,12 @@ async fn update_test_files(
             config.db = db_name.clone();
 
             let failed_dbs = failed_dbs.clone();
+            let labels = &labels;
             async move {
                 let mut runner = Runner::new(|| engines::connect(engine, &config));
+                for label in labels {
+                    runner.add_label(label);
+                }
                 runner.set_var(well_known::DATABASE.to_owned(), db_name.clone());
 
                 let mut buffer = vec![];
