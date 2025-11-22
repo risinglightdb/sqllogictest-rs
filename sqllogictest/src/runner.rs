@@ -506,11 +506,18 @@ pub fn default_validator(
         let actual_snapshot = actual_rows.join("\n");
         let fragments: Vec<&str> = expected_snapshot.split(IGNORE_MARKER).collect();
         let mut pos = 0;
-        for frag in fragments {
+        for (i, frag) in fragments.iter().enumerate() {
             if frag.is_empty() {
                 continue;
             }
             if let Some(idx) = actual_snapshot[pos..].find(frag) {
+                // Edge case: The following example is expected to fail
+                // Actual - 'foo bar baz'
+                // Expected - 'bar <slt:ignore>'
+                if (i == 0) && (idx != 0) {
+                    return false;
+                }
+
                 pos += idx + frag.len();
             } else {
                 tracing::error!(
@@ -2361,7 +2368,10 @@ Caused by:
             "beta".to_string(),
             "gamma".to_string(),
         ]];
-        let expected = vec!["alpha<slt:ignore>delta".to_string()];
-        assert!(!default_validator(normalizer, &actual, &expected));
+        let expected1 = vec!["alpha<slt:ignore>delta".to_string()];
+        assert!(!default_validator(normalizer, &actual, &expected1));
+
+        let expected2 = vec!["pha<slt:ignore>gamma".to_string()];
+        assert!(!default_validator(normalizer, &actual, &expected2));
     }
 }
