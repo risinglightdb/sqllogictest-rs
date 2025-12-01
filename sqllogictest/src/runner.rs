@@ -680,6 +680,7 @@ pub struct Runner<D: AsyncDB, M: MakeConnection<Conn = D>> {
     result_mode: Option<ResultMode>,
     /// 0 means never hashing
     hash_threshold: usize,
+    show_column_names: bool,
     /// Labels for condition `skipif` and `onlyif`.
     labels: HashSet<String>,
     /// Local variables/context for the runner.
@@ -714,6 +715,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             sort_mode: None,
             result_mode: None,
             hash_threshold: 0,
+            show_column_names: true,
             labels: HashSet::new(),
             conn: Connections::new(make_conn),
             locals: RunnerLocals::default(),
@@ -981,6 +983,10 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                 };
 
+                if !self.show_column_names {
+                    rows = rows[1..].into();
+                }
+
                 let sort_mode = match expected {
                     QueryExpect::Results { sort_mode, .. } => sort_mode,
                     QueryExpect::Error(_) => None,
@@ -991,16 +997,20 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 match sort_mode {
                     None | Some(SortMode::NoSort) => {}
                     Some(SortMode::RowSort) => {
-                        // TODO(mkornaukhov) for now we assume that we use **only Postgres<>** protocols.
-                        // There always must be the first row contaning column names.
-                        // This code may break out in case of other protocol, it should be fixed.
-                        // Possible problems:
-                        // * Panic in case of empty `rows`
-                        // * Incorrect sort in case of absence of column name row
-                        assert!(!rows.is_empty(), "At least 1 row is expected");
-                        rows[1..].sort_unstable();
+                        // TODO(mkornaukhov) all protocols except from Postgres one should
+                        // return column names by default
+                        if self.show_column_names {
+                            assert!(!rows.is_empty());
+                            rows[1..].sort_unstable();
+                        } else {
+                            rows.sort_unstable();
+                        }
                     }
                     Some(SortMode::ValueSort) => {
+                        if self.show_column_names {
+                            // Column names are useless
+                            rows = rows[1..].into();
+                        }
                         rows = rows
                             .iter()
                             .flat_map(|row| row.iter())
@@ -1058,6 +1068,10 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             }
             Record::HashThreshold { loc: _, threshold } => {
                 self.hash_threshold = threshold as usize;
+                RecordOutput::Nothing
+            }
+            Record::ShowColumnNames { loc: _, value } => {
+                self.show_column_names = value;
                 RecordOutput::Nothing
             }
             Record::Halt { loc: _ } => {
@@ -1544,6 +1558,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 sort_mode: self.sort_mode,
                 result_mode: self.result_mode,
                 hash_threshold: self.hash_threshold,
+                show_column_names: self.show_column_names,
                 labels: self.labels.clone(),
                 locals,
             };

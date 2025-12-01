@@ -188,6 +188,11 @@ pub enum Record<T: ColumnType> {
         loc: Location,
         threshold: u64,
     },
+    /// Show column names or not. True by default
+    ShowColumnNames {
+        loc: Location,
+        value: bool,
+    },
     /// Condition statements, including `onlyif` and `skipif`.
     Condition(Condition),
     /// Connection statements to specify the connection to use for the following statement.
@@ -363,6 +368,9 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
             }
             Record::HashThreshold { loc: _, threshold } => {
                 write!(f, "hash-threshold {threshold}")
+            }
+            Record::ShowColumnNames { loc: _, value } => {
+                write!(f, "show-column-names {value}")
             }
             Record::Comment(comment) => {
                 let mut iter = comment.iter();
@@ -708,6 +716,8 @@ pub enum ParseErrorKind {
     InvalidType(char),
     #[error("invalid number: {0:?}")]
     InvalidNumber(String),
+    #[error("invalid bool: {0:?}")]
+    InvalidBool(String),
     #[error("invalid error message: {0:?}")]
     InvalidErrorMessage(String),
     #[error("duplicated error messages after error` and under `----`")]
@@ -1043,6 +1053,12 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     sql,
                 });
             }
+            ["show-column-names", value] => records.push(Record::ShowColumnNames {
+                loc: loc.clone(),
+                value: value
+                    .parse::<bool>()
+                    .map_err(|_| ParseErrorKind::InvalidBool((*value).into()).at(loc.clone()))?,
+            }),
             _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
         }
     }
@@ -1080,7 +1096,7 @@ fn parse_file_inner<T: ColumnType>(loc: Location) -> Result<Vec<Record<T>>, Pars
                 return Err(ParseErrorKind::EmptyIncludeFile(filename).at(loc.clone()));
             }
             for included_file in iter {
-                let included_file = included_file.map_err(|e| {
+                let included_file = included_file.map_err(|e: glob::GlobError| {
                     ParseErrorKind::InvalidIncludeFile(e.to_string()).at(loc.clone())
                 })?;
                 let included_file = included_file.as_os_str().to_string_lossy().to_string();
@@ -1089,7 +1105,9 @@ fn parse_file_inner<T: ColumnType>(loc: Location) -> Result<Vec<Record<T>>, Pars
                     included_file.clone(),
                 )));
                 records.extend(parse_file_inner(loc.include(&included_file))?);
-                records.push(Record::Injected(Injected::EndInclude(included_file)));
+                records.push(Record::Injected(Injected::EndInclude(
+                    included_file.to_string(),
+                )));
             }
         }
     }
@@ -1264,7 +1282,7 @@ mod tests {
     fn test_include_glob() {
         let records =
             parse_file::<DefaultColumnType>("../tests/slt/include/include_1.slt").unwrap();
-        assert_eq!(15, records.len());
+        assert_eq!(17, records.len());
     }
 
     #[test]
@@ -1419,6 +1437,7 @@ select * from foo;
                     Record::Halt { loc, .. } => normalize_loc(loc),
                     Record::HashThreshold { loc, .. } => normalize_loc(loc),
                     Record::Let { loc, .. } => normalize_loc(loc),
+                    Record::ShowColumnNames { loc, .. } => normalize_loc(loc),
                     // even though these variants don't include a
                     // location include them in this match statement
                     // so if new variants are added, this match

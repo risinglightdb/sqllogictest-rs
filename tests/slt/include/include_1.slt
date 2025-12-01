@@ -1,3 +1,5 @@
+show-column-names false
+
 include ./include_2.slt.part
 include ./include/*.slt.part
 

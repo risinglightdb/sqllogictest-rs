@@ -1,3 +1,5 @@
+show-column-names false
+
 query I
 select counter()
 ----

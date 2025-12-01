@@ -51,6 +51,7 @@ impl sqllogictest::DB for FakeDB {
             return Ok(DBOutput::Rows {
                 types: vec![DefaultColumnType::Text],
                 rows: vec![
+                    vec!["Name".to_string()], // Column name
                     vec!["Alice".to_string()],
                     vec!["Bob".to_string()],
                     vec!["Eve".to_string()],
@@ -67,6 +68,7 @@ impl sqllogictest::DB for FakeDB {
                     DefaultColumnType::Integer,
                 ],
                 rows: vec![
+                    vec!["A".to_string(), "B".to_string(), "C".to_string()], // Column names
                     vec!["1".to_string(), "10".to_string(), "2333".to_string()],
                     vec!["2".to_string(), "20".to_string(), "2333".to_string()],
                     vec!["10".to_string(), "100".to_string(), "2333".to_string()],
@@ -77,7 +79,10 @@ impl sqllogictest::DB for FakeDB {
             self.counter += 1;
             return Ok(DBOutput::Rows {
                 types: vec![DefaultColumnType::Integer],
-                rows: vec![vec![self.counter.to_string()]],
+                rows: vec![
+                    vec!["Counter".to_string()], // Columns names
+                    vec![self.counter.to_string()],
+                ],
             });
         }
         if sql.starts_with("create") {

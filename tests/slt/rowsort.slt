@@ -1,3 +1,5 @@
+show-column-names false
+
 control resultmode valuewise
 
 query III rowsort

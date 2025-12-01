@@ -1,3 +1,5 @@
+show-column-names false
+
 query I retry 3 backoff 0s
 select counter()
 ----
