@@ -1010,14 +1010,17 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         // Retry for `retry.attempts` times. The parser ensures that `retry.attempts` must > 0.
         let retry = retry.unwrap();
         let mut last_error = None;
-        for _ in 0..retry.attempts {
-            let result = self.run_async_no_retry(record.clone()).await;
-            if result.is_ok() {
-                return result;
+        for i in 0..retry.attempts {
+            if i > 0 {
+                D::sleep(retry.backoff).await;
             }
-            tracing::warn!(target:"sqllogictest::retry", backoff = ?retry.backoff, error = ?result, "retrying");
-            D::sleep(retry.backoff).await;
-            last_error = result.err();
+            match self.run_async_no_retry(record.clone()).await {
+                Ok(output) => return Ok(output),
+                Err(error) => {
+                    tracing::warn!(target:"sqllogictest::retry", backoff = ?retry.backoff, %error, "retrying");
+                    last_error = Some(error);
+                }
+            }
         }
 
         Err(last_error.unwrap())
