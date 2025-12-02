@@ -188,8 +188,14 @@ pub enum Record<T: ColumnType> {
         loc: Location,
         threshold: u64,
     },
-    /// Show column names or not. True by default
+    /// Show column names or not. True by default.
     ShowColumnNames {
+        loc: Location,
+        value: bool,
+    },
+    /// Flatten all result values into a single column, instead of preserving the row structure.
+    /// When enabled, the output will be a single column containing all values, regardless of their original row grouping.
+    FlatValues {
         loc: Location,
         value: bool,
     },
@@ -371,6 +377,9 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
             }
             Record::ShowColumnNames { loc: _, value } => {
                 write!(f, "show-column-names {value}")
+            }
+            Record::FlatValues { loc: _, value } => {
+                write!(f, "flat-values {value}")
             }
             Record::Comment(comment) => {
                 let mut iter = comment.iter();
@@ -1059,6 +1068,12 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     .parse::<bool>()
                     .map_err(|_| ParseErrorKind::InvalidBool((*value).into()).at(loc.clone()))?,
             }),
+            ["flat-values", value] => records.push(Record::FlatValues {
+                loc: loc.clone(),
+                value: value
+                    .parse::<bool>()
+                    .map_err(|_| ParseErrorKind::InvalidBool((*value).into()).at(loc.clone()))?,
+            }),
             _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
         }
     }
@@ -1438,6 +1453,7 @@ select * from foo;
                     Record::HashThreshold { loc, .. } => normalize_loc(loc),
                     Record::Let { loc, .. } => normalize_loc(loc),
                     Record::ShowColumnNames { loc, .. } => normalize_loc(loc),
+                    Record::FlatValues { loc, .. } => normalize_loc(loc),
                     // even though these variants don't include a
                     // location include them in this match statement
                     // so if new variants are added, this match

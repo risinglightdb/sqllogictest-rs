@@ -681,6 +681,7 @@ pub struct Runner<D: AsyncDB, M: MakeConnection<Conn = D>> {
     /// 0 means never hashing
     hash_threshold: usize,
     show_column_names: bool,
+    flat_values: bool,
     /// Labels for condition `skipif` and `onlyif`.
     labels: HashSet<String>,
     /// Local variables/context for the runner.
@@ -716,6 +717,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             result_mode: None,
             hash_threshold: 0,
             show_column_names: true,
+            flat_values: false,
             labels: HashSet::new(),
             conn: Connections::new(make_conn),
             locals: RunnerLocals::default(),
@@ -983,8 +985,14 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                 };
 
+                let mut column_names_present = true;
                 if !self.show_column_names {
                     rows = rows[1..].into();
+                    column_names_present = false;
+                }
+                if column_names_present && self.flat_values {
+                    rows = rows[1..].into();
+                    column_names_present = false;
                 }
 
                 let sort_mode = match expected {
@@ -999,7 +1007,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     Some(SortMode::RowSort) => {
                         // TODO(mkornaukhov) all protocols except from Postgres one should
                         // return column names by default
-                        if self.show_column_names {
+                        if column_names_present {
                             assert!(!rows.is_empty());
                             rows[1..].sort_unstable();
                         } else {
@@ -1007,9 +1015,10 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         }
                     }
                     Some(SortMode::ValueSort) => {
-                        if self.show_column_names {
+                        if column_names_present {
                             // Column names are useless
                             rows = rows[1..].into();
+                            column_names_present = false;
                         }
                         rows = rows
                             .iter()
@@ -1021,7 +1030,16 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                 };
 
-                let num_values = if value_sort {
+                if !value_sort && self.flat_values {
+                    rows = rows
+                        .iter()
+                        .flat_map(|row| row.iter())
+                        .map(|s| vec![s.to_owned()])
+                        .collect();
+                }
+                let _ = column_names_present;
+
+                let num_values = if value_sort || self.flat_values {
                     rows.len()
                 } else {
                     rows.len() * types.len()
@@ -1072,6 +1090,10 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             }
             Record::ShowColumnNames { loc: _, value } => {
                 self.show_column_names = value;
+                RecordOutput::Nothing
+            }
+            Record::FlatValues { loc: _, value } => {
+                self.flat_values = value;
                 RecordOutput::Nothing
             }
             Record::Halt { loc: _ } => {
@@ -1559,6 +1581,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 result_mode: self.result_mode,
                 hash_threshold: self.hash_threshold,
                 show_column_names: self.show_column_names,
+                flat_values: self.flat_values,
                 labels: self.labels.clone(),
                 locals,
             };
