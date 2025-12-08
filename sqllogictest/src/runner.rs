@@ -554,7 +554,7 @@ pub fn default_validator(
         let expected_results = expected;
         let actual_rows = actual
             .iter()
-            .map(|strs| strs.iter().join(" "))
+            .map(|strs| strs.iter().join("\t"))
             .collect_vec();
 
         let expected_snapshot = expected_results.join("\n");
