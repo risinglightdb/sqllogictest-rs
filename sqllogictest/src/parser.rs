@@ -447,9 +447,7 @@ impl ExpectedError {
             Self::Empty => true,
             Self::Inline(regex) => regex.is_match(err),
             Self::Multiline(results) => results.trim() == err.trim(),
-            Self::SqlState(expected_state) => {
-                sqlstate.is_some_and(|state| state == expected_state)
-            }
+            Self::SqlState(expected_state) => sqlstate.is_some_and(|state| state == expected_state),
         }
     }
 
