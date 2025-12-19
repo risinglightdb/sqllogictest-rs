@@ -161,7 +161,7 @@ where
 #[derive(thiserror::Error, Clone)]
 #[error("{kind}\nat {loc}\n")]
 pub struct TestError {
-    kind: TestErrorKind,
+    kind: Box<TestErrorKind>,
     loc: Location,
 }
 
@@ -244,7 +244,7 @@ impl std::fmt::Debug for TestError {
 impl TestError {
     /// Returns the corresponding [`TestErrorKind`] for this error.
     pub fn kind(&self) -> TestErrorKind {
-        self.kind.clone()
+        *self.kind.clone()
     }
 
     /// Returns the location from which the error originated.
@@ -335,7 +335,7 @@ pub enum TestErrorKind {
 impl From<ParseError> for TestError {
     fn from(e: ParseError) -> Self {
         TestError {
-            kind: TestErrorKind::ParseError(e.kind()),
+            kind: TestErrorKind::ParseError(e.kind()).into(),
             loc: e.location(),
         }
     }
@@ -343,7 +343,10 @@ impl From<ParseError> for TestError {
 
 impl TestErrorKind {
     fn at(self, loc: Location) -> TestError {
-        TestError { kind: self, loc }
+        TestError {
+            kind: self.into(),
+            loc,
+        }
     }
 
     pub fn display(&self, colorize: bool) -> TestErrorKindDisplay<'_> {
