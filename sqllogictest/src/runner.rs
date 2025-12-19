@@ -98,6 +98,11 @@ pub trait AsyncDB {
     async fn run_command(mut command: Command) -> std::io::Result<std::process::Output> {
         command.output()
     }
+
+    /// Extract the SQL state from the error.
+    fn error_sql_state(_err: &Self::Error) -> Option<String> {
+        None
+    }
 }
 
 /// The database to be tested.
@@ -116,6 +121,11 @@ pub trait DB {
     /// Engine name of current database.
     fn engine_name(&self) -> &str {
         ""
+    }
+
+    /// Extract the SQL state from the error.
+    fn error_sql_state(_err: &Self::Error) -> Option<String> {
+        None
     }
 }
 
@@ -139,6 +149,10 @@ where
     fn engine_name(&self) -> &str {
         D::engine_name(self)
     }
+
+    fn error_sql_state(err: &Self::Error) -> Option<String> {
+        D::error_sql_state(err)
+    }
 }
 
 /// The error type for running sqllogictest.
@@ -147,7 +161,7 @@ where
 #[derive(thiserror::Error, Clone)]
 #[error("{kind}\nat {loc}\n")]
 pub struct TestError {
-    kind: TestErrorKind,
+    kind: Box<TestErrorKind>,
     loc: Location,
 }
 
@@ -230,7 +244,7 @@ impl std::fmt::Debug for TestError {
 impl TestError {
     /// Returns the corresponding [`TestErrorKind`] for this error.
     pub fn kind(&self) -> TestErrorKind {
-        self.kind.clone()
+        *self.kind.clone()
     }
 
     /// Returns the location from which the error originated.
@@ -282,12 +296,14 @@ pub enum TestErrorKind {
         actual_stdout: String,
     },
     // Remember to also update [`TestErrorKindDisplay`] if this message is changed.
-    #[error("{kind} is expected to fail with error:\n\t{expected_err}\nbut got error:\n\t{err}\n[SQL] {sql}")]
+    #[error("{kind} is expected to fail with error:\n\t{expected_err}\nbut got error:\n\t{}{err}\n[SQL] {sql}", .actual_sqlstate.as_ref().map(|s| format!("(sqlstate {s}) ")).unwrap_or_default())]
     ErrorMismatch {
         sql: String,
         err: AnyError,
         expected_err: String,
         kind: RecordKind,
+        /// The actual SQL state when the expected error was a SqlState type
+        actual_sqlstate: Option<String>,
     },
     #[error("statement is expected to affect {expected} rows, but actually {actual}\n[SQL] {sql}")]
     StatementResultMismatch {
@@ -319,7 +335,7 @@ pub enum TestErrorKind {
 impl From<ParseError> for TestError {
     fn from(e: ParseError) -> Self {
         TestError {
-            kind: TestErrorKind::ParseError(e.kind()),
+            kind: TestErrorKind::ParseError(e.kind()).into(),
             loc: e.location(),
         }
     }
@@ -327,7 +343,10 @@ impl From<ParseError> for TestError {
 
 impl TestErrorKind {
     fn at(self, loc: Location) -> TestError {
-        TestError { kind: self, loc }
+        TestError {
+            kind: self.into(),
+            loc,
+        }
     }
 
     pub fn display(&self, colorize: bool) -> TestErrorKindDisplay<'_> {
@@ -355,12 +374,16 @@ impl Display for TestErrorKindDisplay<'_> {
                 err,
                 expected_err,
                 kind,
-            } => write!(
-                f,
-                "{kind} is expected to fail with error:\n\t{}\nbut got error:\n\t{}\n[SQL] {sql}",
-                expected_err.bright_green(),
-                err.bright_red(),
-            ),
+                actual_sqlstate,
+            } => {
+                write!(
+                    f,
+                    "{kind} is expected to fail with error:\n\t{}\nbut got error:\n\t{}{}\n[SQL] {sql}",
+                    expected_err.bright_green(),
+                    actual_sqlstate.as_ref().map(|s| format!("(sqlstate {s}) ")).unwrap_or_default(),
+                    err.bright_red(),
+                )
+            }
             TestErrorKind::QueryResultMismatch {
                 sql,
                 expected,
@@ -1112,12 +1135,16 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 }
                 (None, StatementExpect::Ok) => {}
                 (Some(e), StatementExpect::Error(expected_error)) => {
-                    if !expected_error.is_match(&e.to_string()) {
+                    let sqlstate = e
+                        .downcast_ref::<D::Error>()
+                        .and_then(|concrete_err| D::error_sql_state(concrete_err));
+                    if !expected_error.is_match(&e.to_string(), sqlstate.as_deref()) {
                         return Err(TestErrorKind::ErrorMismatch {
                             sql,
                             err: Arc::clone(e),
                             expected_err: expected_error.to_string(),
                             kind: RecordKind::Statement,
+                            actual_sqlstate: sqlstate,
                         }
                         .at(loc));
                     }
@@ -1151,12 +1178,16 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         .at(loc));
                     }
                     (Some(e), QueryExpect::Error(expected_error)) => {
-                        if !expected_error.is_match(&e.to_string()) {
+                        let sqlstate = e
+                            .downcast_ref::<D::Error>()
+                            .and_then(|concrete_err| D::error_sql_state(concrete_err));
+                        if !expected_error.is_match(&e.to_string(), sqlstate.as_deref()) {
                             return Err(TestErrorKind::ErrorMismatch {
                                 sql,
                                 err: Arc::clone(e),
                                 expected_err: expected_error.to_string(),
                                 kind: RecordKind::Query,
+                                actual_sqlstate: sqlstate,
                             }
                             .at(loc));
                         }
@@ -1701,7 +1732,7 @@ pub fn update_record_with_output<T: ColumnType>(
             }),
             // Error match
             (Some(e), StatementExpect::Error(expected_error))
-                if expected_error.is_match(&e.to_string()) =>
+                if expected_error.is_match(&e.to_string(), None) =>
             {
                 None
             }
@@ -1738,7 +1769,7 @@ pub fn update_record_with_output<T: ColumnType>(
         ) => match (error, expected) {
             // Error match
             (Some(e), QueryExpect::Error(expected_error))
-                if expected_error.is_match(&e.to_string()) =>
+                if expected_error.is_match(&e.to_string(), None) =>
             {
                 None
             }

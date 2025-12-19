@@ -65,10 +65,9 @@ jobs:
           profile: minimal
           toolchain: stable
       - name: Install semver-checks
-        uses: actions-rs/cargo@v1
+        uses: taiki-e/install-action@v2
         with:
-          command: install
-          args: cargo-semver-checks --version ^0.43 --locked
+          tool: cargo-semver-checks
       - name: Check semver
         run: |
          cargo semver-checks check-release -p sqllogictest
