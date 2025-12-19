@@ -388,8 +388,9 @@ impl ExpectedError {
     fn parse_inline_tokens(tokens: &[&str]) -> Result<Self, ParseErrorKind> {
         let joined = tokens.join(" ");
 
-        // Check if this is a sqlstate error pattern: error(sqlstate)
-        if let Some(captures) = regex::Regex::new(r"^\(([^)]+)\)$")
+        // Check if this is a SQLSTATE error pattern: error(<SQLSTATE>).
+        // SQLSTATE is exactly 5 characters: digits and uppercase letters (SQL standard).
+        if let Some(captures) = regex::Regex::new(r"^\(([0-9A-Z]{5})\)$")
             .unwrap()
             .captures(&joined)
         {
@@ -1269,6 +1270,25 @@ select * from foo;
                 retry: None,
             }]
         );
+    }
+
+    #[test]
+    fn test_expected_error_sqlstate_format() {
+        assert!(matches!(
+            ExpectedError::parse_inline_tokens(&["(42P01)"]).unwrap(),
+            ExpectedError::SqlState(s) if s == "42P01"
+        ));
+        assert!(matches!(
+            ExpectedError::parse_inline_tokens(&["(HY000)"]).unwrap(),
+            ExpectedError::SqlState(s) if s == "HY000"
+        ));
+
+        for non_sqlstate in ["(42p01)", "(42P0)", "(42P011)", "(12_45)", "(12-45)"] {
+            assert!(matches!(
+                ExpectedError::parse_inline_tokens(&[non_sqlstate]).unwrap(),
+                ExpectedError::Inline(_)
+            ));
+        }
     }
 
     /// Verifies Display impl is consistent with parsing by ensuring
