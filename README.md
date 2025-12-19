@@ -86,11 +86,12 @@ Seq Scan on t  (cost=<slt:ignore> rows=<slt:ignore> width=<slt:ignore>)
    Filter: (x > 1)  
 ```
 
-### Extension: Run a query/statement that should fail with the expacted error message
+### Extension: Run a query/statement that should fail with the expected error message
 
 The syntax:
 - Do not check the error message: `[statement|query] error`
 - Single line error message (regexp match): `[statement|query] error <regex>`
+- Match SQLSTATE (exact match): `[statement|query] error (<SQLSTATE>)`
 - Multiline error message (exact match): Use `----`.
 
 ```text
@@ -98,6 +99,11 @@ The syntax:
 # message contains 'Multiple object drop not supported'
 statement error Multiple object drop not supported
 DROP VIEW foo, bar;
+
+# Ensure that the statement errors and that the SQLSTATE is exactly the expected one.
+# (This requires the engine to expose the SQLSTATE via `DB::error_sql_state` / `AsyncDB::error_sql_state`.)
+statement error (42P01)
+SELECT * FROM non_existent_table;
 
 # The output error message must be the exact match of the expected one to pass the test,
 # except for the leading and trailing whitespaces.
