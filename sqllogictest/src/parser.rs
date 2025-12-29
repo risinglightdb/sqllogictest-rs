@@ -65,6 +65,11 @@ impl Location {
             upper: Some(Arc::new(self.clone())),
         }
     }
+
+    /// Reuse upper field for chain of locations
+    pub fn add_next_location(&mut self, next: Arc<Self>) {
+        self.upper = Some(next);
+    }
 }
 
 /// Configuration for retry behavior
@@ -802,20 +807,20 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
         let tokens: Vec<&str> = line.split_whitespace().collect();
         match tokens.as_slice() {
             [] => continue,
-            ["include", included] => records.push(Record::Include {
+            ["include", included, _rest @ ..] => records.push(Record::Include {
                 loc,
                 filename: included.to_string(),
             }),
-            ["halt"] => {
+            ["halt", _rest @ ..] => {
                 records.push(Record::Halt { loc });
             }
-            ["subtest", name] => {
+            ["subtest", name, _rest @ ..] => {
                 records.push(Record::Subtest {
                     loc,
                     name: name.to_string(),
                 });
             }
-            ["sleep", dur] => {
+            ["sleep", dur, _rest @ ..] => {
                 records.push(Record::Sleep {
                     duration: humantime::parse_duration(dur).map_err(|_| {
                         ParseErrorKind::InvalidDuration(dur.to_string()).at(loc.clone())
@@ -823,21 +828,21 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     loc,
                 });
             }
-            ["skipif", label] => {
+            ["skipif", label, _rest @ ..] => {
                 let cond = Condition::SkipIf {
                     label: label.to_string(),
                 };
                 conditions.push(cond.clone());
                 records.push(Record::Condition(cond));
             }
-            ["onlyif", label] => {
+            ["onlyif", label, _rest @ ..] => {
                 let cond = Condition::OnlyIf {
                     label: label.to_string(),
                 };
                 conditions.push(cond.clone());
                 records.push(Record::Condition(cond));
             }
-            ["connection", name] => {
+            ["connection", name, _rest @ ..] => {
                 let conn = Connection::new(name);
                 connection = conn.clone();
                 records.push(Record::Connection(conn));
@@ -1015,7 +1020,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 },
                 _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
             },
-            ["hash-threshold", threshold] => {
+            ["hash-threshold", threshold, _rest @ ..] => {
                 records.push(Record::HashThreshold {
                     loc: loc.clone(),
                     threshold: threshold.parse::<u64>().map_err(|_| {
@@ -1062,13 +1067,13 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     sql,
                 });
             }
-            ["show-column-names", value] => records.push(Record::ShowColumnNames {
+            ["show-column-names", value, _rest @ ..] => records.push(Record::ShowColumnNames {
                 loc: loc.clone(),
                 value: value
                     .parse::<bool>()
                     .map_err(|_| ParseErrorKind::InvalidBool((*value).into()).at(loc.clone()))?,
             }),
-            ["flat-values", value] => records.push(Record::FlatValues {
+            ["flat-values", value, _rest @ ..] => records.push(Record::FlatValues {
                 loc: loc.clone(),
                 value: value
                     .parse::<bool>()

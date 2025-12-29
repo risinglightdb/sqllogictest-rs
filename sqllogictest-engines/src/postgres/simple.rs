@@ -46,6 +46,10 @@ impl sqllogictest::AsyncDB for Postgres<Simple> {
                     break;
                 }
                 tokio_postgres::SimpleQueryMessage::RowDescription(column_names) => {
+                    if column_names.is_empty() {
+                        // No columns in the table => no rows, so just skip
+                        continue;
+                    }
                     // Just print column names in the first line
                     for column_name in column_names.iter() {
                         row_vec.push(column_name.name().to_string());

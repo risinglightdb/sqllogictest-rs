@@ -202,6 +202,24 @@ impl TestError {
             colorize,
         }
     }
+    pub fn new_composite(reasons: Vec<TestErrorKind>, locations: Vec<Location>) -> TestError {
+        assert!(reasons.len() == locations.len());
+        assert!(!locations.is_empty());
+
+        let mut chain: Option<Arc<Location>> = None;
+
+        for mut loc in locations.into_iter().rev() {
+            if let Some(parent) = chain {
+                loc.add_next_location(parent);
+            }
+            chain = Some(Arc::new(loc));
+        }
+
+        TestError {
+            kind: Box::new(TestErrorKind::CompositeMismatch { kinds: reasons }),
+            loc: Arc::as_ref(chain.as_ref().expect("Locations are not empty")).clone(),
+        }
+    }
 }
 
 /// Overrides the `Display` implementation of [`TestError`] to support controlling colorization.
@@ -362,6 +380,8 @@ pub enum TestErrorKind {
     },
     #[error("let failed: {err}\n[SQL] {sql}")]
     LetFail { sql: String, err: LetError },
+    #[error("Multiple record mismatches ({} errors)\n", kinds.len())]
+    CompositeMismatch { kinds: Vec<TestErrorKind> },
 }
 
 impl From<ParseError> for TestError {
@@ -452,6 +472,19 @@ impl Display for TestErrorKindDisplay<'_> {
                         .iter_all_changes()
                         .format_with("\n", |diff, f|{ format_diff(&diff, f, true)})
                 )
+            }
+            TestErrorKind::CompositeMismatch { kinds } => {
+                writeln!(f, "Multiple record mismatches ({} errors)", kinds.len())?;
+                // ("Multiple record mismatches ({} errors)", kinds.len());
+                let mut first = true;
+                for x in kinds {
+                    if !first {
+                        write!(f, "\n\n")?;
+                    }
+                    first = false;
+                    write!(f, "{}", x.display(self.colorize))?;
+                }
+                writeln!(f)
             }
             _ => write!(f, "{}", self.error),
         }
