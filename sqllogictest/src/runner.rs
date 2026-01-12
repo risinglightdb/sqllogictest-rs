@@ -556,10 +556,16 @@ fn format_column_diff(expected: &str, actual: &str, colorize: bool) -> String {
 /// By default, the ([`default_normalizer`]) will be used to normalize values.
 pub type Normalizer = fn(s: &String) -> String;
 
-/// Trim and replace multiple whitespaces with one.
+/// Trim and replace multiple whitespaces with single tab.
 #[allow(clippy::ptr_arg)]
 pub fn default_normalizer(s: &String) -> String {
-    s.trim().split_ascii_whitespace().join(" ")
+    s.trim().split_ascii_whitespace().join("\t")
+}
+
+/// Just trim. We expected strict format with tab-separated columns.
+#[allow(clippy::ptr_arg)]
+pub fn trim_normalizer(s: &String) -> String {
+    s.trim().to_string()
 }
 
 /// Validator will be used by [`Runner`] to validate the output.
@@ -617,7 +623,7 @@ pub fn default_validator(
     // Default, we compare normalized results. Whitespace characters are ignored.
     let normalized_rows = actual
         .iter()
-        .map(|strs| strs.iter().map(normalizer).join(" "))
+        .map(|strs| strs.iter().map(normalizer).join("\t"))
         .collect_vec();
 
     normalized_rows == expected_results
@@ -742,7 +748,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     pub fn new(make_conn: M) -> Self {
         Runner {
             validator: default_validator,
-            normalizer: default_normalizer,
+            normalizer: trim_normalizer,
             column_type_validator: default_column_validator,
             partitioner: Arc::new(default_partitioner),
             substitution_on: false,
@@ -1418,7 +1424,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
                         if !(self.validator)(self.normalizer, &actual_results, &expected_results) {
                             let output_rows =
-                                rows.iter().map(|strs| strs.iter().join(" ")).collect_vec();
+                                rows.iter().map(|strs| strs.iter().join("\t")).collect_vec();
                             return Err(TestErrorKind::QueryResultMismatch {
                                 sql,
                                 expected: expected_results.join("\n"),
@@ -1808,6 +1814,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         validator,
                         normalizer,
                         column_type_validator,
+                        false,
                     )
                     .unwrap_or(record);
                     writeln!(outfile, "{record}")?;
@@ -1851,6 +1858,7 @@ pub fn update_record_with_output<T: ColumnType>(
     validator: Validator,
     normalizer: Normalizer,
     column_type_validator: ColumnTypeValidator<T>,
+    force_override: bool,
 ) -> Option<Record<T>> {
     match (record.clone(), record_output) {
         (_, RecordOutput::Nothing) => None,
@@ -1994,11 +2002,14 @@ pub fn update_record_with_output<T: ColumnType>(
             }
             (None, expected) => {
                 let results = match &expected {
-                    // If validation is successful, we respect the original file's expected results.
+                    // If validation succeeds and formatting normalization is not forced, preserve original.
                     QueryExpect::Results {
                         results: expected_results,
                         ..
-                    } if validator(normalizer, rows, expected_results) => expected_results.clone(),
+                    } if validator(normalizer, rows, expected_results) && !force_override => {
+                        expected_results.clone()
+                    }
+                    // Otherwise, regenerate with proper formatting.
                     _ => rows.iter().map(|cols| cols.join(col_separator)).collect(),
                 };
                 let types = match &expected {
@@ -2494,6 +2505,7 @@ Caused by:
                 default_validator,
                 default_normalizer,
                 strict_column_validator,
+                false,
             );
 
             assert_eq!(

@@ -20,6 +20,6 @@ control resultmode rowwise
 query III rowsort
 select * from example_sort
 ----
-1 10 2333
-10 100 2333
-2 20 2333
+1	10	2333
+10	100	2333
+2	20	2333
