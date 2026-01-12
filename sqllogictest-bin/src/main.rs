@@ -22,7 +22,7 @@ use rand::seq::SliceRandom;
 use sqllogictest::substitution::well_known;
 use sqllogictest::{
     default_column_validator, default_validator, trim_normalizer, update_record_with_output,
-    AsyncDB, Injected, MakeConnection, Partitioner, Record, Runner, TestError,
+    AsyncDB, Injected, MakeConnection, Partitioner, Record, Runner, TestError, UpdateMode,
 };
 use tokio::sync::{mpsc, Mutex, Semaphore};
 use tokio::task::JoinSet;
@@ -35,19 +35,6 @@ pub enum Color {
     Auto,
     Always,
     Never,
-}
-
-/// Mode for updating test files.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum UpdateMode {
-    /// Run tests normally without updating files.
-    Run,
-    /// Update files with actual output, preserving original formatting when content matches.
-    Override,
-    /// Update files with actual output, normalizing formatting even when content matches.
-    Force,
-    /// Reformat files without running queries.
-    Format,
 }
 
 // Env keys for partitioning.
@@ -125,16 +112,20 @@ struct Opt {
     options: Option<String>,
 
     /// Overrides the test files with the actual output of the database.
-    #[clap(long, conflicts_with_all = ["force_override", "format"])]
+    #[clap(long, conflicts_with_all = ["force_override", "format", "skip_failed"])]
     r#override: bool,
     /// Overrides the test files with the actual output of the database,
     /// and normalizes formatting (e.g., converts spaces to tabs and despite <slt:ignore>) even when
     /// the logical content matches.
-    #[clap(long, conflicts_with_all = ["override", "format"])]
+    #[clap(long, conflicts_with_all = ["override", "format", "skip_failed"])]
     force_override: bool,
     /// Reformats the test files.
-    #[clap(long, conflicts_with_all = ["override", "force_override"])]
+    #[clap(long, conflicts_with_all = ["override", "force_override", "skip_failed"])]
     format: bool,
+    /// When a test fails, prepend a skipif directive instead of updating the expected output.
+    /// Format: LABEL,REASON (e.g., "postgres,not implemented yet")
+    #[clap(long, conflicts_with_all = ["override", "force_override", "format"])]
+    skip_failed: Option<String>,
 
     /// Add a label for conditions.
     ///
@@ -273,6 +264,7 @@ pub async fn main() -> Result<()> {
         r#override,
         force_override,
         format,
+        skip_failed,
         labels,
         partition_count,
         partition_id,
@@ -368,21 +360,31 @@ pub async fn main() -> Result<()> {
     };
 
     let update_mode = if format {
-        UpdateMode::Format
+        Some(UpdateMode::Format)
     } else if force_override {
-        UpdateMode::Force
+        Some(UpdateMode::OverrideWithFormat)
     } else if r#override {
-        UpdateMode::Override
+        Some(UpdateMode::Override)
+    } else if let Some(skip_failed_arg) = skip_failed {
+        let parts: Vec<&str> = skip_failed_arg.splitn(2, ',').collect();
+        if parts.len() != 2 {
+            bail!("--skip-failed must be in format LABEL,REASON (e.g., 'postgres,not implemented yet')");
+        }
+
+        Some(UpdateMode::SkipFailed {
+            label: parts[0].trim().to_string(),
+            reason: parts[1].trim().to_string(),
+        })
     } else {
-        UpdateMode::Run
+        None
     };
 
-    if update_mode != UpdateMode::Run {
+    if let Some(update_mode) = update_mode {
         return update_test_files(
             all_files,
             &engine,
             config,
-            update_mode,
+            &update_mode,
             jobs,
             keep_db_on_failure,
             labels,
@@ -837,7 +839,7 @@ async fn update_test_files(
     files: Vec<PathBuf>,
     engine: &EngineConfig,
     config: DBConfig,
-    update_mode: UpdateMode,
+    update_mode: &UpdateMode,
     jobs: Option<usize>,
     keep_db_on_failure: bool,
     labels: Vec<String>,
@@ -1240,7 +1242,7 @@ async fn update_test_file<T: io::Write, M: MakeConnection>(
     out: &mut T,
     runner: &mut Runner<M::Conn, M>,
     filename: impl AsRef<Path>,
-    update_mode: UpdateMode,
+    update_mode: &UpdateMode,
 ) -> Result<()> {
     let filename = filename.as_ref();
     let records = tokio::task::block_in_place(|| {
@@ -1403,16 +1405,14 @@ async fn update_record<M: MakeConnection>(
     outfile: &mut File,
     runner: &mut Runner<M::Conn, M>,
     record: Record<<M::Conn as AsyncDB>::ColumnType>,
-    update_mode: UpdateMode,
+    update_mode: &UpdateMode,
 ) -> Result<()> {
     assert!(!matches!(record, Record::Injected(_)));
 
-    if update_mode == UpdateMode::Format {
+    if *update_mode == UpdateMode::Format {
         writeln!(outfile, "{record}")?;
         return Ok(());
     }
-
-    let normalize_formatting = update_mode == UpdateMode::Force;
 
     let record_output = runner.apply_record(record.clone()).await;
     match update_record_with_output(
@@ -1422,9 +1422,32 @@ async fn update_record<M: MakeConnection>(
         default_validator,
         trim_normalizer,
         default_column_validator,
-        normalize_formatting,
+        update_mode,
     ) {
         Some(new_record) => {
+            // Check if skipif was added (new conditions > old conditions)
+            let old_conditions_len = match &record {
+                Record::Statement { conditions, .. } => conditions.len(),
+                Record::Query { conditions, .. } => conditions.len(),
+                _ => 0,
+            };
+            let new_conditions = match &new_record {
+                Record::Statement { conditions, .. } => conditions,
+                Record::Query { conditions, .. } => conditions,
+                _ => &vec![],
+            };
+
+            // Write any new conditions that were added
+            if new_conditions.len() > old_conditions_len {
+                for condition in &new_conditions[..new_conditions.len() - old_conditions_len] {
+                    writeln!(
+                        outfile,
+                        "{}",
+                        Record::<<M::Conn as AsyncDB>::ColumnType>::Condition(condition.clone())
+                    )?;
+                }
+            }
+
             writeln!(outfile, "{new_record}")?;
         }
         None => {

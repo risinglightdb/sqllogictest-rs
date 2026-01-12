@@ -600,8 +600,13 @@ pub fn default_validator(
         let actual_snapshot = actual_rows.join("\n");
         let fragments: Vec<&str> = expected_snapshot.split(IGNORE_MARKER).collect();
         let mut pos = 0;
-        for frag in fragments {
+        let mut allow_trailing_data = false;
+        for (i, frag) in fragments.iter().enumerate() {
             if frag.is_empty() {
+                // If it's the last fragment, trailing data is allowed
+                if i == fragments.len() - 1 {
+                    allow_trailing_data = true;
+                }
                 continue;
             }
             if let Some(idx) = actual_snapshot[pos..].find(frag) {
@@ -615,6 +620,13 @@ pub fn default_validator(
                 );
                 return false;
             }
+        }
+        if pos < actual_snapshot.len() && !allow_trailing_data {
+            tracing::error!(
+                "extra data found after last expected fragment:\nremaining: {}",
+                &actual_snapshot[pos..]
+            );
+            return false;
         }
         return true;
     }
@@ -1814,7 +1826,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         validator,
                         normalizer,
                         column_type_validator,
-                        false,
+                        &UpdateMode::Override,
                     )
                     .unwrap_or(record);
                     writeln!(outfile, "{record}")?;
@@ -1847,6 +1859,19 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     }
 }
 
+/// Mode for updating test files.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UpdateMode {
+    /// Update files with actual output, preserving original formatting when content matches.
+    Override,
+    /// Update files with actual output, normalizing formatting even when content matches.
+    OverrideWithFormat,
+    /// Reformat files without running queries.
+    Format,
+    /// When a test fails, prepend a skipif directive with the given label and reason.
+    SkipFailed { label: String, reason: String },
+}
+
 /// Updates the specified [`Record`] with the [`QueryOutput`] produced
 /// by a Database, returning `Some(new_record)`.
 ///
@@ -1858,8 +1883,13 @@ pub fn update_record_with_output<T: ColumnType>(
     validator: Validator,
     normalizer: Normalizer,
     column_type_validator: ColumnTypeValidator<T>,
-    force_override: bool,
+    update_mode: &UpdateMode,
 ) -> Option<Record<T>> {
+    let force_override = matches!(update_mode, UpdateMode::OverrideWithFormat);
+    let skip_failed = match update_mode {
+        UpdateMode::SkipFailed { label, reason } => Some((label.as_str(), reason.as_str())),
+        _ => None,
+    };
     match (record.clone(), record_output) {
         (_, RecordOutput::Nothing) => None,
         // statement, query
@@ -1907,14 +1937,28 @@ pub fn update_record_with_output<T: ColumnType>(
                 retry,
             },
             RecordOutput::Statement { error: None, count },
-        ) => Some(Record::Statement {
-            sql,
-            loc,
-            conditions,
-            connection,
-            expected: StatementExpect::Count(*count),
-            retry,
-        }),
+        ) => {
+            if *count > 0 {
+                tracing::warn!(
+                    "DB returned StatementComplete({}) for a Query record; preserving Query with empty results",
+                    count
+                );
+            }
+            Some(Record::Query {
+                sql,
+                loc,
+                conditions,
+                connection,
+                expected: QueryExpect::Results {
+                    results: Vec::new(),
+                    types: Vec::new(),
+                    sort_mode: None,
+                    result_mode: None,
+                    label: None,
+                },
+                retry,
+            })
+        }
         // statement, statement
         (
             Record::Statement {
@@ -1928,40 +1972,84 @@ pub fn update_record_with_output<T: ColumnType>(
             RecordOutput::Statement { count, error },
         ) => match (error, expected) {
             // Ok
-            (None, expected) => Some(Record::Statement {
-                sql,
-                loc,
-                conditions,
-                connection,
-                expected: match expected {
-                    StatementExpect::Count(_) => StatementExpect::Count(*count),
-                    StatementExpect::Error(_) | StatementExpect::Ok => StatementExpect::Ok,
-                },
-                retry,
-            }),
+            (None, expected) => {
+                // If we expected an error but got success, add skipif in skip_failed mode
+                if matches!(expected, StatementExpect::Error(_)) {
+                    if let Some((label, reason)) = skip_failed {
+                        let mut new_conditions = conditions.clone();
+                        new_conditions.insert(
+                            0,
+                            Condition::SkipIf {
+                                label: label.to_string(),
+                                comments: vec![format!("# {}", reason)],
+                            },
+                        );
+                        return Some(Record::Statement {
+                            sql,
+                            expected,
+                            loc,
+                            conditions: new_conditions,
+                            connection,
+                            retry,
+                        });
+                    }
+                }
+                Some(Record::Statement {
+                    sql,
+                    loc,
+                    conditions,
+                    connection,
+                    expected: match expected {
+                        StatementExpect::Count(_) => StatementExpect::Count(*count),
+                        StatementExpect::Error(_) | StatementExpect::Ok => StatementExpect::Ok,
+                    },
+                    retry,
+                })
+            }
             // Error match
             (Some(e), StatementExpect::Error(expected_error))
                 if expected_error.is_match(&e.to_string(), None) =>
             {
                 None
             }
-            // Error mismatch, update expected error
+            // Error mismatch, update expected error or prepend skipif
             (Some(e), r) => {
-                let reference = match &r {
-                    StatementExpect::Error(e) => Some(e),
-                    StatementExpect::Count(_) | StatementExpect::Ok => None,
-                };
-                Some(Record::Statement {
-                    sql,
-                    expected: StatementExpect::Error(ExpectedError::from_actual_error(
-                        reference,
-                        &e.to_string(),
-                    )),
-                    loc,
-                    conditions,
-                    connection,
-                    retry,
-                })
+                if let Some((label, reason)) = skip_failed {
+                    // Prepend skipif directive
+                    let mut new_conditions = conditions.clone();
+                    new_conditions.insert(
+                        0,
+                        Condition::SkipIf {
+                            label: label.to_string(),
+                            comments: vec![format!("# {}", reason)],
+                        },
+                    );
+                    Some(Record::Statement {
+                        sql,
+                        expected: r,
+                        loc,
+                        conditions: new_conditions,
+                        connection,
+                        retry,
+                    })
+                } else {
+                    // Original behavior: update expected error
+                    let reference = match &r {
+                        StatementExpect::Error(e) => Some(e),
+                        StatementExpect::Count(_) | StatementExpect::Ok => None,
+                    };
+                    Some(Record::Statement {
+                        sql,
+                        expected: StatementExpect::Error(ExpectedError::from_actual_error(
+                            reference,
+                            &e.to_string(),
+                        )),
+                        loc,
+                        conditions,
+                        connection,
+                        retry,
+                    })
+                }
             }
         },
         // query, query
@@ -1984,31 +2072,85 @@ pub fn update_record_with_output<T: ColumnType>(
             }
             // Error mismatch
             (Some(e), r) => {
-                let reference = match &r {
-                    QueryExpect::Error(e) => Some(e),
-                    QueryExpect::Results { .. } => None,
-                };
-                Some(Record::Query {
-                    sql,
-                    expected: QueryExpect::Error(ExpectedError::from_actual_error(
-                        reference,
-                        &e.to_string(),
-                    )),
-                    loc,
-                    conditions,
-                    connection,
-                    retry,
-                })
+                if let Some((label, reason)) = skip_failed {
+                    // Prepend skipif directive
+                    let mut new_conditions = conditions.clone();
+                    new_conditions.insert(
+                        0,
+                        Condition::SkipIf {
+                            label: label.to_string(),
+                            comments: vec![format!("# {}", reason)],
+                        },
+                    );
+                    Some(Record::Query {
+                        sql,
+                        expected: r,
+                        loc,
+                        conditions: new_conditions,
+                        connection,
+                        retry,
+                    })
+                } else {
+                    // Original behavior: update expected error
+                    let reference = match &r {
+                        QueryExpect::Error(e) => Some(e),
+                        QueryExpect::Results { .. } => None,
+                    };
+                    Some(Record::Query {
+                        sql,
+                        expected: QueryExpect::Error(ExpectedError::from_actual_error(
+                            reference,
+                            &e.to_string(),
+                        )),
+                        loc,
+                        conditions,
+                        connection,
+                        retry,
+                    })
+                }
             }
             (None, expected) => {
+                let (results_match, types_match) = match &expected {
+                    QueryExpect::Error(_) => (false, false), // Expected error but got success
+                    QueryExpect::Results {
+                        results: expected_results,
+                        types: expected_types,
+                        ..
+                    } => (
+                        validator(normalizer, rows, expected_results),
+                        column_type_validator(types, expected_types),
+                    ),
+                };
+
+                // If there's a mismatch and skip_failed mode is enabled, add skipif
+                if !results_match || !types_match {
+                    if let Some((label, reason)) = skip_failed {
+                        let mut new_conditions = conditions.clone();
+                        new_conditions.insert(
+                            0,
+                            Condition::SkipIf {
+                                label: label.to_string(),
+                                comments: vec![format!("# {}", reason)],
+                            },
+                        );
+                        return Some(Record::Query {
+                            sql,
+                            expected,
+                            loc,
+                            conditions: new_conditions,
+                            connection,
+                            retry,
+                        });
+                    }
+                }
+
+                // Otherwise, update results normally
                 let results = match &expected {
                     // If validation succeeds and formatting normalization is not forced, preserve original.
                     QueryExpect::Results {
                         results: expected_results,
                         ..
-                    } if validator(normalizer, rows, expected_results) && !force_override => {
-                        expected_results.clone()
-                    }
+                    } if results_match && !force_override => expected_results.clone(),
                     // Otherwise, regenerate with proper formatting.
                     _ => rows.iter().map(|cols| cols.join(col_separator)).collect(),
                 };
@@ -2017,7 +2159,7 @@ pub fn update_record_with_output<T: ColumnType>(
                     QueryExpect::Results {
                         types: expected_types,
                         ..
-                    } if column_type_validator(types, expected_types) => expected_types.clone(),
+                    } if types_match => expected_types.clone(),
                     _ => types.clone(),
                 };
                 Some(Record::Query {
@@ -2241,18 +2383,25 @@ Caused by:
     }
 
     #[test]
-    fn test_query_statement_output() {
+    fn test_query_no_results_output() {
         TestCase {
             // input has no query results
             input: "query III\n\
                     select * from foo;\n\
                     ----",
 
-            // Model a run that produced a statement output
-            record_output: statement_output(3),
+            // Model a run that produced a query with no results, but scheme is still correct
+            record_output: query_output(
+                &[],
+                vec![
+                    DefaultColumnType::Integer,
+                    DefaultColumnType::Integer,
+                    DefaultColumnType::Integer,
+                ],
+            ),
 
             expected: Some(
-                "statement count 3\n\
+                "query III\n\
                  select * from foo;",
             ),
         }
@@ -2505,7 +2654,7 @@ Caused by:
                 default_validator,
                 default_normalizer,
                 strict_column_validator,
-                false,
+                &UpdateMode::Override,
             );
 
             assert_eq!(
