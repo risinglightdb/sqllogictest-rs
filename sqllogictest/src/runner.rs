@@ -382,6 +382,8 @@ pub enum TestErrorKind {
     LetFail { sql: String, err: LetError },
     #[error("Multiple record mismatches ({} errors)\n", kinds.len())]
     CompositeMismatch { kinds: Vec<TestErrorKind> },
+    #[error("retry configuration substitution failed: {variable}\n{err}")]
+    RetrySubstitutionFailure { variable: String, err: AnyError },
 }
 
 impl From<ParseError> for TestError {
@@ -1227,26 +1229,82 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         &mut self,
         record: Record<D::ColumnType>,
     ) -> Result<RecordOutput<D::ColumnType>, TestError> {
-        let retry = match &record {
-            Record::Statement { retry, .. } => retry.clone(),
-            Record::Query { retry, .. } => retry.clone(),
-            Record::System { retry, .. } => retry.clone(),
-            _ => None,
+        let (retry, loc) = match &record {
+            Record::Statement { retry, loc, .. } => (retry.clone(), loc.clone()),
+            Record::Query { retry, loc, .. } => (retry.clone(), loc.clone()),
+            Record::System { retry, loc, .. } => (retry.clone(), loc.clone()),
+            _ => return self.run_async_no_retry(record).await,
         };
-        if retry.is_none() {
-            return self.run_async_no_retry(record).await;
-        }
 
-        // Retry for `retry.attempts` times. The parser ensures that `retry.attempts` must > 0.
-        let retry = retry.unwrap();
+        let Some(retry) = retry else {
+            return self.run_async_no_retry(record).await;
+        };
+
+        // Resolve attempts from either direct value or environment variable
+        let attempts = match &retry.attempts {
+            RetryAttempts::Count(n) => *n,
+            RetryAttempts::EnvVar(var) => {
+                let resolved = self.may_substitute(var.clone(), true).map_err(|e| {
+                    TestErrorKind::RetrySubstitutionFailure {
+                        variable: var.clone(),
+                        err: e,
+                    }
+                    .at(loc.clone())
+                })?;
+
+                let count = resolved.parse::<usize>().map_err(|_| {
+                    TestErrorKind::ParseError(ParseErrorKind::InvalidNumber(resolved.clone()))
+                        .at(loc.clone())
+                })?;
+
+                if count == 0 {
+                    return Err(
+                        TestErrorKind::ParseError(ParseErrorKind::InvalidRetryConfig(
+                            "attempt must be greater than 0".to_string(),
+                        ))
+                        .at(loc.clone()),
+                    );
+                }
+
+                count
+            }
+        };
+
+        // Resolve backoff from either direct value or environment variable
+        let backoff = match &retry.backoff {
+            RetryBackoff::Duration(d) => *d,
+            RetryBackoff::EnvVar(var) => {
+                let resolved = self.may_substitute(var.clone(), true).map_err(|e| {
+                    TestErrorKind::RetrySubstitutionFailure {
+                        variable: var.clone(),
+                        err: e,
+                    }
+                    .at(loc.clone())
+                })?;
+
+                humantime::parse_duration(&resolved).map_err(|_| {
+                    TestErrorKind::ParseError(ParseErrorKind::InvalidDuration(resolved))
+                        .at(loc.clone())
+                })?
+            }
+        };
+
+        // Retry for `attempts` times
         let mut last_error = None;
-        for _ in 0..retry.attempts {
+        for attempt in 0..attempts {
             let result = self.run_async_no_retry(record.clone()).await;
             if result.is_ok() {
                 return result;
             }
-            tracing::warn!(target:"sqllogictest::retry", backoff = ?retry.backoff, error = ?result, "retrying");
-            D::sleep(retry.backoff).await;
+            tracing::warn!(
+                target: "sqllogictest::retry",
+                attempt = attempt + 1,
+                attempts,
+                backoff = ?backoff,
+                error = ?result,
+                "retrying"
+            );
+            D::sleep(backoff).await;
             last_error = result.err();
         }
 

@@ -525,10 +525,6 @@ async fn run_parallel(
 ) -> Result<()> {
     let test_databases = test_db_names(files)?;
     let total_tests = test_databases.len();
-    let db_names: Vec<String> = test_databases
-        .iter()
-        .map(|(db_name, _)| db_name.clone())
-        .collect();
 
     let (job_tx, job_rx) = mpsc::channel::<TestJob>(jobs);
     let (result_tx, mut result_rx) = mpsc::channel::<TestResultMessage>(jobs);
@@ -599,7 +595,6 @@ async fn run_parallel(
                 if format!("{:?}", e).contains("Connection refused") && !connection_refused {
                     connection_refused = true;
                     eprintln!("Connection refused. The server may be down.");
-                    eprintln!("Skip dropping databases due to connection refused: {db_names:?}");
                 }
                 if fail_fast || connection_refused {
                     eprintln!("Cancelling remaining tests...");
@@ -744,6 +739,9 @@ async fn drop_task(
     engine: EngineConfig,
     config: DBConfig,
 ) -> Result<()> {
+    const MAX_RETRIES: usize = 1;
+    const RETRY_DELAY: Duration = Duration::from_secs(1);
+
     let mut db = engines::connect(&engine, &config).await?;
 
     while let Some(message) = drop_rx.recv().await {
@@ -753,22 +751,81 @@ async fn drop_task(
                 break;
             }
             DropMessage::Drop(db_name) => {
-                let query = format!("DROP DATABASE {db_name};");
-                if let Err(err) = db.run(&query).await {
-                    let err = err.to_string();
-                    if err.contains("Connection refused") {
-                        eprintln!("  Connection refused. The server may be down. Exiting...");
+                match drop_database_with_retry(
+                    &mut db,
+                    &db_name,
+                    &engine,
+                    &config,
+                    MAX_RETRIES,
+                    RETRY_DELAY,
+                )
+                .await
+                {
+                    Ok(()) => {} // Success, maybe reconnected
+                    Err(e) => {
+                        eprintln!("  {e}");
                         break;
                     }
-                    eprintln!("({}) ignore DROP DATABASE error: {err}", query);
                 }
             }
         }
     }
 
     db.shutdown().await;
-
     Ok(())
+}
+
+/// Attempts to drop a database with retry logic.
+/// Uses `DROP DATABASE IF EXISTS` for idempotency and retries on any error.
+/// Reconnects to the database before each retry. Fails fast if reconnection fails.
+async fn drop_database_with_retry(
+    db: &mut engines::Engines,
+    db_name: &str,
+    engine: &EngineConfig,
+    config: &DBConfig,
+    max_retries: usize,
+    retry_delay: Duration,
+) -> Result<()> {
+    let query = format!("DROP DATABASE IF EXISTS {db_name};");
+    let total_attempts = max_retries + 1;
+
+    for attempt in 1..=total_attempts {
+        match db.run(&query).await {
+            Ok(_) => {
+                if attempt > 1 {
+                    eprintln!("  Succeed");
+                }
+                return Ok(());
+            }
+            Err(err) => {
+                eprintln!("({query}) error: {err}");
+
+                if attempt < total_attempts {
+                    eprintln!(
+                        "  Retrying with new connection ({}/{})...",
+                        attempt, max_retries
+                    );
+                    tokio::time::sleep(retry_delay).await;
+
+                    match engines::connect(engine, config).await {
+                        Ok(new_db) => {
+                            *db = new_db;
+                            continue;
+                        }
+                        Err(_) => {
+                            // Just try again to reconnect
+                        }
+                    }
+                } else {
+                    return Err(anyhow!(
+                        "Failed to drop database {db_name} after {max_retries} retries"
+                    ));
+                }
+            }
+        }
+    }
+
+    unreachable!("Loop should always return via Ok or Err branches")
 }
 
 // Run test one be one

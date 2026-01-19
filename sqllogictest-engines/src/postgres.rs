@@ -36,7 +36,11 @@ impl<P> Postgres<P> {
 
         let connection = tokio::spawn(async move {
             if let Err(e) = connection.await {
-                log::error!("Postgres connection error: {:?}", e);
+                if e.is_closed() {
+                    log::info!("Postgres connection closed");
+                } else {
+                    log::error!("Postgres connection error: {:?}", e);
+                }
             }
         });
 
