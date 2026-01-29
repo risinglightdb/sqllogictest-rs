@@ -219,6 +219,35 @@ echo "foo" > "$__TEST_DIR__/foo.txt"
 > and excaping is also not needed.
 > Environment variables are supported by the shell, and special variables are still supported by plain string substitution.
 
+### Extension: Bind query results to variables with `let`
+
+The `let` record allows you to execute a SQL query and bind the results to variables for use in subsequent queries.
+This is useful when you need to capture dynamic values (like auto-generated IDs) from the database.
+
+```text
+control substitution on
+
+# Execute a query that returns exactly 1 row with 1 column, bind result to 'id'
+let (id)
+SELECT id FROM users WHERE name = 'alice'
+
+# Multiple variables can be bound from a single query
+let (user_id, user_name, user_email)
+SELECT id, name, email FROM users WHERE id = 1
+
+# Use the bound variable in subsequent queries
+query TTT
+SELECT $user_id, $user_name, $user_email
+----
+1 alice alice@example.com
+```
+
+**Requirements:**
+- The query must return exactly **1 row**.
+- The number of columns must match the number of variables.
+- `let` requires `control substitution on` to be enabled for variable usage, but the `let` statement itself will execute regardless.
+
+
 ## Used by
 
 - [RisingLight](https://github.com/risinglightdb/risinglight): An OLAP database system for educational purpose

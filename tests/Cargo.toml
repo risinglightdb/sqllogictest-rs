@@ -33,3 +33,7 @@ path = "./system_command/system_command.rs"
 [[test]]
 name = "substitution"
 path = "./substitution/substitution.rs"
+
+[[test]]
+name = "let_test"
+path = "./let/let_test.rs"

@@ -196,6 +196,17 @@ pub enum Record<T: ColumnType> {
     Newline,
     /// Internally injected record which should not occur in the test file.
     Injected(Injected),
+    /// A let record binds SQL query results to variables.
+    /// The query must return exactly 1 row with N columns matching the N variable names.
+    Let {
+        loc: Location,
+        conditions: Vec<Condition>,
+        connection: Connection,
+        /// Variable names to bind the results to.
+        variables: Vec<String>,
+        /// The SQL query to execute.
+        sql: String,
+    },
 }
 
 impl<T: ColumnType> Record<T> {
@@ -357,6 +368,15 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
             }
             Record::Newline => Ok(()), // Display doesn't end with newline
             Record::Injected(p) => panic!("unexpected injected record: {p:?}"),
+            Record::Let {
+                loc: _,
+                conditions: _,
+                connection: _,
+                variables,
+                sql,
+            } => {
+                write!(f, "let ({})\n{sql}\n", variables.join(", "))
+            }
         }
     }
 }
@@ -700,6 +720,8 @@ pub enum ParseErrorKind {
     EmptyIncludeFile(String),
     #[error("no such file")]
     FileNotFound,
+    #[error("invalid variable name: {0:?}")]
+    InvalidVariableName(String),
 }
 
 impl ParseErrorKind {
@@ -976,6 +998,60 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     })?,
                 });
             }
+            ["let", rest @ ..] => {
+                // Parse: let (var1, var2, ...) followed by SQL
+                // Join the rest of the tokens and parse the variable list
+                let rest_str = rest.join(" ");
+
+                // Check that the rest starts with '(' and find the matching ')'
+                let rest_str = rest_str.trim();
+                if !rest_str.starts_with('(') {
+                    return Err(ParseErrorKind::InvalidLine(line.into()).at(loc));
+                }
+
+                // Find the matching ')'
+                let close_paren = rest_str.find(')').ok_or_else(|| {
+                    ParseErrorKind::InvalidLine(line.into()).at(loc.clone())
+                })?;
+
+                // Extract variable names between parentheses
+                let vars_str = &rest_str[1..close_paren];
+                let variables: Vec<String> = vars_str
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+
+                if variables.is_empty() {
+                    return Err(ParseErrorKind::InvalidLine(line.into()).at(loc));
+                }
+
+                // Validate variable names (must be valid identifiers)
+                for var in &variables {
+                    if !is_valid_variable_name(var) {
+                        return Err(ParseErrorKind::InvalidVariableName(var.clone()).at(loc));
+                    }
+                }
+
+                // Check if there's extra content after ')'
+                let after_paren = rest_str[close_paren + 1..].trim();
+                if !after_paren.is_empty() {
+                    return Err(
+                        ParseErrorKind::UnexpectedToken(after_paren.to_string()).at(loc)
+                    );
+                }
+
+                // Parse the SQL body (following lines until empty line)
+                let (sql, _has_results) = parse_lines(&mut lines, &loc, None)?;
+
+                records.push(Record::Let {
+                    loc,
+                    conditions: std::mem::take(&mut conditions),
+                    connection: std::mem::take(&mut connection),
+                    variables,
+                    sql,
+                });
+            }
             _ => return Err(ParseErrorKind::InvalidLine(line.into()).at(loc)),
         }
     }
@@ -1027,6 +1103,21 @@ fn parse_file_inner<T: ColumnType>(loc: Location) -> Result<Vec<Record<T>>, Pars
         }
     }
     Ok(records)
+}
+
+/// Check if a variable name is valid.
+/// A valid variable name starts with a letter or underscore, and contains only alphanumeric
+/// characters and underscores.
+fn is_valid_variable_name(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Parse one or more lines until empty line or a delimiter.
@@ -1336,6 +1427,7 @@ select * from foo;
                     Record::Subtest { loc, .. } => normalize_loc(loc),
                     Record::Halt { loc, .. } => normalize_loc(loc),
                     Record::HashThreshold { loc, .. } => normalize_loc(loc),
+                    Record::Let { loc, .. } => normalize_loc(loc),
                     // even though these variants don't include a
                     // location include them in this match statement
                     // so if new variants are added, this match
@@ -1388,5 +1480,121 @@ select * from foo;
     #[test]
     fn test_query_retry() {
         parse_roundtrip::<DefaultColumnType>("../tests/no_run/query_retry.slt")
+    }
+
+    #[test]
+    fn test_let_parsing() {
+        let script = "\
+let (id)
+SELECT 1
+";
+        let records = parse::<DefaultColumnType>(script).unwrap();
+        assert_eq!(records.len(), 1);
+        match &records[0] {
+            Record::Let {
+                variables, sql, ..
+            } => {
+                assert_eq!(variables, &["id".to_string()]);
+                assert_eq!(sql, "SELECT 1");
+            }
+            _ => panic!("expected Let record"),
+        }
+    }
+
+    #[test]
+    fn test_let_parsing_multiple_vars() {
+        let script = "\
+let (id, name, value)
+SELECT 1, 'hello', 42
+";
+        let records = parse::<DefaultColumnType>(script).unwrap();
+        assert_eq!(records.len(), 1);
+        match &records[0] {
+            Record::Let {
+                variables, sql, ..
+            } => {
+                assert_eq!(
+                    variables,
+                    &["id".to_string(), "name".to_string(), "value".to_string()]
+                );
+                assert_eq!(sql, "SELECT 1, 'hello', 42");
+            }
+            _ => panic!("expected Let record"),
+        }
+    }
+
+    #[test]
+    fn test_let_parsing_roundtrip() {
+        let script = "\
+let (id)
+SELECT 1
+";
+        let records = parse::<DefaultColumnType>(script).unwrap();
+        let unparsed = records[0].to_string();
+        let reparsed = parse::<DefaultColumnType>(&unparsed).unwrap();
+        assert_eq!(records.len(), reparsed.len());
+        match (&records[0], &reparsed[0]) {
+            (
+                Record::Let {
+                    variables: v1,
+                    sql: s1,
+                    ..
+                },
+                Record::Let {
+                    variables: v2,
+                    sql: s2,
+                    ..
+                },
+            ) => {
+                assert_eq!(v1, v2);
+                assert_eq!(s1, s2);
+            }
+            _ => panic!("expected Let records"),
+        }
+    }
+
+    #[test]
+    fn test_let_parsing_error_missing_paren() {
+        let script = "\
+let id
+SELECT 1
+";
+        let err = parse::<DefaultColumnType>(script).unwrap_err();
+        assert!(matches!(err.kind(), ParseErrorKind::InvalidLine(_)));
+    }
+
+    #[test]
+    fn test_let_parsing_error_empty_vars() {
+        let script = "\
+let ()
+SELECT 1
+";
+        let err = parse::<DefaultColumnType>(script).unwrap_err();
+        assert!(matches!(err.kind(), ParseErrorKind::InvalidLine(_)));
+    }
+
+    #[test]
+    fn test_let_parsing_error_invalid_var_name() {
+        let script = "\
+let (123invalid)
+SELECT 1
+";
+        let err = parse::<DefaultColumnType>(script).unwrap_err();
+        assert!(matches!(
+            err.kind(),
+            ParseErrorKind::InvalidVariableName(_)
+        ));
+    }
+
+    #[test]
+    fn test_is_valid_variable_name() {
+        assert!(is_valid_variable_name("foo"));
+        assert!(is_valid_variable_name("_bar"));
+        assert!(is_valid_variable_name("foo123"));
+        assert!(is_valid_variable_name("__TEST_DIR__"));
+        assert!(!is_valid_variable_name(""));
+        assert!(!is_valid_variable_name("123"));
+        assert!(!is_valid_variable_name("foo-bar"));
+        assert!(!is_valid_variable_name("foo bar"));
     }
 }

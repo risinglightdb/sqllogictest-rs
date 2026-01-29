@@ -25,6 +25,14 @@ use crate::{ColumnType, Connections, MakeConnection};
 /// Type-erased error type.
 type AnyError = Arc<dyn std::error::Error + Send + Sync>;
 
+/// Internal result type for query execution.
+enum QueryResult<T: ColumnType> {
+    Rows { types: Vec<T>, rows: Vec<Vec<String>> },
+    StatementComplete(u64),
+    Skipped,
+    Err(AnyError),
+}
+
 /// Output of a record.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -44,6 +52,13 @@ pub enum RecordOutput<T: ColumnType> {
     #[non_exhaustive]
     System {
         stdout: Option<String>,
+        error: Option<AnyError>,
+    },
+    /// The output of a `let` record.
+    #[non_exhaustive]
+    Let {
+        /// The values from the query result (if successful).
+        values: Vec<String>,
         error: Option<AnyError>,
     },
 }
@@ -329,6 +344,16 @@ pub enum TestErrorKind {
         sql: String,
         expected: String,
         actual: String,
+    },
+    #[error("let failed: {err}\n[SQL] {sql}")]
+    LetFail { sql: String, err: AnyError },
+    #[error("let row count mismatch: expected 1 row, got {actual}\n[SQL] {sql}")]
+    LetRowCountMismatch { sql: String, actual: usize },
+    #[error("let column count mismatch: expected {expected} columns, got {actual}\n[SQL] {sql}")]
+    LetColumnCountMismatch {
+        sql: String,
+        expected: usize,
+        actual: usize,
     },
 }
 
@@ -706,6 +731,35 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
         self.hash_threshold = hash_threshold;
     }
 
+    /// Helper to run a SQL query with common setup (substitution, connection, skip check).
+    async fn run_query_inner(
+        &mut self,
+        sql: &str,
+        connection: Connection,
+        conditions: &[Condition],
+        should_skip: &impl Fn(&HashSet<String>, &str, &[Condition]) -> bool,
+    ) -> QueryResult<D::ColumnType> {
+        let sql = match self.may_substitute(sql.to_string(), true) {
+            Ok(sql) => sql,
+            Err(error) => return QueryResult::Err(error),
+        };
+
+        let conn = match self.conn.get(connection).await {
+            Ok(conn) => conn,
+            Err(e) => return QueryResult::Err(Arc::new(e)),
+        };
+
+        if should_skip(&self.labels, conn.engine_name(), conditions) {
+            return QueryResult::Skipped;
+        }
+
+        match conn.run(&sql).await {
+            Ok(DBOutput::Rows { types, rows }) => QueryResult::Rows { types, rows },
+            Ok(DBOutput::StatementComplete(count)) => QueryResult::StatementComplete(count),
+            Err(e) => QueryResult::Err(Arc::new(e)),
+        }
+    }
+
     pub async fn apply_record(
         &mut self,
         record: Record<D::ColumnType>,
@@ -888,41 +942,18 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 loc: _,
                 retry: _,
             } => {
-                let sql = match self.may_substitute(sql, true) {
-                    Ok(sql) => sql,
-                    Err(error) => {
-                        return RecordOutput::Query {
-                            error: Some(error),
-                            types: vec![],
-                            rows: vec![],
-                        }
+                let (types, mut rows) = match self
+                    .run_query_inner(&sql, connection, &conditions, &should_skip)
+                    .await
+                {
+                    QueryResult::Rows { types, rows } => (types, rows),
+                    QueryResult::StatementComplete(count) => {
+                        return RecordOutput::Statement { count, error: None };
                     }
-                };
-
-                let conn = match self.conn.get(connection).await {
-                    Ok(conn) => conn,
-                    Err(e) => {
+                    QueryResult::Skipped => return RecordOutput::Nothing,
+                    QueryResult::Err(e) => {
                         return RecordOutput::Query {
-                            error: Some(Arc::new(e)),
-                            types: vec![],
-                            rows: vec![],
-                        }
-                    }
-                };
-                if should_skip(&self.labels, conn.engine_name(), &conditions) {
-                    return RecordOutput::Nothing;
-                }
-
-                let (types, mut rows) = match conn.run(&sql).await {
-                    Ok(out) => match out {
-                        DBOutput::Rows { types, rows } => (types, rows),
-                        DBOutput::StatementComplete(count) => {
-                            return RecordOutput::Statement { count, error: None };
-                        }
-                    },
-                    Err(e) => {
-                        return RecordOutput::Query {
-                            error: Some(Arc::new(e)),
+                            error: Some(e),
                             types: vec![],
                             rows: vec![],
                         };
@@ -1004,6 +1035,72 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
             Record::Halt { loc: _ } => {
                 tracing::error!("halt record encountered. It's likely a bug of the runtime.");
                 RecordOutput::Nothing
+            }
+            Record::Let {
+                conditions,
+                connection,
+                variables,
+                sql,
+                loc: _,
+            } => {
+                let rows = match self
+                    .run_query_inner(&sql, connection, &conditions, &should_skip)
+                    .await
+                {
+                    QueryResult::Rows { rows, .. } => rows,
+                    QueryResult::StatementComplete(_) => {
+                        #[derive(thiserror::Error, Debug)]
+                        #[error("expected query result, got statement completion")]
+                        struct NotAQueryError;
+
+                        return RecordOutput::Let {
+                            values: vec![],
+                            error: Some(Arc::new(NotAQueryError)),
+                        };
+                    }
+                    QueryResult::Skipped => return RecordOutput::Nothing,
+                    QueryResult::Err(e) => {
+                        return RecordOutput::Let {
+                            values: vec![],
+                            error: Some(e),
+                        };
+                    }
+                };
+
+                // Check row count: must be exactly 1
+                if rows.len() != 1 {
+                    #[derive(thiserror::Error, Debug)]
+                    #[error("expected 1 row, got {0}")]
+                    struct RowCountError(usize);
+
+                    return RecordOutput::Let {
+                        values: vec![],
+                        error: Some(Arc::new(RowCountError(rows.len()))),
+                    };
+                }
+
+                let row = &rows[0];
+                // Check column count: must match variable count
+                if row.len() != variables.len() {
+                    #[derive(thiserror::Error, Debug)]
+                    #[error("expected {0} columns, got {1}")]
+                    struct ColumnCountError(usize, usize);
+
+                    return RecordOutput::Let {
+                        values: vec![],
+                        error: Some(Arc::new(ColumnCountError(variables.len(), row.len()))),
+                    };
+                }
+
+                // Set variables in locals
+                for (var, value) in variables.iter().zip(row.iter()) {
+                    self.locals.set_var(var.clone(), value.clone());
+                }
+
+                RecordOutput::Let {
+                    values: row.clone(),
+                    error: None,
+                }
             }
             Record::Include { .. }
             | Record::Newline
@@ -1275,6 +1372,19 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         }
                     }
                 }
+            }
+            (
+                Record::Let { loc, sql, .. },
+                RecordOutput::Let { error, .. },
+            ) => {
+                if let Some(err) = error {
+                    return Err(TestErrorKind::LetFail {
+                        sql,
+                        err: Arc::clone(err),
+                    }
+                    .at(loc));
+                }
+                // Variables are already set in apply_record
             }
             _ => unreachable!(),
         }
