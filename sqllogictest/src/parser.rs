@@ -1010,9 +1010,9 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 }
 
                 // Find the matching ')'
-                let close_paren = rest_str.find(')').ok_or_else(|| {
-                    ParseErrorKind::InvalidLine(line.into()).at(loc.clone())
-                })?;
+                let close_paren = rest_str
+                    .find(')')
+                    .ok_or_else(|| ParseErrorKind::InvalidLine(line.into()).at(loc.clone()))?;
 
                 // Extract variable names between parentheses
                 let vars_str = &rest_str[1..close_paren];
@@ -1036,9 +1036,7 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 // Check if there's extra content after ')'
                 let after_paren = rest_str[close_paren + 1..].trim();
                 if !after_paren.is_empty() {
-                    return Err(
-                        ParseErrorKind::UnexpectedToken(after_paren.to_string()).at(loc)
-                    );
+                    return Err(ParseErrorKind::UnexpectedToken(after_paren.to_string()).at(loc));
                 }
 
                 // Parse the SQL body (following lines until empty line)
@@ -1491,9 +1489,7 @@ SELECT 1
         let records = parse::<DefaultColumnType>(script).unwrap();
         assert_eq!(records.len(), 1);
         match &records[0] {
-            Record::Let {
-                variables, sql, ..
-            } => {
+            Record::Let { variables, sql, .. } => {
                 assert_eq!(variables, &["id".to_string()]);
                 assert_eq!(sql, "SELECT 1");
             }
@@ -1510,9 +1506,7 @@ SELECT 1, 'hello', 42
         let records = parse::<DefaultColumnType>(script).unwrap();
         assert_eq!(records.len(), 1);
         match &records[0] {
-            Record::Let {
-                variables, sql, ..
-            } => {
+            Record::Let { variables, sql, .. } => {
                 assert_eq!(
                     variables,
                     &["id".to_string(), "name".to_string(), "value".to_string()]
@@ -1580,10 +1574,7 @@ let (123invalid)
 SELECT 1
 ";
         let err = parse::<DefaultColumnType>(script).unwrap_err();
-        assert!(matches!(
-            err.kind(),
-            ParseErrorKind::InvalidVariableName(_)
-        ));
+        assert!(matches!(err.kind(), ParseErrorKind::InvalidVariableName(_)));
     }
 
     #[test]

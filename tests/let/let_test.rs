@@ -53,7 +53,9 @@ impl sqllogictest::DB for FakeDB {
             }),
             // select_rows <n> -> returns n rows (for testing row count validation)
             ["select_rows", n] => {
-                let n: usize = n.parse().map_err(|_| FakeDBError("invalid number".into()))?;
+                let n: usize = n
+                    .parse()
+                    .map_err(|_| FakeDBError("invalid number".into()))?;
                 let rows = (0..n).map(|i| vec![i.to_string()]).collect();
                 Ok(DBOutput::Rows {
                     types: vec![DefaultColumnType::Integer],

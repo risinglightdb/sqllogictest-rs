@@ -27,7 +27,10 @@ type AnyError = Arc<dyn std::error::Error + Send + Sync>;
 
 /// Internal result type for query execution.
 enum QueryResult<T: ColumnType> {
-    Rows { types: Vec<T>, rows: Vec<Vec<String>> },
+    Rows {
+        types: Vec<T>,
+        rows: Vec<Vec<String>>,
+    },
     StatementComplete(u64),
     Skipped,
     Err(AnyError),
@@ -1373,10 +1376,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     }
                 }
             }
-            (
-                Record::Let { loc, sql, .. },
-                RecordOutput::Let { error, .. },
-            ) => {
+            (Record::Let { loc, sql, .. }, RecordOutput::Let { error, .. }) => {
                 if let Some(err) = error {
                     return Err(TestErrorKind::LetFail {
                         sql,
