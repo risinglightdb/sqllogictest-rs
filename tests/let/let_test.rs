@@ -20,7 +20,7 @@ impl sqllogictest::DB for FakeDB {
     fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, FakeDBError> {
         println!("[SQL] {sql}");
 
-        let parts: Vec<&str> = sql.trim().split_whitespace().collect();
+        let parts: Vec<&str> = sql.split_whitespace().collect();
         match parts.as_slice() {
             // select_id <value> -> returns a single row with one column
             ["select_id", value] => Ok(DBOutput::Rows {
