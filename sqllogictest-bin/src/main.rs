@@ -335,6 +335,9 @@ pub async fn main() -> Result<()> {
                     .unwrap()
             });
         }
+    
+        // Skip directories
+        files.retain(|path| !path.is_dir());
 
         // Test against partitioner only if there are multiple files matched, e.g., expanded from an `*`.
         if files.len() > 1 {
