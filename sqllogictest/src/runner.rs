@@ -1078,9 +1078,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 if rows.len() != 1 {
                     return RecordOutput::Let {
                         values: vec![],
-                        error: Some(LetError::RowCountMismatch {
-                            actual: rows.len(),
-                        }),
+                        error: Some(LetError::RowCountMismatch { actual: rows.len() }),
                     };
                 }
 
