@@ -81,7 +81,7 @@ fn test_let_row_count_error() {
     let script = r#"
 control substitution on
 
-let (id)
+let id
 select_rows 0
 "#;
 
@@ -102,7 +102,7 @@ fn test_let_row_count_error_multiple() {
     let script = r#"
 control substitution on
 
-let (id)
+let id
 select_rows 3
 "#;
 
@@ -123,7 +123,7 @@ fn test_let_column_count_error() {
     let script = r#"
 control substitution on
 
-let (id, name)
+let id, name
 select_id 42
 "#;
 
@@ -144,7 +144,7 @@ fn test_let_statement_error() {
     let script = r#"
 control substitution on
 
-let (id)
+let id
 statement
 "#;
 

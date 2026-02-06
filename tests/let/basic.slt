@@ -3,7 +3,7 @@
 control substitution on
 
 # Simple single variable binding
-let (id)
+let id
 select_id 42
 
 # Use the bound variable
@@ -13,7 +13,7 @@ select $id
 42
 
 # Multiple variable binding
-let (name, value)
+let name, value
 select_pair hello 123
 
 # Use both bound variables
@@ -23,7 +23,7 @@ select $name, $value
 hello 123
 
 # Override an existing variable
-let (id)
+let id
 select_id 99
 
 query T
@@ -32,7 +32,7 @@ select $id
 99
 
 # Use let with variable substitution in SQL
-let (result)
+let result
 echo $name
 
 query T

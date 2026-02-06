@@ -228,11 +228,11 @@ This is useful when you need to capture dynamic values (like auto-generated IDs)
 control substitution on
 
 # Execute a query that returns exactly 1 row with 1 column, bind result to 'id'
-let (id)
+let id
 SELECT id FROM users WHERE name = 'alice'
 
 # Multiple variables can be bound from a single query
-let (user_id, user_name, user_email)
+let user_id, user_name, user_email
 SELECT id, name, email FROM users WHERE id = 1
 
 # Use the bound variable in subsequent queries

@@ -375,7 +375,7 @@ impl<T: ColumnType> std::fmt::Display for Record<T> {
                 variables,
                 sql,
             } => {
-                write!(f, "let ({})\n{sql}\n", variables.join(", "))
+                write!(f, "let {}\n{sql}\n", variables.join(", "))
             }
         }
     }
@@ -999,24 +999,17 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                 });
             }
             ["let", rest @ ..] => {
-                // Parse: let (var1, var2, ...) followed by SQL
+                // Parse: let var1, var2, ... followed by SQL
                 // Join the rest of the tokens and parse the variable list
                 let rest_str = rest.join(" ");
-
-                // Check that the rest starts with '(' and find the matching ')'
                 let rest_str = rest_str.trim();
-                if !rest_str.starts_with('(') {
+
+                if rest_str.is_empty() {
                     return Err(ParseErrorKind::InvalidLine(line.into()).at(loc));
                 }
 
-                // Find the matching ')'
-                let close_paren = rest_str
-                    .find(')')
-                    .ok_or_else(|| ParseErrorKind::InvalidLine(line.into()).at(loc.clone()))?;
-
-                // Extract variable names between parentheses
-                let vars_str = &rest_str[1..close_paren];
-                let variables: Vec<String> = vars_str
+                // Extract variable names separated by commas
+                let variables: Vec<String> = rest_str
                     .split(',')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
@@ -1031,12 +1024,6 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     if !is_valid_variable_name(var) {
                         return Err(ParseErrorKind::InvalidVariableName(var.clone()).at(loc));
                     }
-                }
-
-                // Check if there's extra content after ')'
-                let after_paren = rest_str[close_paren + 1..].trim();
-                if !after_paren.is_empty() {
-                    return Err(ParseErrorKind::UnexpectedToken(after_paren.to_string()).at(loc));
                 }
 
                 // Parse the SQL body (following lines until empty line)
@@ -1483,7 +1470,7 @@ select * from foo;
     #[test]
     fn test_let_parsing() {
         let script = "\
-let (id)
+let id
 SELECT 1
 ";
         let records = parse::<DefaultColumnType>(script).unwrap();
@@ -1500,7 +1487,7 @@ SELECT 1
     #[test]
     fn test_let_parsing_multiple_vars() {
         let script = "\
-let (id, name, value)
+let id, name, value
 SELECT 1, 'hello', 42
 ";
         let records = parse::<DefaultColumnType>(script).unwrap();
@@ -1520,7 +1507,7 @@ SELECT 1, 'hello', 42
     #[test]
     fn test_let_parsing_roundtrip() {
         let script = "\
-let (id)
+let id
 SELECT 1
 ";
         let records = parse::<DefaultColumnType>(script).unwrap();
@@ -1548,19 +1535,9 @@ SELECT 1
     }
 
     #[test]
-    fn test_let_parsing_error_missing_paren() {
-        let script = "\
-let id
-SELECT 1
-";
-        let err = parse::<DefaultColumnType>(script).unwrap_err();
-        assert!(matches!(err.kind(), ParseErrorKind::InvalidLine(_)));
-    }
-
-    #[test]
     fn test_let_parsing_error_empty_vars() {
         let script = "\
-let ()
+let
 SELECT 1
 ";
         let err = parse::<DefaultColumnType>(script).unwrap_err();
@@ -1570,7 +1547,7 @@ SELECT 1
     #[test]
     fn test_let_parsing_error_invalid_var_name() {
         let script = "\
-let (123invalid)
+let 123invalid
 SELECT 1
 ";
         let err = parse::<DefaultColumnType>(script).unwrap_err();
