@@ -62,8 +62,20 @@ pub enum RecordOutput<T: ColumnType> {
     Let {
         /// The values from the query result (if successful).
         values: Vec<String>,
-        error: Option<AnyError>,
+        error: Option<LetError>,
     },
+}
+
+/// Error type for `let` record execution.
+#[derive(thiserror::Error, Debug, Clone)]
+#[non_exhaustive]
+pub enum LetError {
+    #[error("{0}")]
+    Fail(AnyError),
+    #[error("expected 1 row, got {actual}")]
+    RowCountMismatch { actual: usize },
+    #[error("expected {expected} columns, got {actual}")]
+    ColumnCountMismatch { expected: usize, actual: usize },
 }
 
 #[non_exhaustive]
@@ -349,15 +361,7 @@ pub enum TestErrorKind {
         actual: String,
     },
     #[error("let failed: {err}\n[SQL] {sql}")]
-    LetFail { sql: String, err: AnyError },
-    #[error("let row count mismatch: expected 1 row, got {actual}\n[SQL] {sql}")]
-    LetRowCountMismatch { sql: String, actual: usize },
-    #[error("let column count mismatch: expected {expected} columns, got {actual}\n[SQL] {sql}")]
-    LetColumnCountMismatch {
-        sql: String,
-        expected: usize,
-        actual: usize,
-    },
+    LetFail { sql: String, err: LetError },
 }
 
 impl From<ParseError> for TestError {
@@ -1058,40 +1062,37 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
 
                         return RecordOutput::Let {
                             values: vec![],
-                            error: Some(Arc::new(NotAQueryError)),
+                            error: Some(LetError::Fail(Arc::new(NotAQueryError))),
                         };
                     }
                     QueryResult::Skipped => return RecordOutput::Nothing,
                     QueryResult::Err(e) => {
                         return RecordOutput::Let {
                             values: vec![],
-                            error: Some(e),
+                            error: Some(LetError::Fail(e)),
                         };
                     }
                 };
 
                 // Check row count: must be exactly 1
                 if rows.len() != 1 {
-                    #[derive(thiserror::Error, Debug)]
-                    #[error("expected 1 row, got {0}")]
-                    struct RowCountError(usize);
-
                     return RecordOutput::Let {
                         values: vec![],
-                        error: Some(Arc::new(RowCountError(rows.len()))),
+                        error: Some(LetError::RowCountMismatch {
+                            actual: rows.len(),
+                        }),
                     };
                 }
 
                 let row = &rows[0];
                 // Check column count: must match variable count
                 if row.len() != variables.len() {
-                    #[derive(thiserror::Error, Debug)]
-                    #[error("expected {0} columns, got {1}")]
-                    struct ColumnCountError(usize, usize);
-
                     return RecordOutput::Let {
                         values: vec![],
-                        error: Some(Arc::new(ColumnCountError(variables.len(), row.len()))),
+                        error: Some(LetError::ColumnCountMismatch {
+                            expected: variables.len(),
+                            actual: row.len(),
+                        }),
                     };
                 }
 
@@ -1380,7 +1381,7 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 if let Some(err) = error {
                     return Err(TestErrorKind::LetFail {
                         sql,
-                        err: Arc::clone(err),
+                        err: err.clone(),
                     }
                     .at(loc));
                 }
