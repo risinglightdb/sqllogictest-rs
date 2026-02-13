@@ -1,0 +1,59 @@
+# Basic let test - bind variables from query results
+
+control substitution on
+
+# Simple single variable binding
+let id
+select_id 42
+
+# Use the bound variable
+query T
+select $id
+----
+42
+
+# Multiple variable binding
+let name, value
+select_pair hello 123
+
+# Use both bound variables
+query TT
+select $name, $value
+----
+hello 123
+
+# Override an existing variable
+let id
+select_id 99
+
+query T
+select $id
+----
+99
+
+# Use let with variable substitution in SQL
+let result
+echo $name
+
+query T
+select $result
+----
+hello
+
+# Use default value syntax with let-bound variables
+query T
+select ${id:fallback}
+----
+99
+
+# Use default value when variable is not set
+query T
+select ${undefined_var:default_value}
+----
+default_value
+
+# Use let-bound variable as default value
+query T
+select ${another_undefined:$name}
+----
+hello
