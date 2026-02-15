@@ -217,6 +217,16 @@ impl<T: ColumnType> Record<T> {
     pub fn unparse(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
         write!(w, "{self}")
     }
+
+    /// Returns the retry configuration for this record, if one exists.
+    pub fn retry_config(&self) -> Option<&RetryConfig> {
+        match &self {
+            Record::Statement { retry, .. }
+            | Record::Query { retry, .. }
+            | Record::System { retry, .. } => retry.as_ref(),
+            _ => None,
+        }
+    }
 }
 
 /// As is the standard for Display, does not print any trailing
